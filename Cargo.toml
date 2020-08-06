@@ -1,0 +1,22 @@
+[package]
+name = "polling"
+version = "0.1.0"
+authors = ["Stjepan Glavina <stjepang@gmail.com>"]
+edition = "2018"
+description = "Portable interface to epoll, kqueue, and wepoll"
+license = "Apache-2.0 OR MIT"
+repository = "https://github.com/stjepang/polling"
+homepage = "https://github.com/stjepang/polling"
+documentation = "https://docs.rs/polling"
+keywords = ["mio", "epoll", "kqueue", "iocp", "wepoll"]
+categories = ["asynchronous", "network-programming", "os"]
+readme = "README.md"
+
+[dependencies]
+cfg-if = "0.1.10"
+libc = "0.2.74"
+
+[target.'cfg(windows)'.dependencies]
+# Patched version of wepoll that can be notified by PostQueuedCompletionStatus.
+wepoll-sys-stjepang = "1.0.6"
+winapi = { version = "0.3.9", features = ["ioapiset"] }
