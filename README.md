@@ -12,9 +12,10 @@ https://docs.rs/polling)
 Portable interface to epoll, kqueue, and wepoll.
 
 Supported platforms:
-- [epoll](https://en.wikipedia.org/wiki/Epoll): Linux, Android, illumos
+- [epoll](https://en.wikipedia.org/wiki/Epoll): Linux, Android
 - [kqueue](https://en.wikipedia.org/wiki/Kqueue): macOS, iOS, FreeBSD, NetBSD, OpenBSD,
   DragonFly BSD
+- [event ports](https://illumos.org/man/port_create): illumos, Solaris
 - [wepoll](https://github.com/piscisaureus/wepoll): Windows
 
 Polling is done in oneshot mode, which means interest in I/O events needs to be reset after
