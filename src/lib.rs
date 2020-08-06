@@ -48,6 +48,9 @@
 
 #![warn(missing_docs, missing_debug_implementations, rust_2018_idioms)]
 
+#[cfg(doctest)]
+doc_comment::doctest!("../README.md");
+
 use std::fmt;
 use std::io;
 use std::sync::Mutex;
