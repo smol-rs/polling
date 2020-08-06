@@ -1,18 +1,18 @@
 //! Bindings to event port (illumos, Solaris).
 
-use std::ptr;
-use std::os::unix::io::{AsRawFd, RawFd};
 use std::io::{self, Read, Write};
-use std::time::Duration;
+use std::os::unix::io::{AsRawFd, RawFd};
 use std::os::unix::net::UnixStream;
+use std::ptr;
+use std::time::Duration;
 use std::usize;
 
 use crate::Event;
 
-/// Interface to epoll.
+/// Interface to event ports.
 #[derive(Debug)]
 pub struct Poller {
-    /// File descriptor for the epoll instance.
+    /// File descriptor for the port instance.
     port_fd: RawFd,
     /// Read side of a pipe for consuming notifications.
     read_stream: UnixStream,
@@ -39,7 +39,11 @@ impl Poller {
         read_stream.set_nonblocking(true)?;
         write_stream.set_nonblocking(true)?;
 
-        let poller = Poller { port_fd, read_stream, write_stream };
+        let poller = Poller {
+            port_fd,
+            read_stream,
+            write_stream,
+        };
         poller.interest(
             poller.read_stream.as_raw_fd(),
             Event {
