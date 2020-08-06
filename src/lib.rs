@@ -403,7 +403,7 @@ cfg_if! {
 
         impl<T: AsRawSocket> Source for &T {
             fn raw(&self) -> RawSocket {
-                self.as_raw_fd()
+                self.as_raw_socket()
             }
         }
     }

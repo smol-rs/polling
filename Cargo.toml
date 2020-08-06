@@ -19,4 +19,4 @@ libc = "0.2.74"
 [target.'cfg(windows)'.dependencies]
 # Patched version of wepoll that can be notified by PostQueuedCompletionStatus.
 wepoll-sys-stjepang = "1.0.6"
-winapi = { version = "0.3.9", features = ["ioapiset"] }
+winapi = { version = "0.3.9", features = ["ioapiset", "winsock2"] }

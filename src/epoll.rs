@@ -62,7 +62,14 @@ impl Poller {
         let event_fd = syscall!(eventfd(0, libc::EFD_CLOEXEC | libc::EFD_NONBLOCK))?;
         let poller = Poller { epoll_fd, event_fd };
         poller.insert(event_fd)?;
-        poller.interest(event_fd, NOTIFY_KEY, true, false)?;
+        poller.interest(
+            event_fd,
+            Event {
+                key: NOTIFY_KEY,
+                readable: true,
+                writable: false,
+            },
+        )?;
 
         Ok(poller)
     }
@@ -84,18 +91,18 @@ impl Poller {
     }
 
     /// Sets interest in a read/write event on a file descriptor and associates a key with it.
-    pub fn interest(&self, fd: RawFd, key: usize, read: bool, write: bool) -> io::Result<()> {
+    pub fn interest(&self, fd: RawFd, ev: Event) -> io::Result<()> {
         let mut flags = libc::EPOLLONESHOT;
-        if read {
+        if ev.readable {
             flags |= read_flags();
         }
-        if write {
+        if ev.writable {
             flags |= write_flags();
         }
 
         let mut ev = libc::epoll_event {
             events: flags as _,
-            u64: key as u64,
+            u64: ev.key as u64,
         };
         syscall!(epoll_ctl(self.epoll_fd, libc::EPOLL_CTL_MOD, fd, &mut ev))?;
 
@@ -149,7 +156,14 @@ impl Poller {
             &mut buf[0] as *mut u8 as *mut libc::c_void,
             buf.len()
         ));
-        self.interest(self.event_fd, NOTIFY_KEY, true, false)?;
+        self.interest(
+            self.event_fd,
+            Event {
+                key: NOTIFY_KEY,
+                readable: true,
+                writable: false,
+            },
+        )?;
 
         Ok(events.len)
     }

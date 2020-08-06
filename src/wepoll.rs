@@ -73,18 +73,18 @@ impl Poller {
     }
 
     /// Sets interest in a read/write event on a socket and associates a key with it.
-    pub fn interest(&self, sock: RawSocket, key: usize, read: bool, write: bool) -> io::Result<()> {
+    pub fn interest(&self, sock: RawSocket, ev: Event) -> io::Result<()> {
         let mut flags = we::EPOLLONESHOT;
-        if read {
+        if ev.readable {
             flags |= READ_FLAGS;
         }
-        if write {
+        if ev.writable {
             flags |= WRITE_FLAGS;
         }
 
         let mut ev = we::epoll_event {
             events: flags as u32,
-            data: we::epoll_data { u64: key as u64 },
+            data: we::epoll_data { u64: ev.key as u64 },
         };
         wepoll!(epoll_ctl(
             self.handle,
