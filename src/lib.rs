@@ -142,8 +142,8 @@ impl Event {
     pub fn none(key: usize) -> Event {
         Event {
             key,
-            readable: true,
-            writable: true,
+            readable: false,
+            writable: false,
         }
     }
 }
