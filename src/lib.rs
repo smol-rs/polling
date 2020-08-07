@@ -17,9 +17,8 @@
 //! use polling::{Event, Poller};
 //! use std::net::TcpListener;
 //!
-//! // Create a TCP listener and put the socket in non-blocking mode.
+//! // Create a TCP listener.
 //! let socket = TcpListener::bind("127.0.0.1:8000")?;
-//! socket.set_nonblocking(true)?;
 //! let key = 7; // arbitrary key identifying the socket
 //!
 //! // Create a poller and register interest in readability on the socket.
@@ -171,10 +170,10 @@ impl Poller {
         Ok(Poller { poller, events })
     }
 
-    /// Inserts a file descriptor or socket into the poller.
+    /// Inserts a file descriptor or socket into the poller and puts it in non-blocking mode.
     ///
     /// Before setting interest in readability or writability, the file descriptor or socket must
-    /// be inserted into the poller.
+    /// be inserted into the poller. This method also puts it in non-blocking mode.
     ///
     /// Don't forget to [remove][`Poller::remove()`] it when it is no longer used!
     ///
@@ -265,7 +264,7 @@ impl Poller {
         if event.key == usize::MAX {
             Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
-                "the key cannot be `usize::MAX`",
+                "the key is not allowed to be `usize::MAX`",
             ))
         } else {
             self.poller.interest(source.raw(), event)
@@ -273,6 +272,9 @@ impl Poller {
     }
 
     /// Removes a file descriptor or socket from the poller.
+    ///
+    /// Unlike [`insert()`][`Poller::insert()`], this method only removes the file descriptor or
+    /// socket from the poller without putting it back into blocking mode.
     ///
     /// # Examples
     ///

@@ -28,9 +28,8 @@ Only one thread can be waiting for I/O events at a time.
 use polling::{Event, Poller};
 use std::net::TcpListener;
 
-// Create a TCP listener and put the socket in non-blocking mode.
+// Create a TCP listener.
 let socket = TcpListener::bind("127.0.0.1:8000")?;
-socket.set_nonblocking(true)?;
 let key = 7; // arbitrary key identifying the socket
 
 // Create a poller and register interest in readability on the socket.
