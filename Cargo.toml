@@ -1,6 +1,6 @@
 [package]
 name = "polling"
-version = "0.1.0"
+version = "0.1.1"
 authors = ["Stjepan Glavina <stjepang@gmail.com>"]
 edition = "2018"
 description = "Portable interface to epoll, kqueue, and wepoll"
