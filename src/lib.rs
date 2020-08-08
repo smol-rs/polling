@@ -295,9 +295,10 @@ impl Poller {
 
     /// Waits for at least one I/O event and returns the number of new events.
     ///
-    /// New events will be appended to `events`.
+    /// New events will be appended to `events`. If necessary, make sure to clear the [`Vec`]
+    /// before calling [`wait()`][`Poller::wait()`]!
     ///
-    /// This call will return with no new events if a notification is delivered by the [`notify()`]
+    /// This method will return with no new events if a notification is delivered by the [`notify()`]
     /// method, or the timeout is reached.
     ///
     /// Only one thread can wait on I/O. If another thread is already in [`wait()`], concurrent
