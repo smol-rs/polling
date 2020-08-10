@@ -77,10 +77,10 @@ impl Poller {
     pub fn interest(&self, fd: RawFd, ev: Event) -> io::Result<()> {
         let mut flags = 0;
         if ev.readable {
-            flags |= read_flags();
+            flags |= libc::POLLIN;
         }
         if ev.writable {
-            flags |= write_flags();
+            flags |= libc::POLLOUT;
         }
 
         syscall!(port_associate(
@@ -130,13 +130,12 @@ impl Poller {
             }
         ));
 
-        // Event ports will return -1 and set the following errnos which are safe to ignore in this
-        // context.
+        // Event ports sets the return value to -1 and returns ETIME on timer expire. The number of
+        // returned events is stored in nget, but in our case it should always be 0 since we set
+        // nget to 1 initially.
         let nevents = match res {
             Err(e) => match e.raw_os_error().unwrap() {
                 libc::ETIME => 0,
-                libc::EAGAIN => 0,
-                libc::EINTR => 0,
                 _ => return Err(e),
             },
             Ok(_) => nget as usize,
