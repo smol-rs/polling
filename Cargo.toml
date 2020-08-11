@@ -1,9 +1,9 @@
 [package]
 name = "polling"
-version = "0.1.1"
+version = "0.1.2"
 authors = ["Stjepan Glavina <stjepang@gmail.com>"]
 edition = "2018"
-description = "Portable interface to epoll, kqueue, and wepoll"
+description = "Portable interface to epoll, kqueue, event ports, and wepoll"
 license = "Apache-2.0 OR MIT"
 repository = "https://github.com/stjepang/polling"
 homepage = "https://github.com/stjepang/polling"
