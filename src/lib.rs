@@ -1,9 +1,10 @@
-//! Portable interface to epoll, kqueue, and wepoll.
+//! Portable interface to epoll, kqueue, event ports, and wepoll.
 //!
 //! Supported platforms:
-//! - [epoll](https://en.wikipedia.org/wiki/Epoll): Linux, Android, illumos
+//! - [epoll](https://en.wikipedia.org/wiki/Epoll): Linux, Android
 //! - [kqueue](https://en.wikipedia.org/wiki/Kqueue): macOS, iOS, FreeBSD, NetBSD, OpenBSD,
 //!   DragonFly BSD
+//! - [event ports](https://illumos.org/man/port_create): illumos, Solaris
 //! - [wepoll](https://github.com/piscisaureus/wepoll): Windows
 //!
 //! Polling is done in oneshot mode, which means interest in I/O events needs to be reset after
@@ -69,9 +70,15 @@ macro_rules! syscall {
 }
 
 cfg_if! {
-    if #[cfg(any(target_os = "linux", target_os = "android", target_os = "illumos"))] {
+    if #[cfg(any(target_os = "linux", target_os = "android"))] {
         mod epoll;
         use epoll as sys;
+    } else if #[cfg(any(
+        target_os = "illumos",
+        target_os = "solaris",
+    ))] {
+        mod port;
+        use port as sys;
     } else if #[cfg(any(
         target_os = "macos",
         target_os = "ios",
