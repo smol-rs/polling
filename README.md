@@ -9,7 +9,7 @@ https://crates.io/crates/polling)
 [![Documentation](https://docs.rs/polling/badge.svg)](
 https://docs.rs/polling)
 
-Portable interface to epoll, kqueue, and wepoll.
+Portable interface to epoll, kqueue, event ports, and wepoll.
 
 Supported platforms:
 - [epoll](https://en.wikipedia.org/wiki/Epoll): Linux, Android
