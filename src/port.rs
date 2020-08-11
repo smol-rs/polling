@@ -23,16 +23,9 @@ pub struct Poller {
 impl Poller {
     /// Creates a new poller.
     pub fn new() -> io::Result<Poller> {
-        let port_fd = unsafe {
-            let fd = match libc::port_create() {
-                -1 => return Err(io::Error::last_os_error()),
-                fd => fd,
-            };
-
-            let flags = libc::fcntl(fd, libc::F_GETFD);
-            libc::fcntl(fd, libc::F_SETFD, flags | libc::FD_CLOEXEC);
-            fd
-        };
+        let port_fd = syscall!(port_create())?;
+        let flags = syscall!(fcntl(port_fd, libc::F_GETFD))?;
+        syscall!(fcntl(port_fd, libc::F_SETFD, flags | libc::FD_CLOEXEC))?;
 
         // Set up the notification pipe.
         let (read_stream, write_stream) = UnixStream::pair()?;
