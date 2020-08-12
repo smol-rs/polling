@@ -1,3 +1,7 @@
+# Version 0.1.3
+
+- Improve error handling around event ports fcntl
+
 # Version 0.1.2
 
 - Add support for event ports (illumos and Solaris)
