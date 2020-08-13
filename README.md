@@ -25,7 +25,7 @@ Only one thread can be waiting for I/O events at a time.
 
 ## Examples
 
-```rust
+```rust,no_run
 use polling::{Event, Poller};
 use std::net::TcpListener;
 
@@ -54,6 +54,7 @@ loop {
         }
     }
 }
+std::io::Result::Ok(())
 ```
 
 ## License
