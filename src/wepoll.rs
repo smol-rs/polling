@@ -114,21 +114,23 @@ impl Poller {
     /// If a notification occurs, this method will return but the notification event will not be
     /// included in the `events` list nor contribute to the returned count.
     pub fn wait(&self, events: &mut Events, timeout: Option<Duration>) -> io::Result<()> {
-        // Convert the timeout to milliseconds.
-        let timeout_ms = match timeout {
-            None => -1,
-            Some(t) => {
-                // Round up to a whole millisecond.
-                let mut ms = t.as_millis().try_into().unwrap_or(std::u64::MAX);
-                if Duration::from_millis(ms) < t {
-                    ms += 1;
-                }
-                ms.try_into().unwrap_or(std::i32::MAX)
-            }
-        };
+        let mut now = Instant::now();
+        let deadline = timeout.map(|t| now + t);
 
-        let start = Instant::now();
         loop {
+            // Convert the timeout to milliseconds.
+            let timeout_ms = match deadline.map(|d| d - now) {
+                None => -1,
+                Some(t) => {
+                    // Round up to a whole millisecond.
+                    let mut ms = t.as_millis().try_into().unwrap_or(std::u64::MAX);
+                    if Duration::from_millis(ms) < t {
+                        ms += 1;
+                    }
+                    ms.try_into().unwrap_or(std::i32::MAX)
+                }
+            };
+
             // Wait for I/O events.
             events.len = wepoll!(epoll_wait(
                 self.handle,
@@ -137,14 +139,16 @@ impl Poller {
                 timeout_ms,
             ))? as usize;
 
-            // If there any events at all, break.
+            // If there are any events at all, break.
             if events.len > 0 {
                 break;
             }
 
+            now = Instant::now();
+
             // Check for timeout.
-            if let Some(t) = timeout {
-                if start.elapsed() > t {
+            if let Some(d) = deadline {
+                if now >= d {
                     break;
                 }
             }
