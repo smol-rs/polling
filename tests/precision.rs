@@ -1,9 +1,5 @@
-//! Makes sure that timeouts have precision lower than 1ns on non-Windows systems.
-
-#![cfg(not(windows))]
-
 use std::io;
-use std::time::{Instant, Duration};
+use std::time::{Duration, Instant};
 
 use polling::Poller;
 
@@ -11,7 +7,9 @@ use polling::Poller;
 fn below_ms() -> io::Result<()> {
     let poller = Poller::new()?;
     let mut events = Vec::new();
+
     let margin = Duration::from_micros(500);
+    let mut lowest = Duration::from_secs(1000);
 
     for _ in 0..1_000 {
         let now = Instant::now();
@@ -21,20 +19,22 @@ fn below_ms() -> io::Result<()> {
         let elapsed = now.elapsed();
         assert_eq!(n, 0);
         assert!(elapsed >= dur);
-
-        if elapsed < dur + margin {
-            return Ok(());
-        }
+        lowest = lowest.min(elapsed);
     }
 
-    panic!("timeouts are not precise enough");
+    if cfg!(not(windows)) && lowest > dur + margin {
+        panic!("timeouts are not precise enough");
+    }
+    Ok(())
 }
 
 #[test]
 fn above_ms() -> io::Result<()> {
     let poller = Poller::new()?;
     let mut events = Vec::new();
+
     let margin = Duration::from_micros(500);
+    let mut lowest = Duration::from_secs(1000);
 
     for _ in 0..1_000 {
         let now = Instant::now();
@@ -44,11 +44,11 @@ fn above_ms() -> io::Result<()> {
         let elapsed = now.elapsed();
         assert_eq!(n, 0);
         assert!(elapsed >= dur);
-
-        if elapsed < dur + margin {
-            return Ok(());
-        }
+        lowest = lowest.min(elapsed);
     }
 
-    panic!("timeouts are not precise enough");
+    if cfg!(not(windows)) && lowest > dur + margin {
+        panic!("timeouts are not precise enough");
+    }
+    Ok(())
 }
