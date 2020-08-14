@@ -127,13 +127,28 @@ impl Poller {
             }
         };
 
-        // Wait for I/O events.
-        events.len = wepoll!(epoll_wait(
-            self.handle,
-            events.list.as_mut_ptr(),
-            events.list.len() as libc::c_int,
-            timeout_ms,
-        ))? as usize;
+        let start = Instant::now();
+        loop {
+            // Wait for I/O events.
+            events.len = wepoll!(epoll_wait(
+                self.handle,
+                events.list.as_mut_ptr(),
+                events.list.len() as libc::c_int,
+                timeout_ms,
+            ))? as usize;
+
+            // If there any events at all, break.
+            if events.len > 0 {
+                break;
+            }
+
+            // Check for timeout.
+            if let Some(t) = timeout {
+                if start.elapsed() > t {
+                    break;
+                }
+            }
+        }
 
         Ok(())
     }
