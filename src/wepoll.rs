@@ -4,6 +4,7 @@ use std::convert::TryInto;
 use std::io;
 use std::os::windows::io::RawSocket;
 use std::ptr;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use wepoll_sys_stjepang as we;
@@ -27,6 +28,7 @@ macro_rules! wepoll {
 #[derive(Debug)]
 pub struct Poller {
     handle: we::HANDLE,
+    notified: AtomicBool,
 }
 
 unsafe impl Send for Poller {}
@@ -39,7 +41,8 @@ impl Poller {
         if handle.is_null() {
             return Err(io::Error::last_os_error());
         }
-        Ok(Poller { handle })
+        let notified = AtomicBool::new(false);
+        Ok(Poller { handle, notified })
     }
 
     /// Inserts a socket.
@@ -139,6 +142,11 @@ impl Poller {
                 timeout_ms,
             ))? as usize;
 
+            // If there was a notification, break.
+            if self.notified.swap(false, Ordering::SeqCst) {
+                break;
+            }
+
             // If there are any events at all, break.
             if events.len > 0 {
                 break;
@@ -159,18 +167,23 @@ impl Poller {
 
     /// Sends a notification to wake up the current or next `wait()` call.
     pub fn notify(&self) -> io::Result<()> {
-        unsafe {
-            // This call errors if a notification has already been posted, but that's okay - we can
-            // just ignore the error.
-            //
-            // The original wepoll does not support notifications triggered this way, which is why
-            // this crate depends on a patched version of wepoll, wepoll-sys-stjepang.
-            winapi::um::ioapiset::PostQueuedCompletionStatus(
-                self.handle as winapi::um::winnt::HANDLE,
-                0,
-                0,
-                ptr::null_mut(),
-            );
+        if !self
+            .notified
+            .compare_and_swap(false, true, Ordering::SeqCst)
+        {
+            unsafe {
+                // This call errors if a notification has already been posted, but that's okay - we
+                // can just ignore the error.
+                //
+                // The original wepoll does not support notifications triggered this way, which is
+                // why this crate depends on a patched version of wepoll, wepoll-sys-stjepang.
+                winapi::um::ioapiset::PostQueuedCompletionStatus(
+                    self.handle as winapi::um::winnt::HANDLE,
+                    0,
+                    0,
+                    ptr::null_mut(),
+                );
+            }
         }
         Ok(())
     }
