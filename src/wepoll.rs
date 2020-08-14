@@ -113,7 +113,7 @@ impl Poller {
     ///
     /// If a notification occurs, this method will return but the notification event will not be
     /// included in the `events` list nor contribute to the returned count.
-    pub fn wait(&self, events: &mut Events, timeout: Option<Duration>) -> io::Result<usize> {
+    pub fn wait(&self, events: &mut Events, timeout: Option<Duration>) -> io::Result<()> {
         // Convert the timeout to milliseconds.
         let timeout_ms = match timeout {
             None => -1,
@@ -138,7 +138,7 @@ impl Poller {
             timeout_ms,
         ))? as usize;
 
-        Ok(events.len)
+        Ok(())
     }
 
     /// Sends a notification to wake up the current or next `wait()` call.
