@@ -15,7 +15,7 @@ pub struct Poller {
     epoll_fd: RawFd,
     /// File descriptor for the eventfd that produces notifications.
     event_fd: RawFd,
-    /// File descriptor for the timerfd that produces notifications.
+    /// File descriptor for the timerfd that produces timeouts.
     timer_fd: RawFd,
 }
 
