@@ -53,6 +53,7 @@ doc_comment::doctest!("../README.md");
 
 use std::fmt;
 use std::io;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::time::Duration;
 use std::usize;
@@ -161,6 +162,7 @@ impl Event {
 pub struct Poller {
     poller: sys::Poller,
     events: Mutex<sys::Events>,
+    notified: AtomicBool,
 }
 
 impl Poller {
@@ -175,9 +177,11 @@ impl Poller {
     /// # std::io::Result::Ok(())
     /// ```
     pub fn new() -> io::Result<Poller> {
-        let poller = sys::Poller::new()?;
-        let events = Mutex::new(sys::Events::new());
-        Ok(Poller { poller, events })
+        Ok(Poller {
+            poller: sys::Poller::new()?,
+            events: Mutex::new(sys::Events::new()),
+            notified: AtomicBool::new(false),
+        })
     }
 
     /// Inserts a file descriptor or socket into the poller and puts it in non-blocking mode.
@@ -337,7 +341,13 @@ impl Poller {
     /// ```
     pub fn wait(&self, events: &mut Vec<Event>, timeout: Option<Duration>) -> io::Result<usize> {
         if let Ok(mut lock) = self.events.try_lock() {
+            // Wait for I/O events.
             self.poller.wait(&mut lock, timeout)?;
+
+            // Clear the notification, if any.
+            self.notified.swap(false, Ordering::SeqCst);
+
+            // Collect events.
             let len = events.len();
             events.extend(lock.iter().filter(|ev| ev.key != usize::MAX));
             Ok(events.len() - len)
@@ -369,7 +379,13 @@ impl Poller {
     /// # std::io::Result::Ok(())
     /// ```
     pub fn notify(&self) -> io::Result<()> {
-        self.poller.notify()
+        if !self
+            .notified
+            .compare_and_swap(false, true, Ordering::SeqCst)
+        {
+            self.poller.notify()?;
+        }
+        Ok(())
     }
 }
 
