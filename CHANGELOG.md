@@ -1,3 +1,9 @@
+# Version 0.1.4
+
+- Optimize notifications.
+- Fix a bug in timeouts on Windows where it would trigger too early.
+- Support sub-nanosecond precision on Linux/Android.
+
 # Version 0.1.3
 
 - Improve error handling around event ports fcntl
