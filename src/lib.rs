@@ -337,9 +337,10 @@ impl Poller {
     /// ```
     pub fn wait(&self, events: &mut Vec<Event>, timeout: Option<Duration>) -> io::Result<usize> {
         if let Ok(mut lock) = self.events.try_lock() {
-            let n = self.poller.wait(&mut lock, timeout)?;
+            self.poller.wait(&mut lock, timeout)?;
+            let len = events.len();
             events.extend(lock.iter().filter(|ev| ev.key != usize::MAX));
-            Ok(n)
+            Ok(events.len() - len)
         } else {
             Ok(0)
         }
