@@ -4,7 +4,7 @@ use std::convert::TryInto;
 use std::io;
 use std::os::windows::io::RawSocket;
 use std::ptr;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use wepoll_sys_stjepang as we;
 use winapi::um::winsock2;
