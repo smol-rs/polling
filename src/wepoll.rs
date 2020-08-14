@@ -118,15 +118,12 @@ impl Poller {
         let timeout_ms = match timeout {
             None => -1,
             Some(t) => {
-                if t == Duration::from_millis(0) {
-                    0
-                } else {
-                    // Non-zero duration must be at least 1ms.
-                    t.max(Duration::from_millis(1))
-                        .as_millis()
-                        .try_into()
-                        .unwrap_or(libc::c_int::max_value())
+                // Round up to a whole millisecond.
+                let mut ms = t.as_millis();
+                if Duration::from_ms(ms) < t {
+                    ms += 1;
                 }
+                Duration::from_millis(ms)
             }
         };
 
