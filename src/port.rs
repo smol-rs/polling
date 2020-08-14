@@ -141,7 +141,7 @@ impl Poller {
             },
         )?;
 
-        Ok()
+        Ok(())
     }
 
     /// Sends a notification to wake up the current or next `wait()` call.
