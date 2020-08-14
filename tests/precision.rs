@@ -1,3 +1,5 @@
+#![cfg(not(windows))]
+
 use std::io;
 use std::time::{Duration, Instant};
 
@@ -22,9 +24,7 @@ fn below_ms() -> io::Result<()> {
         lowest = lowest.min(elapsed);
     }
 
-    if cfg!(not(windows)) {
-        assert!(lowest < dur + margin);
-    }
+    assert!(lowest < dur + margin);
     Ok(())
 }
 
@@ -47,8 +47,6 @@ fn above_ms() -> io::Result<()> {
         lowest = lowest.min(elapsed);
     }
 
-    if cfg!(not(windows)) {
-        assert!(lowest < dur + margin);
-    }
+    assert!(lowest < dur + margin);
     Ok(())
 }
