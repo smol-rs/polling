@@ -99,12 +99,7 @@ impl Poller {
     }
 
     /// Waits for I/O events with an optional timeout.
-    ///
-    /// Returns the number of processed I/O events.
-    ///
-    /// If a notification occurs, the notification event will be included in the `events` list
-    /// identifiable by key `usize::MAX`.
-    pub fn wait(&self, events: &mut Events, timeout: Option<Duration>) -> io::Result<usize> {
+    pub fn wait(&self, events: &mut Events, timeout: Option<Duration>) -> io::Result<()> {
         let mut timeout = timeout.map(|t| libc::timespec {
             tv_sec: t.as_secs() as libc::time_t,
             tv_nsec: t.subsec_nanos() as libc::c_long,
@@ -146,7 +141,7 @@ impl Poller {
             },
         )?;
 
-        Ok(events.len)
+        Ok(())
     }
 
     /// Sends a notification to wake up the current or next `wait()` call.

@@ -1,6 +1,5 @@
 //! Bindings to epoll (Linux, Android).
 
-use std::convert::TryInto;
 use std::io;
 use std::os::unix::io::RawFd;
 use std::ptr;
@@ -16,6 +15,8 @@ pub struct Poller {
     epoll_fd: RawFd,
     /// File descriptor for the eventfd that produces notifications.
     event_fd: RawFd,
+    /// File descriptor for the timerfd that produces timeouts.
+    timer_fd: RawFd,
 }
 
 impl Poller {
@@ -58,10 +59,19 @@ impl Poller {
             }
         };
 
-        // Set up eventfd.
+        // Set up eventfd and timerfd.
         let event_fd = syscall!(eventfd(0, libc::EFD_CLOEXEC | libc::EFD_NONBLOCK))?;
-        let poller = Poller { epoll_fd, event_fd };
+        let timer_fd = syscall!(timerfd_create(
+            libc::CLOCK_MONOTONIC,
+            libc::TFD_CLOEXEC | libc::TFD_NONBLOCK,
+        ))?;
+        let poller = Poller {
+            epoll_fd,
+            event_fd,
+            timer_fd,
+        };
         poller.insert(event_fd)?;
+        poller.insert(timer_fd)?;
         poller.interest(
             event_fd,
             Event {
@@ -121,31 +131,36 @@ impl Poller {
     }
 
     /// Waits for I/O events with an optional timeout.
-    ///
-    /// Returns the number of processed I/O events.
-    ///
-    /// If a notification occurs, the notification event will be included in the `events` list
-    /// identifiable by key `usize::MAX`.
-    pub fn wait(&self, events: &mut Events, timeout: Option<Duration>) -> io::Result<usize> {
-        // Convert the timeout to milliseconds.
-        let timeout_ms = timeout
-            .map(|t| {
-                if t == Duration::from_millis(0) {
-                    t
-                } else {
-                    // Non-zero duration must be at least 1ms.
-                    t.max(Duration::from_millis(1))
-                }
-            })
-            .and_then(|t| t.as_millis().try_into().ok())
-            .unwrap_or(-1);
+    pub fn wait(&self, events: &mut Events, timeout: Option<Duration>) -> io::Result<()> {
+        // Convert the `Duration` to `libc::timespec`.
+        let timeout = timeout.map(|t| libc::timespec {
+            tv_sec: t.as_secs() as libc::time_t,
+            tv_nsec: t.subsec_nanos() as libc::c_long,
+        });
+
+        // Set interest in timerfd.
+        self.interest(
+            self.timer_fd,
+            Event {
+                key: NOTIFY_KEY,
+                readable: true,
+                writable: false,
+            },
+        )?;
+
+        // Configure the timeout using timerfd.
+        let new_val = libc::itimerspec {
+            it_interval: TS_ZERO,
+            it_value: timeout.unwrap_or(TS_ZERO),
+        };
+        syscall!(timerfd_settime(self.timer_fd, 0, &new_val, ptr::null_mut()))?;
 
         // Wait for I/O events.
         let res = syscall!(epoll_wait(
             self.epoll_fd,
             events.list.as_mut_ptr() as *mut libc::epoll_event,
             events.list.len() as libc::c_int,
-            timeout_ms as libc::c_int,
+            -1,
         ))?;
         events.len = res as usize;
 
@@ -165,7 +180,7 @@ impl Poller {
             },
         )?;
 
-        Ok(events.len)
+        Ok(())
     }
 
     /// Sends a notification to wake up the current or next `wait()` call.
@@ -183,10 +198,18 @@ impl Poller {
 impl Drop for Poller {
     fn drop(&mut self) {
         let _ = self.remove(self.event_fd);
+        let _ = self.remove(self.timer_fd);
         let _ = syscall!(close(self.event_fd));
+        let _ = syscall!(close(self.timer_fd));
         let _ = syscall!(close(self.epoll_fd));
     }
 }
+
+/// `timespec` value that equals zero.
+const TS_ZERO: libc::timespec = libc::timespec {
+    tv_sec: 0,
+    tv_nsec: 0,
+};
 
 /// Key associated with the eventfd for producing notifications.
 const NOTIFY_KEY: usize = usize::MAX;
