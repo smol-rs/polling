@@ -11,8 +11,8 @@ fn simple() -> io::Result<()> {
     let mut events = Vec::new();
 
     for _ in 0..10 {
-        poller.notify();
-        poller.wait(&mut events, None);
+        poller.notify()?;
+        poller.wait(&mut events, None)?;
     }
 
     Ok(())
