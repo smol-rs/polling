@@ -132,11 +132,18 @@ impl Poller {
 
     /// Waits for I/O events with an optional timeout.
     pub fn wait(&self, events: &mut Events, timeout: Option<Duration>) -> io::Result<()> {
-        // Convert the `Duration` to `libc::timespec`.
-        let timeout = timeout.map(|t| libc::timespec {
-            tv_sec: t.as_secs() as libc::time_t,
-            tv_nsec: t.subsec_nanos() as libc::c_long,
-        });
+        // Configure the timeout using timerfd.
+        let new_val = libc::itimerspec {
+            it_interval: TS_ZERO,
+            it_value: match timeout {
+                None => TS_ZERO,
+                Some(t) => libc::timespec {
+                    tv_sec: t.as_secs() as libc::time_t,
+                    tv_nsec: t.subsec_nanos() as libc::c_long,
+                },
+            },
+        };
+        syscall!(timerfd_settime(self.timer_fd, 0, &new_val, ptr::null_mut()))?;
 
         // Set interest in timerfd.
         self.interest(
@@ -148,19 +155,21 @@ impl Poller {
             },
         )?;
 
-        // Configure the timeout using timerfd.
-        let new_val = libc::itimerspec {
-            it_interval: TS_ZERO,
-            it_value: timeout.unwrap_or(TS_ZERO),
+        // Timeout in milliseconds for epoll.
+        let timeout_ms = if timeout == Some(Duration::from_secs(0)) {
+            // This is a non-blocking call - use zero as the timeout.
+            0
+        } else {
+            // This is a blocking call - rely on timerfd to trigger the timeout.
+            -1
         };
-        syscall!(timerfd_settime(self.timer_fd, 0, &new_val, ptr::null_mut()))?;
 
         // Wait for I/O events.
         let res = syscall!(epoll_wait(
             self.epoll_fd,
             events.list.as_mut_ptr() as *mut libc::epoll_event,
             events.list.len() as libc::c_int,
-            -1,
+            timeout_ms,
         ))?;
         events.len = res as usize;
 

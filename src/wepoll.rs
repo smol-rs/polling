@@ -117,12 +117,11 @@ impl Poller {
     /// If a notification occurs, this method will return but the notification event will not be
     /// included in the `events` list nor contribute to the returned count.
     pub fn wait(&self, events: &mut Events, timeout: Option<Duration>) -> io::Result<()> {
-        let mut now = Instant::now();
-        let deadline = timeout.map(|t| now + t);
+        let deadline = timeout.map(|t| Instant::now() + t);
 
         loop {
             // Convert the timeout to milliseconds.
-            let timeout_ms = match deadline.map(|d| d - now) {
+            let timeout_ms = match deadline.map(|d| d.saturating_duration_since(Instant::now())) {
                 None => -1,
                 Some(t) => {
                     // Round up to a whole millisecond.
@@ -142,23 +141,9 @@ impl Poller {
                 timeout_ms,
             ))? as usize;
 
-            // If there was a notification, break.
-            if self.notified.swap(false, Ordering::SeqCst) {
+            // Break if there was a notification or at least one event, or if deadline is reached.
+            if self.notified.swap(false, Ordering::SeqCst) || events.len > 0 || timeout_ms == 0 {
                 break;
-            }
-
-            // If there are any events at all, break.
-            if events.len > 0 {
-                break;
-            }
-
-            now = Instant::now();
-
-            // Check for timeout.
-            if let Some(d) = deadline {
-                if now >= d {
-                    break;
-                }
             }
         }
 
