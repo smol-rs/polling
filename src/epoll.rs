@@ -132,6 +132,19 @@ impl Poller {
 
     /// Waits for I/O events with an optional timeout.
     pub fn wait(&self, events: &mut Events, timeout: Option<Duration>) -> io::Result<()> {
+        // Convert the timeout to milliseconds.
+        let timeout_ms = timeout
+            .map(|t| {
+                if t == Duration::from_millis(0) {
+                    t
+                } else {
+                    // Non-zero duration must be at least 1ms.
+                    t.max(Duration::from_millis(1))
+                }
+            })
+            .and_then(|t| t.as_millis().try_into().ok())
+            .unwrap_or(-1);
+
         // Convert the `Duration` to `libc::timespec`.
         let timeout = timeout.map(|t| libc::timespec {
             tv_sec: t.as_secs() as libc::time_t,
@@ -149,7 +162,7 @@ impl Poller {
         self.interest(
             self.timer_fd,
             Event {
-                key: NOTIFY_KEY,
+                key: NOTIFY_KEY - 1,
                 readable: true,
                 writable: false,
             },
@@ -160,7 +173,7 @@ impl Poller {
             self.epoll_fd,
             events.list.as_mut_ptr() as *mut libc::epoll_event,
             events.list.len() as libc::c_int,
-            -1,
+            timeout_ms,
         ))?;
         events.len = res as usize;
 
