@@ -1,3 +1,8 @@
+# Version 0.1.5
+
+- Fix a bug where epoll would block when the timeout is set to zero.
+- More tests.
+
 # Version 0.1.4
 
 - Optimize notifications.
