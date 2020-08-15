@@ -138,6 +138,13 @@ impl Poller {
             tv_nsec: t.subsec_nanos() as libc::c_long,
         });
 
+        // Configure the timeout using timerfd.
+        let new_val = libc::itimerspec {
+            it_interval: TS_ZERO,
+            it_value: timeout.unwrap_or(TS_ZERO),
+        };
+        syscall!(timerfd_settime(self.timer_fd, 0, &new_val, ptr::null_mut()))?;
+
         // Set interest in timerfd.
         self.interest(
             self.timer_fd,
@@ -147,13 +154,6 @@ impl Poller {
                 writable: false,
             },
         )?;
-
-        // Configure the timeout using timerfd.
-        let new_val = libc::itimerspec {
-            it_interval: TS_ZERO,
-            it_value: timeout.unwrap_or(TS_ZERO),
-        };
-        syscall!(timerfd_settime(self.timer_fd, 0, &new_val, ptr::null_mut()))?;
 
         // Wait for I/O events.
         let res = syscall!(epoll_wait(

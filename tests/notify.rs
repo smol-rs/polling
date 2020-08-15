@@ -1,6 +1,6 @@
 use std::io;
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use easy_parallel::Parallel;
 use polling::Poller;
