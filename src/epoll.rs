@@ -1,6 +1,5 @@
 //! Bindings to epoll (Linux, Android).
 
-use std::convert::TryInto;
 use std::io;
 use std::os::unix::io::RawFd;
 use std::ptr;
@@ -133,29 +132,16 @@ impl Poller {
 
     /// Waits for I/O events with an optional timeout.
     pub fn wait(&self, events: &mut Events, timeout: Option<Duration>) -> io::Result<()> {
-        // Convert the timeout to milliseconds.
-        let timeout_ms = timeout
-            .map(|t| {
-                if t == Duration::from_millis(0) {
-                    t
-                } else {
-                    // Non-zero duration must be at least 1ms.
-                    t.max(Duration::from_millis(1))
-                }
-            })
-            .and_then(|t| t.as_millis().try_into().ok())
-            .unwrap_or(-1);
-
-        // Convert the `Duration` to `libc::timespec`.
-        let timeout = timeout.map(|t| libc::timespec {
-            tv_sec: t.as_secs() as libc::time_t,
-            tv_nsec: t.subsec_nanos() as libc::c_long,
-        });
-
         // Configure the timeout using timerfd.
         let new_val = libc::itimerspec {
             it_interval: TS_ZERO,
-            it_value: timeout.unwrap_or(TS_ZERO),
+            it_value: match timeout {
+                None => TS_ZERO,
+                Some(t) => libc::timespec {
+                    tv_sec: t.as_secs() as libc::time_t,
+                    tv_nsec: t.subsec_nanos() as libc::c_long,
+                },
+            },
         };
         syscall!(timerfd_settime(self.timer_fd, 0, &new_val, ptr::null_mut()))?;
 
@@ -163,11 +149,20 @@ impl Poller {
         self.interest(
             self.timer_fd,
             Event {
-                key: NOTIFY_KEY - 1,
+                key: NOTIFY_KEY,
                 readable: true,
                 writable: false,
             },
         )?;
+
+        // Timeout in milliseconds for epoll.
+        let timeout_ms = if timeout == Some(Duration::from_secs(0)) {
+            // This is a non-blocking call - use zero as the timeout.
+            0
+        } else {
+            // This is a blocking call - rely on timerfd to trigger the timeout.
+            -1
+        };
 
         // Wait for I/O events.
         let res = syscall!(epoll_wait(

@@ -18,3 +18,15 @@ fn twice() -> io::Result<()> {
 
     Ok(())
 }
+
+#[test]
+fn non_blocking() -> io::Result<()> {
+    let poller = Poller::new()?;
+    let mut events = Vec::new();
+
+    for _ in 0..100 {
+        poller.wait(&mut events, Some(Duration::from_secs(0)))?;
+    }
+
+    Ok(())
+}
