@@ -22,42 +22,30 @@ pub struct Poller {
 impl Poller {
     /// Creates a new poller.
     pub fn new() -> io::Result<Poller> {
-        // According to libuv, `EPOLL_CLOEXEC` is not defined on Android API < 21.
-        // But `EPOLL_CLOEXEC` is an alias for `O_CLOEXEC` on that platform, so we use it instead.
-        #[cfg(target_os = "android")]
-        const CLOEXEC: libc::c_int = libc::O_CLOEXEC;
-        #[cfg(not(target_os = "android"))]
-        const CLOEXEC: libc::c_int = libc::EPOLL_CLOEXEC;
-
         // Create an epoll instance.
-        let epoll_fd = unsafe {
-            // Check if the `epoll_create1` symbol is available on this platform.
-            let ptr = libc::dlsym(
-                libc::RTLD_DEFAULT,
-                "epoll_create1\0".as_ptr() as *const libc::c_char,
-            );
+        //
+        // Use `epoll_create1` with `EPOLL_CLOEXEC`.
+        let epoll_fd = syscall!(syscall(
+            libc::SYS_epoll_create1,
+            libc::EPOLL_CLOEXEC as libc::c_int
+        ))
+        .map(|fd| fd as libc::c_int)
+        .or_else(|e| {
+            match e.raw_os_error() {
+                Some(libc::ENOSYS) => {
+                    // If `epoll_create1` is not implemented, use `epoll_create`
+                    // and manually set `FD_CLOEXEC`.
+                    let fd = syscall!(epoll_create(1024))?;
 
-            if ptr.is_null() {
-                // If not, use `epoll_create` and manually set `CLOEXEC`.
-                let fd = match libc::epoll_create(1024) {
-                    -1 => return Err(io::Error::last_os_error()),
-                    fd => fd,
-                };
-                let flags = libc::fcntl(fd, libc::F_GETFD);
-                libc::fcntl(fd, libc::F_SETFD, flags | libc::FD_CLOEXEC);
-                fd
-            } else {
-                // Use `epoll_create1` with `CLOEXEC`.
-                let epoll_create1 = std::mem::transmute::<
-                    *mut libc::c_void,
-                    unsafe extern "C" fn(libc::c_int) -> libc::c_int,
-                >(ptr);
-                match epoll_create1(CLOEXEC) {
-                    -1 => return Err(io::Error::last_os_error()),
-                    fd => fd,
+                    if let Ok(flags) = syscall!(fcntl(fd, libc::F_GETFD)) {
+                        let _ = syscall!(fcntl(fd, libc::F_SETFD, flags | libc::FD_CLOEXEC));
+                    }
+
+                    Ok(fd)
                 }
+                _ => Err(e),
             }
-        };
+        })?;
 
         // Set up eventfd and timerfd.
         let event_fd = syscall!(eventfd(0, libc::EFD_CLOEXEC | libc::EFD_NONBLOCK))?;
