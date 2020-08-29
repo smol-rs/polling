@@ -45,13 +45,15 @@ impl Poller {
             },
         )?;
 
-        log::debug!("new: kqueue_fd={}", kqueue_fd);
+        log::debug!("new: kqueue_fd={}, read_stream={:?}", kqueue_fd, poller.read_stream);
         Ok(poller)
     }
 
     /// Inserts a file descriptor.
     pub fn insert(&self, fd: RawFd) -> io::Result<()> {
-        log::debug!("insert: fd={}", fd);
+        if fd != self.read_stream.as_raw_fd() {
+            log::debug!("insert: fd={}", fd);
+        }
 
         // Put the file descriptor in non-blocking mode.
         let flags = syscall!(fcntl(fd, libc::F_GETFL))?;
@@ -61,12 +63,9 @@ impl Poller {
 
     /// Sets interest in a read/write event on a file descriptor and associates a key with it.
     pub fn interest(&self, fd: RawFd, ev: Event) -> io::Result<()> {
-        log::debug!(
-            "interest: kqueue_fd={}, fd={}, ev={:?}",
-            self.kqueue_fd,
-            fd,
-            ev
-        );
+        if fd != self.read_stream.as_raw_fd() {
+            log::debug!("interest: kqueue_fd={}, fd={}, ev={:?}", self.kqueue_fd, fd, ev);
+        }
 
         let mut read_flags = libc::EV_ONESHOT | libc::EV_RECEIPT;
         let mut write_flags = libc::EV_ONESHOT | libc::EV_RECEIPT;
@@ -129,7 +128,9 @@ impl Poller {
 
     /// Removes a file descriptor.
     pub fn remove(&self, fd: RawFd) -> io::Result<()> {
-        log::debug!("remove: kqueue_fd={}, fd={}", self.kqueue_fd, fd);
+        if fd != self.read_stream.as_raw_fd() {
+            log::debug!("remove: kqueue_fd={}, fd={}", self.kqueue_fd, fd);
+        }
 
         // A list of changes for kqueue.
         let changelist = [

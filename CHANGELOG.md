@@ -1,3 +1,7 @@
+# Version 0.1.6
+
+- Add logging.
+
 # Version 0.1.5
 
 - Fix a bug where epoll would block when the timeout is set to zero.
