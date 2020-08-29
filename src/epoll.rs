@@ -81,11 +81,19 @@ impl Poller {
             },
         )?;
 
+        log::debug!(
+            "new: epoll_fd={}, event_fd={}, timer_fd={}",
+            epoll_fd,
+            event_fd,
+            timer_fd
+        );
         Ok(poller)
     }
 
     /// Inserts a file descriptor.
     pub fn insert(&self, fd: RawFd) -> io::Result<()> {
+        log::debug!("insert: epoll_fd={}, fd={}", self.epoll_fd, fd);
+
         // Put the file descriptor in non-blocking mode.
         let flags = syscall!(fcntl(fd, libc::F_GETFL))?;
         syscall!(fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK))?;
@@ -102,6 +110,13 @@ impl Poller {
 
     /// Sets interest in a read/write event on a file descriptor and associates a key with it.
     pub fn interest(&self, fd: RawFd, ev: Event) -> io::Result<()> {
+        log::debug!(
+            "interest: epoll_fd={}, fd={}, ev={:?}",
+            self.epoll_fd,
+            fd,
+            ev
+        );
+
         let mut flags = libc::EPOLLONESHOT;
         if ev.readable {
             flags |= read_flags();
@@ -121,6 +136,8 @@ impl Poller {
 
     /// Removes a file descriptor.
     pub fn remove(&self, fd: RawFd) -> io::Result<()> {
+        log::debug!("remove: epoll_fd={}, fd={}", self.epoll_fd, fd);
+
         syscall!(epoll_ctl(
             self.epoll_fd,
             libc::EPOLL_CTL_DEL,
@@ -132,6 +149,8 @@ impl Poller {
 
     /// Waits for I/O events with an optional timeout.
     pub fn wait(&self, events: &mut Events, timeout: Option<Duration>) -> io::Result<()> {
+        log::debug!("wait: epoll_fd={}, timeout={:?}", self.epoll_fd, timeout);
+
         // Configure the timeout using timerfd.
         let new_val = libc::itimerspec {
             it_interval: TS_ZERO,
@@ -172,6 +191,7 @@ impl Poller {
             timeout_ms,
         ))?;
         events.len = res as usize;
+        log::trace!("new events: epoll_fd={}, res={}", self.epoll_fd, res);
 
         // Clear the notification (if received) and re-register interest in it.
         let mut buf = [0u8; 8];
@@ -194,6 +214,12 @@ impl Poller {
 
     /// Sends a notification to wake up the current or next `wait()` call.
     pub fn notify(&self) -> io::Result<()> {
+        log::debug!(
+            "notify: epoll_fd={}, event_fd={}",
+            self.epoll_fd,
+            self.event_fd
+        );
+
         let buf: [u8; 8] = 1u64.to_ne_bytes();
         let _ = syscall!(write(
             self.event_fd,
@@ -206,6 +232,12 @@ impl Poller {
 
 impl Drop for Poller {
     fn drop(&mut self) {
+        log::debug!(
+            "drop: epoll_fd={}, event_fd={}, timer_fd={}",
+            self.epoll_fd,
+            self.event_fd,
+            self.timer_fd
+        );
         let _ = self.remove(self.event_fd);
         let _ = self.remove(self.timer_fd);
         let _ = syscall!(close(self.event_fd));

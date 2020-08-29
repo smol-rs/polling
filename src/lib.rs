@@ -340,6 +340,8 @@ impl Poller {
     /// # std::io::Result::Ok(())
     /// ```
     pub fn wait(&self, events: &mut Vec<Event>, timeout: Option<Duration>) -> io::Result<usize> {
+        log::debug!("Poller::wait(_, {:?})", timeout);
+
         if let Ok(mut lock) = self.events.try_lock() {
             // Wait for I/O events.
             self.poller.wait(&mut lock, timeout)?;
@@ -352,6 +354,7 @@ impl Poller {
             events.extend(lock.iter().filter(|ev| ev.key != usize::MAX));
             Ok(events.len() - len)
         } else {
+            log::trace!("wait: skipping because another thread is already waiting on I/O");
             Ok(0)
         }
     }
@@ -379,6 +382,7 @@ impl Poller {
     /// # std::io::Result::Ok(())
     /// ```
     pub fn notify(&self) -> io::Result<()> {
+        log::debug!("Poller::notify()");
         if !self
             .notified
             .compare_and_swap(false, true, Ordering::SeqCst)

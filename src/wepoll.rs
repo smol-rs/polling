@@ -42,11 +42,14 @@ impl Poller {
             return Err(io::Error::last_os_error());
         }
         let notified = AtomicBool::new(false);
+        log::debug!("new: handle={:?}", handle);
         Ok(Poller { handle, notified })
     }
 
     /// Inserts a socket.
     pub fn insert(&self, sock: RawSocket) -> io::Result<()> {
+        log::debug!("insert: handle={:?}, sock={}", self.handle, sock);
+
         // Put the socket in non-blocking mode.
         unsafe {
             let mut nonblocking = true as libc::c_ulong;
@@ -77,6 +80,13 @@ impl Poller {
 
     /// Sets interest in a read/write event on a socket and associates a key with it.
     pub fn interest(&self, sock: RawSocket, ev: Event) -> io::Result<()> {
+        log::debug!(
+            "interest: handle={:?}, sock={}, ev={:?}",
+            self.handle,
+            sock,
+            ev
+        );
+
         let mut flags = we::EPOLLONESHOT;
         if ev.readable {
             flags |= READ_FLAGS;
@@ -101,6 +111,7 @@ impl Poller {
 
     /// Removes a socket.
     pub fn remove(&self, sock: RawSocket) -> io::Result<()> {
+        log::debug!("remove: handle={:?}, sock={}", self.handle, sock);
         wepoll!(epoll_ctl(
             self.handle,
             we::EPOLL_CTL_DEL as libc::c_int,
@@ -117,6 +128,7 @@ impl Poller {
     /// If a notification occurs, this method will return but the notification event will not be
     /// included in the `events` list nor contribute to the returned count.
     pub fn wait(&self, events: &mut Events, timeout: Option<Duration>) -> io::Result<()> {
+        log::debug!("wait: handle={:?}, timeout={:?}", self.handle, timeout);
         let deadline = timeout.map(|t| Instant::now() + t);
 
         loop {
@@ -140,6 +152,7 @@ impl Poller {
                 events.list.len() as libc::c_int,
                 timeout_ms,
             ))? as usize;
+            log::trace!("new events: handle={:?}, len={}", self.handle, events.len);
 
             // Break if there was a notification or at least one event, or if deadline is reached.
             if self.notified.swap(false, Ordering::SeqCst) || events.len > 0 || timeout_ms == 0 {
@@ -152,6 +165,8 @@ impl Poller {
 
     /// Sends a notification to wake up the current or next `wait()` call.
     pub fn notify(&self) -> io::Result<()> {
+        log::debug!("notify: handle={:?}", self.handle);
+
         if !self
             .notified
             .compare_and_swap(false, true, Ordering::SeqCst)
@@ -176,6 +191,7 @@ impl Poller {
 
 impl Drop for Poller {
     fn drop(&mut self) {
+        log::debug!("drop: handle={:?}", self.handle);
         unsafe {
             we::epoll_close(self.handle);
         }

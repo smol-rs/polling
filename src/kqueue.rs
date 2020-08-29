@@ -45,11 +45,14 @@ impl Poller {
             },
         )?;
 
+        log::debug!("new: kqueue_fd={}", kqueue_fd);
         Ok(poller)
     }
 
     /// Inserts a file descriptor.
     pub fn insert(&self, fd: RawFd) -> io::Result<()> {
+        log::debug!("insert: fd={}", fd);
+
         // Put the file descriptor in non-blocking mode.
         let flags = syscall!(fcntl(fd, libc::F_GETFL))?;
         syscall!(fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK))?;
@@ -58,6 +61,13 @@ impl Poller {
 
     /// Sets interest in a read/write event on a file descriptor and associates a key with it.
     pub fn interest(&self, fd: RawFd, ev: Event) -> io::Result<()> {
+        log::debug!(
+            "interest: kqueue_fd={}, fd={}, ev={:?}",
+            self.kqueue_fd,
+            fd,
+            ev
+        );
+
         let mut read_flags = libc::EV_ONESHOT | libc::EV_RECEIPT;
         let mut write_flags = libc::EV_ONESHOT | libc::EV_RECEIPT;
         if ev.readable {
@@ -119,6 +129,8 @@ impl Poller {
 
     /// Removes a file descriptor.
     pub fn remove(&self, fd: RawFd) -> io::Result<()> {
+        log::debug!("remove: kqueue_fd={}, fd={}", self.kqueue_fd, fd);
+
         // A list of changes for kqueue.
         let changelist = [
             libc::kevent {
@@ -162,6 +174,8 @@ impl Poller {
 
     /// Waits for I/O events with an optional timeout.
     pub fn wait(&self, events: &mut Events, timeout: Option<Duration>) -> io::Result<()> {
+        log::debug!("wait: kqueue_fd={}, timeout={:?}", self.kqueue_fd, timeout);
+
         // Convert the `Duration` to `libc::timespec`.
         let timeout = timeout.map(|t| libc::timespec {
             tv_sec: t.as_secs() as libc::time_t,
@@ -183,6 +197,7 @@ impl Poller {
             }
         ))?;
         events.len = res as usize;
+        log::trace!("new events: kqueue_fd={}, res={}", self.kqueue_fd, res);
 
         // Clear the notification (if received) and re-register interest in it.
         while (&self.read_stream).read(&mut [0; 64]).is_ok() {}
@@ -200,6 +215,7 @@ impl Poller {
 
     /// Sends a notification to wake up the current or next `wait()` call.
     pub fn notify(&self) -> io::Result<()> {
+        log::debug!("notify: kqueue_fd={}", self.kqueue_fd);
         let _ = (&self.write_stream).write(&[1]);
         Ok(())
     }
@@ -207,6 +223,7 @@ impl Poller {
 
 impl Drop for Poller {
     fn drop(&mut self) {
+        log::debug!("drop: kqueue_fd={}", self.kqueue_fd);
         let _ = self.remove(self.read_stream.as_raw_fd());
         let _ = syscall!(close(self.kqueue_fd));
     }
