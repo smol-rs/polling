@@ -5,7 +5,6 @@ use std::os::unix::io::{AsRawFd, RawFd};
 use std::os::unix::net::UnixStream;
 use std::ptr;
 use std::time::Duration;
-use std::usize;
 
 use crate::Event;
 
@@ -39,13 +38,17 @@ impl Poller {
         poller.interest(
             poller.read_stream.as_raw_fd(),
             Event {
-                key: NOTIFY_KEY,
+                key: crate::NOTIFY_KEY,
                 readable: true,
                 writable: false,
             },
         )?;
 
-        log::debug!("new: kqueue_fd={}, read_stream={:?}", kqueue_fd, poller.read_stream);
+        log::debug!(
+            "new: kqueue_fd={}, read_stream={:?}",
+            kqueue_fd,
+            poller.read_stream
+        );
         Ok(poller)
     }
 
@@ -64,7 +67,12 @@ impl Poller {
     /// Sets interest in a read/write event on a file descriptor and associates a key with it.
     pub fn interest(&self, fd: RawFd, ev: Event) -> io::Result<()> {
         if fd != self.read_stream.as_raw_fd() {
-            log::debug!("interest: kqueue_fd={}, fd={}, ev={:?}", self.kqueue_fd, fd, ev);
+            log::debug!(
+                "interest: kqueue_fd={}, fd={}, ev={:?}",
+                self.kqueue_fd,
+                fd,
+                ev
+            );
         }
 
         let mut read_flags = libc::EV_ONESHOT | libc::EV_RECEIPT;
@@ -205,7 +213,7 @@ impl Poller {
         self.interest(
             self.read_stream.as_raw_fd(),
             Event {
-                key: NOTIFY_KEY,
+                key: crate::NOTIFY_KEY,
                 readable: true,
                 writable: false,
             },
@@ -229,9 +237,6 @@ impl Drop for Poller {
         let _ = syscall!(close(self.kqueue_fd));
     }
 }
-
-/// Key associated with the pipe for producing notifications.
-const NOTIFY_KEY: usize = usize::MAX;
 
 /// A list of reported I/O events.
 pub struct Events {

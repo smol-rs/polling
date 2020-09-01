@@ -4,7 +4,6 @@ use std::io;
 use std::os::unix::io::RawFd;
 use std::ptr;
 use std::time::Duration;
-use std::usize;
 
 use crate::Event;
 
@@ -75,7 +74,7 @@ impl Poller {
         poller.interest(
             event_fd,
             Event {
-                key: NOTIFY_KEY,
+                key: crate::NOTIFY_KEY,
                 readable: true,
                 writable: false,
             },
@@ -100,8 +99,8 @@ impl Poller {
 
         // Register the file descriptor in epoll.
         let mut ev = libc::epoll_event {
-            events: 0,
-            u64: 0u64,
+            events: libc::EPOLLONESHOT as _,
+            u64: crate::NOTIFY_KEY as u64,
         };
         syscall!(epoll_ctl(self.epoll_fd, libc::EPOLL_CTL_ADD, fd, &mut ev))?;
 
@@ -168,7 +167,7 @@ impl Poller {
         self.interest(
             self.timer_fd,
             Event {
-                key: NOTIFY_KEY,
+                key: crate::NOTIFY_KEY,
                 readable: true,
                 writable: false,
             },
@@ -203,7 +202,7 @@ impl Poller {
         self.interest(
             self.event_fd,
             Event {
-                key: NOTIFY_KEY,
+                key: crate::NOTIFY_KEY,
                 readable: true,
                 writable: false,
             },
@@ -251,9 +250,6 @@ const TS_ZERO: libc::timespec = libc::timespec {
     tv_sec: 0,
     tv_nsec: 0,
 };
-
-/// Key associated with the eventfd for producing notifications.
-const NOTIFY_KEY: usize = usize::MAX;
 
 /// Epoll flags for all possible readability events.
 fn read_flags() -> libc::c_int {

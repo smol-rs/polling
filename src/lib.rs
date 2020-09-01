@@ -101,6 +101,9 @@ cfg_if! {
     }
 }
 
+/// Key associated with notifications.
+const NOTIFY_KEY: usize = std::usize::MAX;
+
 /// Indicates that a file descriptor or socket can read or write without blocking.
 #[derive(Debug)]
 pub struct Event {
@@ -313,7 +316,8 @@ impl Poller {
     /// before calling [`wait()`][`Poller::wait()`]!
     ///
     /// This method will return with no new events if a notification is delivered by the
-    /// [`notify()`] method, or the timeout is reached.
+    /// [`notify()`] method, or the timeout is reached. Sometimes it may even return with no events
+    /// spuriously.
     ///
     /// Only one thread can wait on I/O. If another thread is already in [`wait()`], concurrent
     /// calls to this method will return immediately with no new events.
