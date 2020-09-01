@@ -1,3 +1,7 @@
+# Version 0.1.7
+
+- Specify oneshot mode in epoll/wepoll at insert.
+
 # Version 0.1.6
 
 - Add logging.
