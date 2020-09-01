@@ -5,7 +5,6 @@ use std::os::unix::io::{AsRawFd, RawFd};
 use std::os::unix::net::UnixStream;
 use std::ptr;
 use std::time::Duration;
-use std::usize;
 
 use crate::Event;
 
@@ -39,7 +38,7 @@ impl Poller {
         poller.interest(
             poller.read_stream.as_raw_fd(),
             Event {
-                key: NOTIFY_KEY,
+                key: crate::NOTIFY_KEY,
                 readable: true,
                 writable: false,
             },
@@ -214,7 +213,7 @@ impl Poller {
         self.interest(
             self.read_stream.as_raw_fd(),
             Event {
-                key: NOTIFY_KEY,
+                key: crate::NOTIFY_KEY,
                 readable: true,
                 writable: false,
             },
@@ -238,9 +237,6 @@ impl Drop for Poller {
         let _ = syscall!(close(self.kqueue_fd));
     }
 }
-
-/// Key associated with the pipe for producing notifications.
-const NOTIFY_KEY: usize = usize::MAX;
 
 /// A list of reported I/O events.
 pub struct Events {

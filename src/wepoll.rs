@@ -67,7 +67,7 @@ impl Poller {
         let mut ev = we::epoll_event {
             events: we::EPOLLONESHOT,
             data: we::epoll_data {
-                u64: std::usize::MAX as u64,
+                u64: crate::NOTIFY_KEY as u64,
             },
         };
         wepoll!(epoll_ctl(
