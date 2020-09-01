@@ -99,7 +99,7 @@ impl Poller {
 
         // Register the file descriptor in epoll.
         let mut ev = libc::epoll_event {
-            events: libc::EPOLLONESHOT,
+            events: libc::EPOLLONESHOT as _,
             u64: crate::NOTIFY_KEY as u64,
         };
         syscall!(epoll_ctl(self.epoll_fd, libc::EPOLL_CTL_ADD, fd, &mut ev))?;
