@@ -65,8 +65,10 @@ impl Poller {
 
         // Register the socket in wepoll.
         let mut ev = we::epoll_event {
-            events: 0,
-            data: we::epoll_data { u64: 0u64 },
+            events: we::EPOLLONESHOT,
+            data: we::epoll_data {
+                u64: std::usize::MAX as u64,
+            },
         };
         wepoll!(epoll_ctl(
             self.handle,

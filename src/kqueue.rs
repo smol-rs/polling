@@ -45,7 +45,11 @@ impl Poller {
             },
         )?;
 
-        log::debug!("new: kqueue_fd={}, read_stream={:?}", kqueue_fd, poller.read_stream);
+        log::debug!(
+            "new: kqueue_fd={}, read_stream={:?}",
+            kqueue_fd,
+            poller.read_stream
+        );
         Ok(poller)
     }
 
@@ -64,7 +68,12 @@ impl Poller {
     /// Sets interest in a read/write event on a file descriptor and associates a key with it.
     pub fn interest(&self, fd: RawFd, ev: Event) -> io::Result<()> {
         if fd != self.read_stream.as_raw_fd() {
-            log::debug!("interest: kqueue_fd={}, fd={}, ev={:?}", self.kqueue_fd, fd, ev);
+            log::debug!(
+                "interest: kqueue_fd={}, fd={}, ev={:?}",
+                self.kqueue_fd,
+                fd,
+                ev
+            );
         }
 
         let mut read_flags = libc::EV_ONESHOT | libc::EV_RECEIPT;
