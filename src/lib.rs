@@ -344,7 +344,7 @@ impl Poller {
     /// # std::io::Result::Ok(())
     /// ```
     pub fn wait(&self, events: &mut Vec<Event>, timeout: Option<Duration>) -> io::Result<usize> {
-        log::debug!("Poller::wait(_, {:?})", timeout);
+        log::trace!("Poller::wait(_, {:?})", timeout);
 
         if let Ok(mut lock) = self.events.try_lock() {
             // Wait for I/O events.
@@ -386,7 +386,7 @@ impl Poller {
     /// # std::io::Result::Ok(())
     /// ```
     pub fn notify(&self) -> io::Result<()> {
-        log::debug!("Poller::notify()");
+        log::trace!("Poller::notify()");
         if !self
             .notified
             .compare_and_swap(false, true, Ordering::SeqCst)

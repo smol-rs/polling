@@ -80,7 +80,7 @@ impl Poller {
             },
         )?;
 
-        log::debug!(
+        log::trace!(
             "new: epoll_fd={}, event_fd={}, timer_fd={}",
             epoll_fd,
             event_fd,
@@ -91,7 +91,7 @@ impl Poller {
 
     /// Inserts a file descriptor.
     pub fn insert(&self, fd: RawFd) -> io::Result<()> {
-        log::debug!("insert: epoll_fd={}, fd={}", self.epoll_fd, fd);
+        log::trace!("insert: epoll_fd={}, fd={}", self.epoll_fd, fd);
 
         // Put the file descriptor in non-blocking mode.
         let flags = syscall!(fcntl(fd, libc::F_GETFL))?;
@@ -109,7 +109,7 @@ impl Poller {
 
     /// Sets interest in a read/write event on a file descriptor and associates a key with it.
     pub fn interest(&self, fd: RawFd, ev: Event) -> io::Result<()> {
-        log::debug!(
+        log::trace!(
             "interest: epoll_fd={}, fd={}, ev={:?}",
             self.epoll_fd,
             fd,
@@ -135,7 +135,7 @@ impl Poller {
 
     /// Removes a file descriptor.
     pub fn remove(&self, fd: RawFd) -> io::Result<()> {
-        log::debug!("remove: epoll_fd={}, fd={}", self.epoll_fd, fd);
+        log::trace!("remove: epoll_fd={}, fd={}", self.epoll_fd, fd);
 
         syscall!(epoll_ctl(
             self.epoll_fd,
@@ -148,7 +148,7 @@ impl Poller {
 
     /// Waits for I/O events with an optional timeout.
     pub fn wait(&self, events: &mut Events, timeout: Option<Duration>) -> io::Result<()> {
-        log::debug!("wait: epoll_fd={}, timeout={:?}", self.epoll_fd, timeout);
+        log::trace!("wait: epoll_fd={}, timeout={:?}", self.epoll_fd, timeout);
 
         // Configure the timeout using timerfd.
         let new_val = libc::itimerspec {
@@ -213,7 +213,7 @@ impl Poller {
 
     /// Sends a notification to wake up the current or next `wait()` call.
     pub fn notify(&self) -> io::Result<()> {
-        log::debug!(
+        log::trace!(
             "notify: epoll_fd={}, event_fd={}",
             self.epoll_fd,
             self.event_fd
@@ -231,7 +231,7 @@ impl Poller {
 
 impl Drop for Poller {
     fn drop(&mut self) {
-        log::debug!(
+        log::trace!(
             "drop: epoll_fd={}, event_fd={}, timer_fd={}",
             self.epoll_fd,
             self.event_fd,

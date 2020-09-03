@@ -42,13 +42,13 @@ impl Poller {
             return Err(io::Error::last_os_error());
         }
         let notified = AtomicBool::new(false);
-        log::debug!("new: handle={:?}", handle);
+        log::trace!("new: handle={:?}", handle);
         Ok(Poller { handle, notified })
     }
 
     /// Inserts a socket.
     pub fn insert(&self, sock: RawSocket) -> io::Result<()> {
-        log::debug!("insert: handle={:?}, sock={}", self.handle, sock);
+        log::trace!("insert: handle={:?}, sock={}", self.handle, sock);
 
         // Put the socket in non-blocking mode.
         unsafe {
@@ -82,7 +82,7 @@ impl Poller {
 
     /// Sets interest in a read/write event on a socket and associates a key with it.
     pub fn interest(&self, sock: RawSocket, ev: Event) -> io::Result<()> {
-        log::debug!(
+        log::trace!(
             "interest: handle={:?}, sock={}, ev={:?}",
             self.handle,
             sock,
@@ -113,7 +113,7 @@ impl Poller {
 
     /// Removes a socket.
     pub fn remove(&self, sock: RawSocket) -> io::Result<()> {
-        log::debug!("remove: handle={:?}, sock={}", self.handle, sock);
+        log::trace!("remove: handle={:?}, sock={}", self.handle, sock);
         wepoll!(epoll_ctl(
             self.handle,
             we::EPOLL_CTL_DEL as libc::c_int,
@@ -130,7 +130,7 @@ impl Poller {
     /// If a notification occurs, this method will return but the notification event will not be
     /// included in the `events` list nor contribute to the returned count.
     pub fn wait(&self, events: &mut Events, timeout: Option<Duration>) -> io::Result<()> {
-        log::debug!("wait: handle={:?}, timeout={:?}", self.handle, timeout);
+        log::trace!("wait: handle={:?}, timeout={:?}", self.handle, timeout);
         let deadline = timeout.map(|t| Instant::now() + t);
 
         loop {
@@ -167,7 +167,7 @@ impl Poller {
 
     /// Sends a notification to wake up the current or next `wait()` call.
     pub fn notify(&self) -> io::Result<()> {
-        log::debug!("notify: handle={:?}", self.handle);
+        log::trace!("notify: handle={:?}", self.handle);
 
         if !self
             .notified
@@ -193,7 +193,7 @@ impl Poller {
 
 impl Drop for Poller {
     fn drop(&mut self) {
-        log::debug!("drop: handle={:?}", self.handle);
+        log::trace!("drop: handle={:?}", self.handle);
         unsafe {
             we::epoll_close(self.handle);
         }
