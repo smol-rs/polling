@@ -1,3 +1,7 @@
+# Version 0.1.8
+
+- Replace `log::debug!` with `log::trace!`.
+
 # Version 0.1.7
 
 - Specify oneshot mode in epoll/wepoll at insert.
