@@ -157,7 +157,7 @@ impl Poller {
                 None => TS_ZERO,
                 Some(t) => libc::timespec {
                     tv_sec: t.as_secs() as libc::time_t,
-                    tv_nsec: t.subsec_nanos() as libc::c_long,
+                    tv_nsec: (t.subsec_nanos() as libc::c_long).into(),
                 },
             },
         };
