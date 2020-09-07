@@ -54,7 +54,6 @@ loop {
         }
     }
 }
-std::io::Result::Ok(())
 ```
 
 ## License
