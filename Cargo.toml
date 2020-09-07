@@ -18,7 +18,6 @@ libc = "0.2.76"
 log = "0.4.11"
 
 [dev-dependencies]
-doc-comment = "0.3.3"
 easy-parallel = "3.1.0"
 
 [target.'cfg(windows)'.dependencies]
