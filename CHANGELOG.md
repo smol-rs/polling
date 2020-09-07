@@ -1,3 +1,7 @@
+# Version 1.0.0
+
+- Stabilize.
+
 # Version 0.1.9
 
 - Fix compilation on x86_64-unknown-linux-gnux32

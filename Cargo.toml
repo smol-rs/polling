@@ -1,6 +1,6 @@
 [package]
 name = "polling"
-version = "0.1.9"
+version = "1.0.0"
 authors = ["Stjepan Glavina <stjepang@gmail.com>"]
 edition = "2018"
 description = "Portable interface to epoll, kqueue, event ports, and wepoll"
@@ -14,11 +14,11 @@ readme = "README.md"
 
 [dependencies]
 cfg-if = "0.1.10"
-libc = "0.2.74"
+libc = "0.2.76"
 log = "0.4.11"
 
 [dev-dependencies]
-doc-comment = "0.3"
+doc-comment = "0.3.3"
 easy-parallel = "3.1.0"
 
 [target.'cfg(windows)'.dependencies]
