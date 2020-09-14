@@ -59,8 +59,10 @@ jobs:
           command: test
 
       - name: Clone async-io
-        run: git clone https://github.com/stjepang/async-io.git && cd async-io
+        run: git clone https://github.com/stjepang/async-io.git
+      - name: Add patch section
+        run: echo '[patch.crates-io]' >> async-io/Cargo.toml
       - name: Patch polling
-        run: echo '[patch.crates-io]' >> Cargo.toml && echo 'polling = { path = ".." }' >> Cargo.toml
+        run: echo 'polling = { path = ".." }' >> async-io/Cargo.toml
       - name: Test async-io
-        run: cargo test
+        run: cargo test --manifest-path=async-io/Cargo.toml
