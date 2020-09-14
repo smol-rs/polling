@@ -1,5 +1,6 @@
 //! Bindings to epoll (Linux, Android).
 
+use std::convert::TryInto;
 use std::io;
 use std::os::unix::io::RawFd;
 use std::ptr;
@@ -174,12 +175,17 @@ impl Poller {
         )?;
 
         // Timeout in milliseconds for epoll.
-        let timeout_ms = if timeout == Some(Duration::from_secs(0)) {
-            // This is a non-blocking call - use zero as the timeout.
-            0
-        } else {
-            // This is a blocking call - rely on timerfd to trigger the timeout.
-            -1
+        let timeout_ms = match timeout {
+            None => -1,
+            Some(t) if t == Duration::from_secs(0) => 0,
+            Some(t) => {
+                // Round up to a whole millisecond.
+                let mut ms = t.as_millis().try_into().unwrap_or(std::i32::MAX);
+                if Duration::from_millis(ms as u64) < t {
+                    ms = ms.saturating_add(1);
+                }
+                ms
+            }
         };
 
         // Wait for I/O events.
@@ -187,7 +193,7 @@ impl Poller {
             self.epoll_fd,
             events.list.as_mut_ptr() as *mut libc::epoll_event,
             events.list.len() as libc::c_int,
-            timeout_ms,
+            timeout_ms as libc::c_int,
         ))?;
         events.len = res as usize;
         log::trace!("new events: epoll_fd={}, res={}", self.epoll_fd, res);
