@@ -16,62 +16,57 @@ pub struct Poller {
     /// File descriptor for the eventfd that produces notifications.
     event_fd: RawFd,
     /// File descriptor for the timerfd that produces timeouts.
-    timer_fd: RawFd,
+    timer_fd: Option<RawFd>,
 }
 
 impl Poller {
     /// Creates a new poller.
     pub fn new() -> io::Result<Poller> {
-        // According to libuv, `EPOLL_CLOEXEC` is not defined on Android API < 21.
-        // But `EPOLL_CLOEXEC` is an alias for `O_CLOEXEC` on that platform, so we use it instead.
-        #[cfg(target_os = "android")]
-        const CLOEXEC: libc::c_int = libc::O_CLOEXEC;
-        #[cfg(not(target_os = "android"))]
-        const CLOEXEC: libc::c_int = libc::EPOLL_CLOEXEC;
-
         // Create an epoll instance.
-        let epoll_fd = unsafe {
-            // Check if the `epoll_create1` symbol is available on this platform.
-            let ptr = libc::dlsym(
-                libc::RTLD_DEFAULT,
-                "epoll_create1\0".as_ptr() as *const libc::c_char,
-            );
+        //
+        // Use `epoll_create1` with `EPOLL_CLOEXEC`.
+        let epoll_fd = syscall!(syscall(
+            libc::SYS_epoll_create1,
+            libc::EPOLL_CLOEXEC as libc::c_int
+        ))
+        .map(|fd| fd as libc::c_int)
+        .or_else(|e| {
+            match e.raw_os_error() {
+                Some(libc::ENOSYS) => {
+                    // If `epoll_create1` is not implemented, use `epoll_create`
+                    // and manually set `FD_CLOEXEC`.
+                    let fd = syscall!(epoll_create(1024))?;
 
-            if ptr.is_null() {
-                // If not, use `epoll_create` and manually set `CLOEXEC`.
-                let fd = match libc::epoll_create(1024) {
-                    -1 => return Err(io::Error::last_os_error()),
-                    fd => fd,
-                };
-                let flags = libc::fcntl(fd, libc::F_GETFD);
-                libc::fcntl(fd, libc::F_SETFD, flags | libc::FD_CLOEXEC);
-                fd
-            } else {
-                // Use `epoll_create1` with `CLOEXEC`.
-                let epoll_create1 = std::mem::transmute::<
-                    *mut libc::c_void,
-                    unsafe extern "C" fn(libc::c_int) -> libc::c_int,
-                >(ptr);
-                match epoll_create1(CLOEXEC) {
-                    -1 => return Err(io::Error::last_os_error()),
-                    fd => fd,
+                    if let Ok(flags) = syscall!(fcntl(fd, libc::F_GETFD)) {
+                        let _ = syscall!(fcntl(fd, libc::F_SETFD, flags | libc::FD_CLOEXEC));
+                    }
+
+                    Ok(fd)
                 }
+                _ => Err(e),
             }
-        };
+        })?;
 
         // Set up eventfd and timerfd.
         let event_fd = syscall!(eventfd(0, libc::EFD_CLOEXEC | libc::EFD_NONBLOCK))?;
-        let timer_fd = syscall!(timerfd_create(
-            libc::CLOCK_MONOTONIC,
-            libc::TFD_CLOEXEC | libc::TFD_NONBLOCK,
-        ))?;
+        let timer_fd = syscall!(syscall(
+            libc::SYS_timerfd_create,
+            libc::CLOCK_MONOTONIC as libc::c_int,
+            (libc::TFD_CLOEXEC | libc::TFD_NONBLOCK) as libc::c_int,
+        ))
+        .map(|fd| fd as libc::c_int)
+        .ok();
+
         let poller = Poller {
             epoll_fd,
             event_fd,
             timer_fd,
         };
+
+        if let Some(timer_fd) = timer_fd {
+            poller.insert(timer_fd)?;
+        }
         poller.insert(event_fd)?;
-        poller.insert(timer_fd)?;
         poller.interest(
             event_fd,
             Event {
@@ -82,7 +77,7 @@ impl Poller {
         )?;
 
         log::trace!(
-            "new: epoll_fd={}, event_fd={}, timer_fd={}",
+            "new: epoll_fd={}, event_fd={}, timer_fd={:?}",
             epoll_fd,
             event_fd,
             timer_fd
@@ -151,34 +146,42 @@ impl Poller {
     pub fn wait(&self, events: &mut Events, timeout: Option<Duration>) -> io::Result<()> {
         log::trace!("wait: epoll_fd={}, timeout={:?}", self.epoll_fd, timeout);
 
-        // Configure the timeout using timerfd.
-        let new_val = libc::itimerspec {
-            it_interval: TS_ZERO,
-            it_value: match timeout {
-                None => TS_ZERO,
-                Some(t) => libc::timespec {
-                    tv_sec: t.as_secs() as libc::time_t,
-                    tv_nsec: (t.subsec_nanos() as libc::c_long).into(),
+        if let Some(timer_fd) = self.timer_fd {
+            // Configure the timeout using timerfd.
+            let new_val = libc::itimerspec {
+                it_interval: TS_ZERO,
+                it_value: match timeout {
+                    None => TS_ZERO,
+                    Some(t) => libc::timespec {
+                        tv_sec: t.as_secs() as libc::time_t,
+                        tv_nsec: (t.subsec_nanos() as libc::c_long).into(),
+                    },
                 },
-            },
-        };
-        syscall!(timerfd_settime(self.timer_fd, 0, &new_val, ptr::null_mut()))?;
+            };
 
-        // Set interest in timerfd.
-        self.interest(
-            self.timer_fd,
-            Event {
-                key: crate::NOTIFY_KEY,
-                readable: true,
-                writable: false,
-            },
-        )?;
+            syscall!(syscall(
+                libc::SYS_timerfd_settime,
+                timer_fd as libc::c_int,
+                0 as libc::c_int,
+                &new_val as *const libc::itimerspec,
+                ptr::null_mut() as *mut libc::itimerspec
+            ))?;
+
+            // Set interest in timerfd.
+            self.interest(
+                timer_fd,
+                Event {
+                    key: crate::NOTIFY_KEY,
+                    readable: true,
+                    writable: false,
+                },
+            )?;
+        }
 
         // Timeout in milliseconds for epoll.
-        let timeout_ms = match timeout {
-            None => -1,
-            Some(t) if t == Duration::from_secs(0) => 0,
-            Some(t) => {
+        let timeout_ms = match (self.timer_fd, timeout) {
+            (_, Some(t)) if t == Duration::from_secs(0) => 0,
+            (None, Some(t)) => {
                 // Round up to a whole millisecond.
                 let mut ms = t.as_millis().try_into().unwrap_or(std::i32::MAX);
                 if Duration::from_millis(ms as u64) < t {
@@ -186,6 +189,7 @@ impl Poller {
                 }
                 ms
             }
+            _ => -1,
         };
 
         // Wait for I/O events.
@@ -238,15 +242,18 @@ impl Poller {
 impl Drop for Poller {
     fn drop(&mut self) {
         log::trace!(
-            "drop: epoll_fd={}, event_fd={}, timer_fd={}",
+            "drop: epoll_fd={}, event_fd={}, timer_fd={:?}",
             self.epoll_fd,
             self.event_fd,
             self.timer_fd
         );
+
+        if let Some(timer_fd) = self.timer_fd {
+            let _ = self.remove(timer_fd);
+            let _ = syscall!(close(timer_fd));
+        }
         let _ = self.remove(self.event_fd);
-        let _ = self.remove(self.timer_fd);
         let _ = syscall!(close(self.event_fd));
-        let _ = syscall!(close(self.timer_fd));
         let _ = syscall!(close(self.epoll_fd));
     }
 }
