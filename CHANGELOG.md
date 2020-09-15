@@ -1,3 +1,9 @@
+# Version 1.0.2
+
+- Bump MSRV to 1.40.0
+- Replace the `epoll_create1` hack with a cleaner solution.
+- Pass timeout to `epoll_wait` to support systems without `timerfd`.
+
 # Version 1.0.1
 
 - Fix a typo in the readme.
