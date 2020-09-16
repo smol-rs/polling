@@ -8,6 +8,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use wepoll_sys_stjepang as we;
+use winapi::ctypes;
 use winapi::um::winsock2;
 
 use crate::Event;
@@ -52,7 +53,7 @@ impl Poller {
 
         // Put the socket in non-blocking mode.
         unsafe {
-            let mut nonblocking = true as libc::c_ulong;
+            let mut nonblocking = true as ctypes::c_ulong;
             let res = winsock2::ioctlsocket(
                 sock as winsock2::SOCKET,
                 winsock2::FIONBIO,
@@ -72,7 +73,7 @@ impl Poller {
         };
         wepoll!(epoll_ctl(
             self.handle,
-            we::EPOLL_CTL_ADD as libc::c_int,
+            we::EPOLL_CTL_ADD as ctypes::c_int,
             sock as we::SOCKET,
             &mut ev,
         ))?;
@@ -103,7 +104,7 @@ impl Poller {
         };
         wepoll!(epoll_ctl(
             self.handle,
-            we::EPOLL_CTL_MOD as libc::c_int,
+            we::EPOLL_CTL_MOD as ctypes::c_int,
             sock as we::SOCKET,
             &mut ev,
         ))?;
@@ -116,7 +117,7 @@ impl Poller {
         log::trace!("remove: handle={:?}, sock={}", self.handle, sock);
         wepoll!(epoll_ctl(
             self.handle,
-            we::EPOLL_CTL_DEL as libc::c_int,
+            we::EPOLL_CTL_DEL as ctypes::c_int,
             sock as we::SOCKET,
             ptr::null_mut(),
         ))?;
@@ -151,7 +152,7 @@ impl Poller {
             events.len = wepoll!(epoll_wait(
                 self.handle,
                 events.list.as_mut_ptr(),
-                events.list.len() as libc::c_int,
+                events.list.len() as ctypes::c_int,
                 timeout_ms,
             ))? as usize;
             log::trace!("new events: handle={:?}, len={}", self.handle, events.len);
