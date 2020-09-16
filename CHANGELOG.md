@@ -1,3 +1,7 @@
+# Version 1.0.3
+
+- Remove `libc` dependency on Windows.
+
 # Version 1.0.2
 
 - Bump MSRV to 1.40.0
