@@ -46,6 +46,8 @@
 //! # std::io::Result::Ok(())
 //! ```
 
+#![cfg(feature = "std")]
+#![cfg_attr(not(feature = "std"), no_std)]
 #![warn(missing_docs, missing_debug_implementations, rust_2018_idioms)]
 
 use std::fmt;
