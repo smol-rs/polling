@@ -1,3 +1,7 @@
+# Version 1.1.0
+
+- Add "std" cargo feature.
+
 # Version 1.0.3
 
 - Remove `libc` dependency on Windows.
