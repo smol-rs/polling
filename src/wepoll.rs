@@ -51,19 +51,6 @@ impl Poller {
     pub fn insert(&self, sock: RawSocket) -> io::Result<()> {
         log::trace!("insert: handle={:?}, sock={}", self.handle, sock);
 
-        // Put the socket in non-blocking mode.
-        unsafe {
-            let mut nonblocking = true as ctypes::c_ulong;
-            let res = winsock2::ioctlsocket(
-                sock as winsock2::SOCKET,
-                winsock2::FIONBIO,
-                &mut nonblocking,
-            );
-            if res != 0 {
-                return Err(io::Error::last_os_error());
-            }
-        }
-
         // Register the socket in wepoll.
         let mut ev = we::epoll_event {
             events: we::EPOLLONESHOT,

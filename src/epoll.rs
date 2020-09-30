@@ -89,10 +89,6 @@ impl Poller {
     pub fn insert(&self, fd: RawFd) -> io::Result<()> {
         log::trace!("insert: epoll_fd={}, fd={}", self.epoll_fd, fd);
 
-        // Put the file descriptor in non-blocking mode.
-        let flags = syscall!(fcntl(fd, libc::F_GETFL))?;
-        syscall!(fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK))?;
-
         // Register the file descriptor in epoll.
         let mut ev = libc::epoll_event {
             events: libc::EPOLLONESHOT as _,

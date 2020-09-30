@@ -7,6 +7,9 @@ fn main() -> io::Result<()> {
     let l1 = TcpListener::bind("127.0.0.1:8001")?;
     let l2 = TcpListener::bind("127.0.0.1:8002")?;
 
+    l1.set_nonblocking(true)?;
+    l2.set_nonblocking(true)?;
+
     let poller = Poller::new()?;
     poller.insert(&l1)?;
     poller.insert(&l2)?;

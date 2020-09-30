@@ -58,9 +58,6 @@ impl Poller {
             log::trace!("insert: fd={}", fd);
         }
 
-        // Put the file descriptor in non-blocking mode.
-        let flags = syscall!(fcntl(fd, libc::F_GETFL))?;
-        syscall!(fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK))?;
         Ok(())
     }
 

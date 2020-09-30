@@ -22,6 +22,8 @@
 //! let socket = TcpListener::bind("127.0.0.1:8000")?;
 //! let key = 7; // arbitrary key identifying the socket
 //!
+//! socket.set_nonblocking(true)?;
+//!
 //! // Create a poller and register interest in readability on the socket.
 //! let poller = Poller::new()?;
 //! poller.insert(&socket)?;
@@ -186,10 +188,10 @@ impl Poller {
         })
     }
 
-    /// Inserts a file descriptor or socket into the poller and puts it in non-blocking mode.
+    /// Inserts a file descriptor or socket into the poller.
     ///
     /// Before setting interest in readability or writability, the file descriptor or socket must
-    /// be inserted into the poller. This method also puts it in non-blocking mode.
+    /// be inserted into the poller.
     ///
     /// Don't forget to [remove][`Poller::remove()`] it when it is no longer used!
     ///
@@ -201,6 +203,8 @@ impl Poller {
     ///
     /// let poller = Poller::new()?;
     /// let socket = TcpListener::bind("127.0.0.1:0")?;
+    ///
+    /// socket.set_nonblocking(true)?;
     ///
     /// poller.insert(&socket)?;
     /// # std::io::Result::Ok(())
@@ -301,6 +305,8 @@ impl Poller {
     /// let poller = Poller::new()?;
     /// let socket = TcpListener::bind("127.0.0.1:0")?;
     ///
+    /// socket.set_nonblocking(true)?;
+    ///
     /// poller.insert(&socket)?;
     /// poller.remove(&socket)?;
     /// # std::io::Result::Ok(())
@@ -336,6 +342,8 @@ impl Poller {
     ///
     /// let poller = Poller::new()?;
     /// let socket = TcpListener::bind("127.0.0.1:0")?;
+    ///
+    /// socket.set_nonblocking(true)?;
     /// poller.insert(&socket)?;
     ///
     /// let mut events = Vec::new();

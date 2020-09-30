@@ -50,10 +50,6 @@ impl Poller {
 
     /// Inserts a file descriptor.
     pub fn insert(&self, fd: RawFd) -> io::Result<()> {
-        // Put the file descriptor in non-blocking mode.
-        let flags = syscall!(fcntl(fd, libc::F_GETFL))?;
-        syscall!(fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK))?;
-
         syscall!(port_associate(
             self.port_fd,
             libc::PORT_SOURCE_FD,
