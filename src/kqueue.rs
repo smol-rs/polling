@@ -35,7 +35,7 @@ impl Poller {
             read_stream,
             write_stream,
         };
-        poller.interest(
+        poller.add(
             poller.read_stream.as_raw_fd(),
             Event {
                 key: crate::NOTIFY_KEY,
@@ -52,24 +52,10 @@ impl Poller {
         Ok(poller)
     }
 
-    /// Inserts a file descriptor.
-    pub fn insert(&self, fd: RawFd) -> io::Result<()> {
+    /// Adds a new file descriptor.
+    pub fn add(&self, fd: RawFd, ev: Event) -> io::Result<()> {
         if fd != self.read_stream.as_raw_fd() {
-            log::trace!("insert: fd={}", fd);
-        }
-
-        Ok(())
-    }
-
-    /// Sets interest in a read/write event on a file descriptor and associates a key with it.
-    pub fn interest(&self, fd: RawFd, ev: Event) -> io::Result<()> {
-        if fd != self.read_stream.as_raw_fd() {
-            log::trace!(
-                "interest: kqueue_fd={}, fd={}, ev={:?}",
-                self.kqueue_fd,
-                fd,
-                ev
-            );
+            log::trace!("add: kqueue_fd={}, fd={}, ev={:?}", self.kqueue_fd, fd, ev);
         }
 
         let mut read_flags = libc::EV_ONESHOT | libc::EV_RECEIPT;
@@ -131,8 +117,15 @@ impl Poller {
         Ok(())
     }
 
+    /// Modifies an existing file descriptor.
+    pub fn modify(&self, fd: RawFd, ev: Event) -> io::Result<()> {
+        // Adding a file description that is already registered will just update the existing
+        // registration.
+        self.add(fd, ev)
+    }
+
     /// Removes a file descriptor.
-    pub fn remove(&self, fd: RawFd) -> io::Result<()> {
+    pub fn delete(&self, fd: RawFd) -> io::Result<()> {
         if fd != self.read_stream.as_raw_fd() {
             log::trace!("remove: kqueue_fd={}, fd={}", self.kqueue_fd, fd);
         }
@@ -207,7 +200,7 @@ impl Poller {
 
         // Clear the notification (if received) and re-register interest in it.
         while (&self.read_stream).read(&mut [0; 64]).is_ok() {}
-        self.interest(
+        self.modify(
             self.read_stream.as_raw_fd(),
             Event {
                 key: crate::NOTIFY_KEY,
@@ -230,7 +223,7 @@ impl Poller {
 impl Drop for Poller {
     fn drop(&mut self) {
         log::trace!("drop: kqueue_fd={}", self.kqueue_fd);
-        let _ = self.remove(self.read_stream.as_raw_fd());
+        let _ = self.delete(self.read_stream.as_raw_fd());
         let _ = syscall!(close(self.kqueue_fd));
     }
 }
