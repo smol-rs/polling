@@ -138,7 +138,7 @@ impl Poller {
             op as ctypes::c_int,
             sock as we::SOCKET,
             ev.as_mut()
-                .map(|ev| ev as *mut _)
+                .map(|ev| ev as *mut we::epoll_event)
                 .unwrap_or(ptr::null_mut()),
         ))?;
         Ok(())

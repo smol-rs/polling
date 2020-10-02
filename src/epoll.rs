@@ -218,7 +218,7 @@ impl Poller {
             op,
             fd,
             ev.as_mut()
-                .map(|ev| ev as *mut _)
+                .map(|ev| ev as *mut libc::epoll_event)
                 .unwrap_or(ptr::null_mut()),
         ))?;
         Ok(())
