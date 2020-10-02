@@ -24,8 +24,7 @@ log = "0.4.11"
 libc = "0.2.77"
 
 [target.'cfg(windows)'.dependencies]
-wepoll-sys = "2.0.0"
-winapi = { version = "0.3.9", features = ["ioapiset", "winsock2"] }
+wepoll-sys = "3.0.0"
 
 [dev-dependencies]
 easy-parallel = "3.1.0"
