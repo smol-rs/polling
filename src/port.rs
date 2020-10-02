@@ -36,7 +36,7 @@ impl Poller {
             read_stream,
             write_stream,
         };
-        poller.interest(
+        poller.add(
             poller.read_stream.as_raw_fd(),
             Event {
                 key: crate::NOTIFY_KEY,
@@ -48,25 +48,8 @@ impl Poller {
         Ok(poller)
     }
 
-    /// Inserts a file descriptor.
-    pub fn insert(&self, fd: RawFd) -> io::Result<()> {
-        // Put the file descriptor in non-blocking mode.
-        let flags = syscall!(fcntl(fd, libc::F_GETFL))?;
-        syscall!(fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK))?;
-
-        syscall!(port_associate(
-            self.port_fd,
-            libc::PORT_SOURCE_FD,
-            fd as _,
-            0,
-            0 as _,
-        ))?;
-
-        Ok(())
-    }
-
-    /// Sets interest in a read/write event on a file descriptor and associates a key with it.
-    pub fn interest(&self, fd: RawFd, ev: Event) -> io::Result<()> {
+    /// Adds a file descriptor.
+    pub fn add(&self, fd: RawFd, ev: Event) -> io::Result<()> {
         let mut flags = 0;
         if ev.readable {
             flags |= libc::POLLIN;
@@ -86,8 +69,14 @@ impl Poller {
         Ok(())
     }
 
+    pub fn modify(&self, fd: RawFd, ev: Event) -> io::Result<()> {
+        // Adding a file description that is already registered will just update the existing
+        // registration.
+        self.add(fd, ev)
+    }
+
     /// Removes a file descriptor.
-    pub fn remove(&self, fd: RawFd) -> io::Result<()> {
+    pub fn delete(&self, fd: RawFd) -> io::Result<()> {
         syscall!(port_dissociate(
             self.port_fd,
             libc::PORT_SOURCE_FD,
@@ -131,7 +120,7 @@ impl Poller {
 
         // Clear the notification (if received) and re-register interest in it.
         while (&self.read_stream).read(&mut [0; 64]).is_ok() {}
-        self.interest(
+        self.modify(
             self.read_stream.as_raw_fd(),
             Event {
                 key: crate::NOTIFY_KEY,
@@ -152,7 +141,7 @@ impl Poller {
 
 impl Drop for Poller {
     fn drop(&mut self) {
-        let _ = self.remove(self.read_stream.as_raw_fd());
+        let _ = self.delete(self.read_stream.as_raw_fd());
         let _ = syscall!(close(self.port_fd));
     }
 }

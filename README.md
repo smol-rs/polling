@@ -33,10 +33,12 @@ use std::net::TcpListener;
 let socket = TcpListener::bind("127.0.0.1:8000")?;
 let key = 7; // arbitrary key identifying the socket
 
+// File descriptors must be explicitly marked as non-blocking.
+socket.set_nonblocking(true)?;
+
 // Create a poller and register interest in readability on the socket.
 let poller = Poller::new()?;
-poller.insert(&socket)?;
-poller.interest(&socket, Event::readable(key))?;
+poller.add(&socket, Event::readable(key))?;
 
 // The event loop.
 let mut events = Vec::new();
@@ -50,7 +52,7 @@ loop {
             // Perform a non-blocking accept operation.
             socket.accept()?;
             // Set interest in the next readability event.
-            poller.interest(&socket, Event::readable(key))?;
+            poller.modify(&socket, Event::readable(key))?;
         }
     }
 }

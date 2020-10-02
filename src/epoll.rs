@@ -64,10 +64,10 @@ impl Poller {
         };
 
         if let Some(timer_fd) = timer_fd {
-            poller.insert(timer_fd)?;
+            poller.add(timer_fd, Event::none(crate::NOTIFY_KEY))?;
         }
-        poller.insert(event_fd)?;
-        poller.interest(
+
+        poller.add(
             event_fd,
             Event {
                 key: crate::NOTIFY_KEY,
@@ -85,52 +85,20 @@ impl Poller {
         Ok(poller)
     }
 
-    /// Inserts a file descriptor.
-    pub fn insert(&self, fd: RawFd) -> io::Result<()> {
-        log::trace!("insert: epoll_fd={}, fd={}", self.epoll_fd, fd);
-
-        // Put the file descriptor in non-blocking mode.
-        let flags = syscall!(fcntl(fd, libc::F_GETFL))?;
-        syscall!(fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK))?;
-
-        // Register the file descriptor in epoll.
-        let mut ev = libc::epoll_event {
-            events: libc::EPOLLONESHOT as _,
-            u64: crate::NOTIFY_KEY as u64,
-        };
-        syscall!(epoll_ctl(self.epoll_fd, libc::EPOLL_CTL_ADD, fd, &mut ev))?;
-
-        Ok(())
+    /// Adds a new file descriptor.
+    pub fn add(&self, fd: RawFd, ev: Event) -> io::Result<()> {
+        log::trace!("add: epoll_fd={}, fd={}, ev={:?}", self.epoll_fd, fd, ev);
+        self.register(fd, libc::EPOLL_CTL_ADD, ev)
     }
 
-    /// Sets interest in a read/write event on a file descriptor and associates a key with it.
-    pub fn interest(&self, fd: RawFd, ev: Event) -> io::Result<()> {
-        log::trace!(
-            "interest: epoll_fd={}, fd={}, ev={:?}",
-            self.epoll_fd,
-            fd,
-            ev
-        );
-
-        let mut flags = libc::EPOLLONESHOT;
-        if ev.readable {
-            flags |= read_flags();
-        }
-        if ev.writable {
-            flags |= write_flags();
-        }
-
-        let mut ev = libc::epoll_event {
-            events: flags as _,
-            u64: ev.key as u64,
-        };
-        syscall!(epoll_ctl(self.epoll_fd, libc::EPOLL_CTL_MOD, fd, &mut ev))?;
-
-        Ok(())
+    /// Modifies an existing file descriptor.
+    pub fn modify(&self, fd: RawFd, ev: Event) -> io::Result<()> {
+        log::trace!("modify: epoll_fd={}, fd={}, ev={:?}", self.epoll_fd, fd, ev);
+        self.register(fd, libc::EPOLL_CTL_MOD, ev)
     }
 
     /// Removes a file descriptor.
-    pub fn remove(&self, fd: RawFd) -> io::Result<()> {
+    pub fn delete(&self, fd: RawFd) -> io::Result<()> {
         log::trace!("remove: epoll_fd={}, fd={}", self.epoll_fd, fd);
 
         syscall!(epoll_ctl(
@@ -168,7 +136,7 @@ impl Poller {
             ))?;
 
             // Set interest in timerfd.
-            self.interest(
+            self.modify(
                 timer_fd,
                 Event {
                     key: crate::NOTIFY_KEY,
@@ -209,7 +177,7 @@ impl Poller {
             &mut buf[0] as *mut u8 as *mut libc::c_void,
             buf.len()
         ));
-        self.interest(
+        self.modify(
             self.event_fd,
             Event {
                 key: crate::NOTIFY_KEY,
@@ -237,6 +205,27 @@ impl Poller {
         ));
         Ok(())
     }
+
+    fn register(&self, fd: RawFd, action: i32, ev: Event) -> io::Result<()> {
+        let mut flags = libc::EPOLLONESHOT;
+
+        if ev.readable {
+            flags |= read_flags();
+        }
+
+        if ev.writable {
+            flags |= write_flags();
+        }
+
+        let mut epoll_ev = libc::epoll_event {
+            events: flags as _,
+            u64: ev.key as u64,
+        };
+
+        syscall!(epoll_ctl(self.epoll_fd, action, fd, &mut epoll_ev))?;
+
+        Ok(())
+    }
 }
 
 impl Drop for Poller {
@@ -249,10 +238,10 @@ impl Drop for Poller {
         );
 
         if let Some(timer_fd) = self.timer_fd {
-            let _ = self.remove(timer_fd);
+            let _ = self.delete(timer_fd);
             let _ = syscall!(close(timer_fd));
         }
-        let _ = self.remove(self.event_fd);
+        let _ = self.delete(self.event_fd);
         let _ = syscall!(close(self.event_fd));
         let _ = syscall!(close(self.epoll_fd));
     }

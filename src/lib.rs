@@ -22,10 +22,11 @@
 //! let socket = TcpListener::bind("127.0.0.1:8000")?;
 //! let key = 7; // arbitrary key identifying the socket
 //!
+//! socket.set_nonblocking(true)?;
+//!
 //! // Create a poller and register interest in readability on the socket.
 //! let poller = Poller::new()?;
-//! poller.insert(&socket)?;
-//! poller.interest(&socket, Event::readable(key))?;
+//! poller.add(&socket, Event::readable(key))?;
 //!
 //! // The event loop.
 //! let mut events = Vec::new();
@@ -39,7 +40,7 @@
 //!             // Perform a non-blocking accept operation.
 //!             socket.accept()?;
 //!             // Set interest in the next readability event.
-//!             poller.interest(&socket, Event::readable(key))?;
+//!             poller.modify(&socket, Event::readable(key))?;
 //!         }
 //!     }
 //! }
@@ -98,6 +99,17 @@ cfg_if! {
     } else {
         compile_error!("polling does not support this target OS");
     }
+}
+
+macro_rules! verify_event_key {
+    ($event:expr) => {{
+        if $event.key == usize::MAX {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "the key is not allowed to be `usize::MAX`",
+            ));
+        }
+    }};
 }
 
 /// Key associated with notifications.
@@ -186,30 +198,7 @@ impl Poller {
         })
     }
 
-    /// Inserts a file descriptor or socket into the poller and puts it in non-blocking mode.
-    ///
-    /// Before setting interest in readability or writability, the file descriptor or socket must
-    /// be inserted into the poller. This method also puts it in non-blocking mode.
-    ///
-    /// Don't forget to [remove][`Poller::remove()`] it when it is no longer used!
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use polling::Poller;
-    /// use std::net::TcpListener;
-    ///
-    /// let poller = Poller::new()?;
-    /// let socket = TcpListener::bind("127.0.0.1:0")?;
-    ///
-    /// poller.insert(&socket)?;
-    /// # std::io::Result::Ok(())
-    /// ```
-    pub fn insert(&self, source: impl Source) -> io::Result<()> {
-        self.poller.insert(source.raw())
-    }
-
-    /// Enables or disables interest in a file descriptor or socket.
+    /// Enables interest in a file descriptor or socket.
     ///
     /// A file descriptor or socket is considered readable or writable when a read or write
     /// operation on it would not block. This doesn't mean the read or write operation will
@@ -223,11 +212,12 @@ impl Poller {
     /// - `Event { key: 7, readable: true, writable: false }`
     /// - `Event { key: 7, readable: false, writable: true }`
     ///
+    /// Don't forget to [delete][`Poller::delete()`] it when it is no longer used!
+    ///
     /// # Errors
     ///
     /// This method returns an error in the following situations:
     ///
-    /// * If `source` was not [inserted][`Poller::interest()`] into the poller.
     /// * If `key` equals `usize::MAX` because that key is reserved for internal use.
     /// * If an error is returned by the syscall.
     ///
@@ -240,7 +230,7 @@ impl Poller {
     /// # let poller = Poller::new()?;
     /// # let key = 7;
     /// # let source = std::net::TcpListener::bind("127.0.0.1:0")?;
-    /// poller.interest(&source, Event::all(key))?;
+    /// poller.add(&source, Event::all(key))?;
     /// # std::io::Result::Ok(())
     /// ```
     ///
@@ -251,7 +241,7 @@ impl Poller {
     /// # let poller = Poller::new()?;
     /// # let key = 7;
     /// # let source = std::net::TcpListener::bind("127.0.0.1:0")?;
-    /// poller.interest(&source, Event::readable(key))?;
+    /// poller.add(&source, Event::readable(key))?;
     /// # std::io::Result::Ok(())
     /// ```
     ///
@@ -262,7 +252,7 @@ impl Poller {
     /// # let poller = Poller::new()?;
     /// # let key = 7;
     /// # let source = std::net::TcpListener::bind("127.0.0.1:0")?;
-    /// poller.interest(&source, Event::writable(key))?;
+    /// poller.add(&source, Event::writable(key))?;
     /// # std::io::Result::Ok(())
     /// ```
     ///
@@ -273,40 +263,64 @@ impl Poller {
     /// # let poller = Poller::new()?;
     /// # let key = 7;
     /// # let source = std::net::TcpListener::bind("127.0.0.1:0")?;
-    /// poller.interest(&source, Event::none(key))?;
+    /// poller.add(&source, Event::none(key))?;
     /// # std::io::Result::Ok(())
     /// ```
-    pub fn interest(&self, source: impl Source, event: Event) -> io::Result<()> {
-        if event.key == usize::MAX {
-            Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "the key is not allowed to be `usize::MAX`",
-            ))
-        } else {
-            self.poller.interest(source.raw(), event)
-        }
+    pub fn add(&self, source: impl Source, event: Event) -> io::Result<()> {
+        verify_event_key!(event);
+        self.poller.add(source.raw(), event)
+    }
+
+    /// Modifies the interest of a file descriptor or socket.
+    ///
+    /// This method has the same behaviour as [`add()`][`Poller::add()`] except it modifies the
+    /// interest of an already registered file descriptor or socket.
+    ///
+    /// To use this method with a file descriptor, you must first add it using
+    /// [`add()`][`Poller::add()`].
+    ///
+    /// # Examples
+    ///
+    /// This will first register a socket for only writes, then modify the interest to both reads
+    /// and writes:
+    ///
+    /// ```no_run
+    /// # use polling::{Event, Poller};
+    /// # let poller = Poller::new()?;
+    /// # let key = 7;
+    /// # let source = std::net::TcpListener::bind("127.0.0.1:0")?;
+    /// poller.add(&source, Event::writable(key))?;
+    /// poller.modify(&source, Event::all(key))?;
+    /// # std::io::Result::Ok(())
+    /// ```
+    pub fn modify(&self, source: impl Source, event: Event) -> io::Result<()> {
+        verify_event_key!(event);
+        self.poller.modify(source.raw(), event)
     }
 
     /// Removes a file descriptor or socket from the poller.
     ///
-    /// Unlike [`insert()`][`Poller::insert()`], this method only removes the file descriptor or
+    /// Unlike [`add()`][`Poller::add()`], this method only removes the file descriptor or
     /// socket from the poller without putting it back into blocking mode.
     ///
     /// # Examples
     ///
     /// ```
-    /// use polling::Poller;
+    /// use polling::{Event, Poller};
     /// use std::net::TcpListener;
     ///
     /// let poller = Poller::new()?;
     /// let socket = TcpListener::bind("127.0.0.1:0")?;
+    /// let key = 7;
     ///
-    /// poller.insert(&socket)?;
-    /// poller.remove(&socket)?;
+    /// socket.set_nonblocking(true)?;
+    ///
+    /// poller.add(&socket, Event::all(key))?;
+    /// poller.delete(&socket)?;
     /// # std::io::Result::Ok(())
     /// ```
-    pub fn remove(&self, source: impl Source) -> io::Result<()> {
-        self.poller.remove(source.raw())
+    pub fn delete(&self, source: impl Source) -> io::Result<()> {
+        self.poller.delete(source.raw())
     }
 
     /// Waits for at least one I/O event and returns the number of new events.
@@ -330,13 +344,16 @@ impl Poller {
     /// # Examples
     ///
     /// ```
-    /// use polling::Poller;
+    /// use polling::{Event, Poller};
     /// use std::net::TcpListener;
     /// use std::time::Duration;
     ///
     /// let poller = Poller::new()?;
     /// let socket = TcpListener::bind("127.0.0.1:0")?;
-    /// poller.insert(&socket)?;
+    /// let key = 7;
+    ///
+    /// socket.set_nonblocking(true)?;
+    /// poller.add(&socket, Event::all(key))?;
     ///
     /// let mut events = Vec::new();
     /// let n = poller.wait(&mut events, Some(Duration::from_secs(1)))?;

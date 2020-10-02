@@ -7,12 +7,13 @@ fn main() -> io::Result<()> {
     let l1 = TcpListener::bind("127.0.0.1:8001")?;
     let l2 = TcpListener::bind("127.0.0.1:8002")?;
 
-    let poller = Poller::new()?;
-    poller.insert(&l1)?;
-    poller.insert(&l2)?;
+    l1.set_nonblocking(true)?;
+    l2.set_nonblocking(true)?;
 
-    poller.interest(&l1, Event::readable(1))?;
-    poller.interest(&l2, Event::readable(2))?;
+    let poller = Poller::new()?;
+
+    poller.add(&l1, Event::readable(1))?;
+    poller.add(&l2, Event::readable(2))?;
 
     let mut events = Vec::new();
     loop {
@@ -24,12 +25,12 @@ fn main() -> io::Result<()> {
                 1 => {
                     println!("Accept on l1");
                     l1.accept()?;
-                    poller.interest(&l1, Event::readable(1))?;
+                    poller.modify(&l1, Event::readable(1))?;
                 }
                 2 => {
                     println!("Accept on l2");
                     l2.accept()?;
-                    poller.interest(&l2, Event::readable(2))?;
+                    poller.modify(&l2, Event::readable(2))?;
                 }
                 _ => unreachable!(),
             }

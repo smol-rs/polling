@@ -47,73 +47,25 @@ impl Poller {
         Ok(Poller { handle, notified })
     }
 
-    /// Inserts a socket.
-    pub fn insert(&self, sock: RawSocket) -> io::Result<()> {
-        log::trace!("insert: handle={:?}, sock={}", self.handle, sock);
-
-        // Put the socket in non-blocking mode.
-        unsafe {
-            let mut nonblocking = true as ctypes::c_ulong;
-            let res = winsock2::ioctlsocket(
-                sock as winsock2::SOCKET,
-                winsock2::FIONBIO,
-                &mut nonblocking,
-            );
-            if res != 0 {
-                return Err(io::Error::last_os_error());
-            }
-        }
-
-        // Register the socket in wepoll.
-        let mut ev = we::epoll_event {
-            events: we::EPOLLONESHOT,
-            data: we::epoll_data {
-                u64: crate::NOTIFY_KEY as u64,
-            },
-        };
-        wepoll!(epoll_ctl(
-            self.handle,
-            we::EPOLL_CTL_ADD as ctypes::c_int,
-            sock as we::SOCKET,
-            &mut ev,
-        ))?;
-
-        Ok(())
+    /// Adds a socket.
+    pub fn add(&self, sock: RawSocket, ev: Event) -> io::Result<()> {
+        log::trace!("add: handle={:?}, sock={}, ev={:?}", self.handle, sock, ev);
+        self.register(sock, we::EPOLL_CTL_ADD, ev)
     }
 
-    /// Sets interest in a read/write event on a socket and associates a key with it.
-    pub fn interest(&self, sock: RawSocket, ev: Event) -> io::Result<()> {
+    /// Modifies a socket.
+    pub fn modify(&self, sock: RawSocket, ev: Event) -> io::Result<()> {
         log::trace!(
-            "interest: handle={:?}, sock={}, ev={:?}",
+            "modify: handle={:?}, sock={}, ev={:?}",
             self.handle,
             sock,
             ev
         );
-
-        let mut flags = we::EPOLLONESHOT;
-        if ev.readable {
-            flags |= READ_FLAGS;
-        }
-        if ev.writable {
-            flags |= WRITE_FLAGS;
-        }
-
-        let mut ev = we::epoll_event {
-            events: flags as u32,
-            data: we::epoll_data { u64: ev.key as u64 },
-        };
-        wepoll!(epoll_ctl(
-            self.handle,
-            we::EPOLL_CTL_MOD as ctypes::c_int,
-            sock as we::SOCKET,
-            &mut ev,
-        ))?;
-
-        Ok(())
+        self.register(sock, we::EPOLL_CTL_MOD, ev)
     }
 
     /// Removes a socket.
-    pub fn remove(&self, sock: RawSocket) -> io::Result<()> {
+    pub fn delete(&self, sock: RawSocket) -> io::Result<()> {
         log::trace!("remove: handle={:?}, sock={}", self.handle, sock);
         wepoll!(epoll_ctl(
             self.handle,
@@ -188,6 +140,32 @@ impl Poller {
                 );
             }
         }
+        Ok(())
+    }
+
+    fn register(&self, sock: RawSocket, action: u32, ev: Event) -> io::Result<()> {
+        let mut flags = we::EPOLLONESHOT;
+
+        if ev.readable {
+            flags |= READ_FLAGS;
+        }
+
+        if ev.writable {
+            flags |= WRITE_FLAGS;
+        }
+
+        let mut ev = we::epoll_event {
+            events: flags as u32,
+            data: we::epoll_data { u64: ev.key as u64 },
+        };
+
+        wepoll!(epoll_ctl(
+            self.handle,
+            action as ctypes::c_int,
+            sock as we::SOCKET,
+            &mut ev,
+        ))?;
+
         Ok(())
     }
 }
