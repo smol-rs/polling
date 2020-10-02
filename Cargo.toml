@@ -24,7 +24,7 @@ log = "0.4.11"
 libc = "0.2.77"
 
 [target.'cfg(windows)'.dependencies]
-wepoll-sys = "2.0.0"
+wepoll-sys = { path = "../wepoll" }
 winapi = { version = "0.3.9", features = ["ioapiset", "winsock2"] }
 
 [dev-dependencies]
