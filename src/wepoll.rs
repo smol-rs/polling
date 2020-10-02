@@ -9,7 +9,6 @@ use std::time::{Duration, Instant};
 
 use wepoll_sys_stjepang as we;
 use winapi::ctypes;
-use winapi::um::winsock2;
 
 use crate::Event;
 
@@ -50,7 +49,7 @@ impl Poller {
     /// Adds a socket.
     pub fn add(&self, sock: RawSocket, ev: Event) -> io::Result<()> {
         log::trace!("add: handle={:?}, sock={}, ev={:?}", self.handle, sock, ev);
-        self.register(sock, we::EPOLL_CTL_ADD, ev)
+        self.ctl(we::EPOLL_CTL_ADD, sock, Some(ev))
     }
 
     /// Modifies a socket.
@@ -61,19 +60,13 @@ impl Poller {
             sock,
             ev
         );
-        self.register(sock, we::EPOLL_CTL_MOD, ev)
+        self.ctl(we::EPOLL_CTL_MOD, sock, Some(ev))
     }
 
-    /// Removes a socket.
+    /// Deletes a socket.
     pub fn delete(&self, sock: RawSocket) -> io::Result<()> {
         log::trace!("remove: handle={:?}, sock={}", self.handle, sock);
-        wepoll!(epoll_ctl(
-            self.handle,
-            we::EPOLL_CTL_DEL as ctypes::c_int,
-            sock as we::SOCKET,
-            ptr::null_mut(),
-        ))?;
-        Ok(())
+        self.ctl(we::EPOLL_CTL_DEL, sock, None)
     }
 
     /// Waits for I/O events with an optional timeout.
@@ -143,29 +136,29 @@ impl Poller {
         Ok(())
     }
 
-    fn register(&self, sock: RawSocket, action: u32, ev: Event) -> io::Result<()> {
-        let mut flags = we::EPOLLONESHOT;
-
-        if ev.readable {
-            flags |= READ_FLAGS;
-        }
-
-        if ev.writable {
-            flags |= WRITE_FLAGS;
-        }
-
-        let mut ev = we::epoll_event {
-            events: flags as u32,
-            data: we::epoll_data { u64: ev.key as u64 },
-        };
-
+    /// Passes arguments to `epoll_ctl`.
+    fn ctl(&self, op: u32, sock: RawSocket, ev: Option<Event>) -> io::Result<()> {
+        let mut ev = ev.map(|ev| {
+            let mut flags = we::EPOLLONESHOT;
+            if ev.readable {
+                flags |= READ_FLAGS;
+            }
+            if ev.writable {
+                flags |= WRITE_FLAGS;
+            }
+            we::epoll_event {
+                events: flags as u32,
+                data: we::epoll_data { u64: ev.key as u64 },
+            }
+        });
         wepoll!(epoll_ctl(
             self.handle,
-            action as ctypes::c_int,
+            op as ctypes::c_int,
             sock as we::SOCKET,
-            &mut ev,
+            ev.as_mut()
+                .map(|ev| ev as *mut _)
+                .unwrap_or(ptr::null_mut()),
         ))?;
-
         Ok(())
     }
 }

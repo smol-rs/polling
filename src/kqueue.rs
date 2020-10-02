@@ -30,6 +30,7 @@ impl Poller {
         let (read_stream, write_stream) = UnixStream::pair()?;
         read_stream.set_nonblocking(true)?;
         write_stream.set_nonblocking(true)?;
+
         let poller = Poller {
             kqueue_fd,
             read_stream,
@@ -54,29 +55,33 @@ impl Poller {
 
     /// Adds a new file descriptor.
     pub fn add(&self, fd: RawFd, ev: Event) -> io::Result<()> {
+        // File descriptors don't need to be added explicitly, so just modify the interest.
+        self.modify(fd, ev)
+    }
+
+    /// Modifies an existing file descriptor.
+    pub fn modify(&self, fd: RawFd, ev: Event) -> io::Result<()> {
         if fd != self.read_stream.as_raw_fd() {
             log::trace!("add: kqueue_fd={}, fd={}, ev={:?}", self.kqueue_fd, fd, ev);
         }
 
-        let mut read_flags = libc::EV_ONESHOT | libc::EV_RECEIPT;
-        let mut write_flags = libc::EV_ONESHOT | libc::EV_RECEIPT;
-        if ev.readable {
-            read_flags |= libc::EV_ADD;
+        let read_flags = if ev.readable {
+            libc::EV_ADD | libc::EV_ONESHOT
         } else {
-            read_flags |= libc::EV_DELETE;
-        }
-        if ev.writable {
-            write_flags |= libc::EV_ADD;
+            libc::EV_DELETE
+        };
+        let write_flags = if ev.writable {
+            libc::EV_ADD | libc::EV_ONESHOT
         } else {
-            write_flags |= libc::EV_DELETE;
-        }
+            libc::EV_DELETE
+        };
 
         // A list of changes for kqueue.
         let changelist = [
             libc::kevent {
                 ident: fd as _,
                 filter: libc::EVFILT_READ,
-                flags: read_flags,
+                flags: read_flags | libc::EV_RECEIPT,
                 fflags: 0,
                 data: 0,
                 udata: ev.key as _,
@@ -84,7 +89,7 @@ impl Poller {
             libc::kevent {
                 ident: fd as _,
                 filter: libc::EVFILT_WRITE,
-                flags: write_flags,
+                flags: write_flags | libc::EV_RECEIPT,
                 fflags: 0,
                 data: 0,
                 udata: ev.key as _,
@@ -117,58 +122,10 @@ impl Poller {
         Ok(())
     }
 
-    /// Modifies an existing file descriptor.
-    pub fn modify(&self, fd: RawFd, ev: Event) -> io::Result<()> {
-        // Adding a file description that is already registered will just update the existing
-        // registration.
-        self.add(fd, ev)
-    }
-
-    /// Removes a file descriptor.
+    /// Deletes a file descriptor.
     pub fn delete(&self, fd: RawFd) -> io::Result<()> {
-        if fd != self.read_stream.as_raw_fd() {
-            log::trace!("remove: kqueue_fd={}, fd={}", self.kqueue_fd, fd);
-        }
-
-        // A list of changes for kqueue.
-        let changelist = [
-            libc::kevent {
-                ident: fd as _,
-                filter: libc::EVFILT_READ,
-                flags: libc::EV_DELETE | libc::EV_RECEIPT,
-                fflags: 0,
-                data: 0,
-                udata: 0 as _,
-            },
-            libc::kevent {
-                ident: fd as _,
-                filter: libc::EVFILT_WRITE,
-                flags: libc::EV_DELETE | libc::EV_RECEIPT,
-                fflags: 0,
-                data: 0,
-                udata: 0 as _,
-            },
-        ];
-
-        // Apply changes.
-        let mut eventlist = changelist;
-        syscall!(kevent(
-            self.kqueue_fd,
-            changelist.as_ptr() as *const libc::kevent,
-            changelist.len() as _,
-            eventlist.as_mut_ptr() as *mut libc::kevent,
-            eventlist.len() as _,
-            ptr::null(),
-        ))?;
-
-        // Check for errors.
-        for ev in &eventlist {
-            if (ev.flags & libc::EV_ERROR) != 0 && ev.data != 0 && ev.data != libc::ENOENT as _ {
-                return Err(io::Error::from_raw_os_error(ev.data as _));
-            }
-        }
-
-        Ok(())
+        // Simply delete interest in the file descriptor.
+        self.modify(fd, Event::none(0))
     }
 
     /// Waits for I/O events with an optional timeout.

@@ -50,6 +50,12 @@ impl Poller {
 
     /// Adds a file descriptor.
     pub fn add(&self, fd: RawFd, ev: Event) -> io::Result<()> {
+        // File descriptors don't need to be added explicitly, so just modify the interest.
+        self.modify(fd, ev)
+    }
+
+    /// Modifies an existing file descriptor.
+    pub fn modify(&self, fd: RawFd, ev: Event) -> io::Result<()> {
         let mut flags = 0;
         if ev.readable {
             flags |= libc::POLLIN;
@@ -65,24 +71,16 @@ impl Poller {
             flags as _,
             ev.key as _,
         ))?;
-
         Ok(())
     }
 
-    pub fn modify(&self, fd: RawFd, ev: Event) -> io::Result<()> {
-        // Adding a file description that is already registered will just update the existing
-        // registration.
-        self.add(fd, ev)
-    }
-
-    /// Removes a file descriptor.
+    /// Deletes a file descriptor.
     pub fn delete(&self, fd: RawFd) -> io::Result<()> {
         syscall!(port_dissociate(
             self.port_fd,
             libc::PORT_SOURCE_FD,
             fd as usize,
         ))?;
-
         Ok(())
     }
 
