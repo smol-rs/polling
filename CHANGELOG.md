@@ -1,3 +1,10 @@
+# Version 2.0.0
+
+- Add `Event` argument to `Poller::insert()`.
+- Don't put fd/socket in non-blocking mode upon insertion.
+- Rename `insert()`/`interest()`/`remove()` to `add()`/`modify()`/`delete()`.
+- Replace `wepoll-sys-stjepang` with an `wepoll-sys`.
+
 # Version 1.1.0
 
 - Add "std" cargo feature.
