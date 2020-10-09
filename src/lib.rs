@@ -267,7 +267,8 @@ impl Poller {
     /// # let source = std::net::TcpListener::bind("127.0.0.1:0")?;
     /// # let key = 7;
     /// # let poller = Poller::new()?;
-    /// poller.add(&source, Event::all(key))?;
+    /// # poller.add(&source, Event::none(key))?;
+    /// poller.modify(&source, Event::all(key))?;
     /// # std::io::Result::Ok(())
     /// ```
     ///

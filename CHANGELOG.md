@@ -1,3 +1,7 @@
+# Version 2.0.1
+
+- Minor docs improvements.
+
 # Version 2.0.0
 
 - Add `Event` argument to `Poller::insert()`.
