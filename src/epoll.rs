@@ -167,7 +167,7 @@ impl Poller {
         let mut buf = [0u8; 8];
         let _ = syscall!(read(
             self.event_fd,
-            &mut buf[0] as *mut u8 as *mut libc::c_void,
+            buf.as_mut_ptr() as *mut libc::c_void,
             buf.len()
         ));
         self.modify(
@@ -192,7 +192,7 @@ impl Poller {
         let buf: [u8; 8] = 1u64.to_ne_bytes();
         let _ = syscall!(write(
             self.event_fd,
-            &buf[0] as *const u8 as *const libc::c_void,
+            buf.as_ptr() as *const libc::c_void,
             buf.len()
         ));
         Ok(())
