@@ -1,3 +1,7 @@
+# Version 2.0.2
+
+- Replace manual pointer conversion with `as_ptr()` and `as_mut_ptr()`.
+
 # Version 2.0.1
 
 - Minor docs improvements.
