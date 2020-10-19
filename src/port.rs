@@ -76,11 +76,17 @@ impl Poller {
 
     /// Deletes a file descriptor.
     pub fn delete(&self, fd: RawFd) -> io::Result<()> {
-        syscall!(port_dissociate(
+        if let Err(e) = syscall!(port_dissociate(
             self.port_fd,
             libc::PORT_SOURCE_FD,
             fd as usize,
-        ))?;
+        )) {
+            match e.raw_os_error().unwrap() {
+                libc::ENOENT => return Ok(()),
+                _ => return Err(e),
+            }
+        }
+
         Ok(())
     }
 
