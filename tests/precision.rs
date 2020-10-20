@@ -22,7 +22,11 @@ fn below_ms() -> io::Result<()> {
         lowest = lowest.min(elapsed);
     }
 
-    if cfg!(not(windows)) {
+    if cfg!(not(any(
+        windows,
+        target_os = "illumos",
+        target_os = "solaris"
+    ))) {
         assert!(lowest < dur + margin);
     }
     Ok(())
