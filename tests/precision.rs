@@ -22,11 +22,16 @@ fn below_ms() -> io::Result<()> {
         lowest = lowest.min(elapsed);
     }
 
-    if cfg!(not(any(
-        windows,
-        target_os = "illumos",
-        target_os = "solaris"
-    ))) {
+    if cfg!(any(
+        target_os = "linux",
+        target_os = "android",
+        target_os = "macos",
+        target_os = "ios",
+        target_os = "freebsd",
+        target_os = "netbsd",
+        target_os = "openbsd",
+        target_os = "dragonfly",
+    )) {
         assert!(lowest < dur + margin);
     }
     Ok(())
@@ -51,7 +56,18 @@ fn above_ms() -> io::Result<()> {
         lowest = lowest.min(elapsed);
     }
 
-    if cfg!(not(windows)) {
+    if cfg!(any(
+        target_os = "linux",
+        target_os = "android",
+        target_os = "illumos",
+        target_os = "solaris",
+        target_os = "macos",
+        target_os = "ios",
+        target_os = "freebsd",
+        target_os = "netbsd",
+        target_os = "openbsd",
+        target_os = "dragonfly",
+    )) {
         assert!(lowest < dur + margin);
     }
     Ok(())

@@ -21,7 +21,7 @@ cfg-if = "0.1.10"
 log = "0.4.11"
 
 [target."cfg(unix)".dependencies]
-libc = "0.2.77"
+libc = { version = "0.2.77", features = ["extra_traits"] }
 
 [target.'cfg(windows)'.dependencies]
 wepoll-sys = "3.0.0"
