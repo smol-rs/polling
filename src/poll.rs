@@ -82,6 +82,8 @@ impl Poller {
             notify_read_flags | libc::O_NONBLOCK
         ))?;
 
+        log::trace!("new: notify_read={}, notify_write={}", notify_pipe[0], notify_pipe[1]);
+
         Ok(Self {
             fds: Mutex::new(Fds {
                 poll_fds: vec![libc::pollfd {
@@ -104,6 +106,8 @@ impl Poller {
         if fd == self.notify_read || fd == self.notify_write {
             return Err(io::Error::from(io::ErrorKind::InvalidInput));
         }
+
+        log::trace!("add: notify_read={}, fd={}, ev={:?}", self.notify_read, fd, ev);
 
         self.modify_fds(|fds| {
             if fds.fd_data.contains_key(&fd) {
@@ -131,6 +135,8 @@ impl Poller {
 
     /// Modifies an existing file descriptor.
     pub fn modify(&self, fd: RawFd, ev: Event) -> io::Result<()> {
+        log::trace!("modify: notify_read={}, fd={}, ev={:?}", self.notify_read, fd, ev);
+
         self.modify_fds(|fds| {
             let data = fds.fd_data.get_mut(&fd).ok_or(io::ErrorKind::NotFound)?;
             data.key = ev.key;
@@ -143,6 +149,8 @@ impl Poller {
 
     /// Deletes a file descriptor.
     pub fn delete(&self, fd: RawFd) -> io::Result<()> {
+        log::trace!("delete: notify_read={}, fd={}", self.notify_read, fd);
+
         self.modify_fds(|fds| {
             let data = fds.fd_data.remove(&fd).ok_or(io::ErrorKind::NotFound)?;
             fds.poll_fds[data.poll_fds_index].fd = REMOVE_FD;
@@ -153,6 +161,8 @@ impl Poller {
 
     /// Waits for I/O events with an optional timeout.
     pub fn wait(&self, events: &mut Events, timeout: Option<Duration>) -> io::Result<()> {
+        log::trace!("wait: notify_read={}, timeout={:?}", self.notify_read, timeout);
+
         let deadline = timeout.map(|t| Instant::now() + t);
 
         events.inner.clear();
@@ -172,6 +182,7 @@ impl Poller {
             let num_events = poll(&mut fds.poll_fds, deadline)?;
             let notified = fds.poll_fds[0].revents != 0;
             let num_fd_events = if notified { num_events - 1 } else { num_events };
+            log::trace!("new events: notify_read={}, num={}", self.notify_read, num_events);
 
             // Read all notifications.
             if notified {
@@ -219,6 +230,8 @@ impl Poller {
 
     /// Sends a notification to wake up the current or next `wait()` call.
     pub fn notify(&self) -> io::Result<()> {
+        log::trace!("notify: notify_read={}", self.notify_read);
+
         if !self.notified.swap(true, Ordering::SeqCst) {
             self.notify_inner()?;
         }
@@ -258,6 +271,7 @@ impl Poller {
 
 impl Drop for Poller {
     fn drop(&mut self) {
+        log::trace!("drop: notify_read={}", self.notify_read);
         let _ = syscall!(close(self.notify_read));
         let _ = syscall!(close(self.notify_write));
     }
@@ -320,7 +334,7 @@ fn poll(fds: &mut [libc::pollfd], deadline: Option<Instant>) -> io::Result<usize
         match syscall!(poll(fds.as_mut_ptr(), fds.len() as u64, timeout_ms,)) {
             Ok(num_events) => break Ok(num_events as usize),
             // poll returns EAGAIN if we can retry it.
-            Err(e) if e.kind() == io::ErrorKind::WouldBlock => continue,
+            Err(e) if e.raw_os_error() == Some(libc::EAGAIN) => continue,
             Err(e) => return Err(e),
         }
     }
