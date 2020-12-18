@@ -35,12 +35,13 @@ pub struct Poller {
     /// mutex to become free. When this is nonzero, `wait` must be suspended until it reaches zero
     /// again.
     waiting_operations: AtomicUsize,
-    /// The condition variable that gets notified when `waiting_operations` reaches zero. This is
-    /// used with the `fds` mutex.
-    operations_complete: Condvar,
-
     /// Whether `wait` has been notified by the user.
     notified: AtomicBool,
+    /// The condition variable that gets notified when `waiting_operations` reaches zero or
+    /// `notified` becomes true.
+    ///
+    /// This is used with the `fds` mutex.
+    operations_complete: Condvar,
 }
 
 /// The file descriptors to poll in a `Poller`.
@@ -171,7 +172,15 @@ impl Poller {
 
         loop {
             // Complete all current operations.
-            while self.waiting_operations.load(Ordering::SeqCst) != 0 {
+            loop {
+                if self.notified.swap(false, Ordering::SeqCst) {
+                    // `notify` will have sent a notification in case we were polling. We weren't,
+                    // so remove it.
+                    return self.pop_notification();
+                } else if self.waiting_operations.load(Ordering::SeqCst) == 0 {
+                    break;
+                }
+
                 fds = self.operations_complete.wait(fds).unwrap();
             }
 
@@ -234,6 +243,7 @@ impl Poller {
 
         if !self.notified.swap(true, Ordering::SeqCst) {
             self.notify_inner()?;
+            self.operations_complete.notify_one();
         }
 
         Ok(())
@@ -248,10 +258,9 @@ impl Poller {
 
         let mut fds = self.fds.lock().unwrap();
 
-        // If there was no caller of `wait` our byte was not removed from the pipe, so attempt to
-        // remove one byte from the pipe.
+        // If there was no caller of `wait` our notification was not removed from the pipe.
         if sent_notification {
-            let _ = syscall!(read(self.notify_read, &mut [0; 1] as *mut _ as *mut _, 1));
+            let _ = self.pop_notification();
         }
 
         let res = f(&mut *fds);
@@ -265,7 +274,14 @@ impl Poller {
 
     /// Wake the current thread that is calling `wait`.
     fn notify_inner(&self) -> io::Result<()> {
-        syscall!(write(self.notify_write, &0_u8 as *const _ as *const _, 1)).map(drop)
+        syscall!(write(self.notify_write, &0_u8 as *const _ as *const _, 1))?;
+        Ok(())
+    }
+
+    /// Remove a notification created by `notify_inner`.
+    fn pop_notification(&self) -> io::Result<()> {
+        syscall!(read(self.notify_read, &mut [0; 1] as *mut _ as *mut _, 1))?;
+        Ok(())
     }
 }
 
