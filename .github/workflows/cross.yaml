@@ -23,10 +23,6 @@ jobs:
         toolchain: nightly
         override: true
 
-    - name: Install docker
-      if: startsWith(matrix.os, 'ubuntu')
-      run: sudo apt install docker
-
     - name: Install cross
       run: cargo install cross
 
