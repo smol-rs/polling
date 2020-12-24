@@ -421,9 +421,10 @@ impl Poller {
     /// ```
     pub fn notify(&self) -> io::Result<()> {
         log::trace!("Poller::notify()");
-        if !self
+        if self
             .notified
-            .compare_and_swap(false, true, Ordering::SeqCst)
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .is_ok()
         {
             self.poller.notify()?;
         }
