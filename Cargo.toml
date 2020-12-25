@@ -17,7 +17,7 @@ default = ["std"]
 std = []
 
 [dependencies]
-cfg-if = "0.1.10"
+cfg-if = "1"
 log = "0.4.11"
 
 [target."cfg(unix)".dependencies]
