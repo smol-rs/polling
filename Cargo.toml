@@ -5,8 +5,8 @@ authors = ["Stjepan Glavina <stjepang@gmail.com>"]
 edition = "2018"
 description = "Portable interface to epoll, kqueue, event ports, and wepoll"
 license = "Apache-2.0 OR MIT"
-repository = "https://github.com/stjepang/polling"
-homepage = "https://github.com/stjepang/polling"
+repository = "https://github.com/smol-rs/polling"
+homepage = "https://github.com/smol-rs/polling"
 documentation = "https://docs.rs/polling"
 keywords = ["mio", "epoll", "kqueue", "iocp", "wepoll"]
 categories = ["asynchronous", "network-programming", "os"]
@@ -17,7 +17,7 @@ default = ["std"]
 std = []
 
 [dependencies]
-cfg-if = "0.1.10"
+cfg-if = "1"
 log = "0.4.11"
 
 [target."cfg(unix)".dependencies]

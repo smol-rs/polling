@@ -115,9 +115,10 @@ impl Poller {
     pub fn notify(&self) -> io::Result<()> {
         log::trace!("notify: handle={:?}", self.handle);
 
-        if !self
+        if self
             .notified
-            .compare_and_swap(false, true, Ordering::SeqCst)
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .is_ok()
         {
             unsafe {
                 // This call errors if a notification has already been posted, but that's okay - we
