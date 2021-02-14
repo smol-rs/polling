@@ -10,7 +10,6 @@ homepage = "https://github.com/smol-rs/polling"
 documentation = "https://docs.rs/polling"
 keywords = ["mio", "epoll", "kqueue", "iocp", "wepoll"]
 categories = ["asynchronous", "network-programming", "os"]
-readme = "README.md"
 
 [features]
 default = ["std"]
