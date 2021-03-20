@@ -1,3 +1,7 @@
+# Version 2.0.3
+
+- Update `cfg-if` dependency to 1.
+
 # Version 2.0.2
 
 - Replace manual pointer conversion with `as_ptr()` and `as_mut_ptr()`.
@@ -30,7 +34,7 @@
 # Version 1.0.1
 
 - Fix a typo in the readme.
--
+
 # Version 1.0.0
 
 - Stabilize.
