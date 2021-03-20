@@ -62,3 +62,4 @@ jobs:
         run: echo 'polling = { path = ".." }' >> async-io/Cargo.toml
       - name: Test async-io
         run: cargo test --manifest-path=async-io/Cargo.toml
+        if: matrix.rust != '1.40.0'
