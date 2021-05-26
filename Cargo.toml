@@ -20,7 +20,7 @@ std = []
 cfg-if = "1"
 log = "0.4.11"
 
-[target."cfg(unix)".dependencies]
+[target.'cfg(any(unix, target_os = "fuchsia", target_os = "vxworks"))'.dependencies]
 libc = { version = "0.2.77", features = ["extra_traits"] }
 
 [target.'cfg(windows)'.dependencies]
