@@ -12,9 +12,6 @@ use libc::c_int as RawFd;
 
 use crate::Event;
 
-/// Special value for an fd in a pollfd to signal that it should be removed.
-const REMOVE_FD: RawFd = -2;
-
 /// Interface to poll.
 #[derive(Debug)]
 pub struct Poller {
@@ -51,8 +48,6 @@ struct Fds {
     ///
     /// The first file descriptor is always present and is used to notify the poller. It is also
     /// stored in `notify_read`.
-    ///
-    /// If the fd stored in here is `REMOVE_FD`, it should be removed.
     poll_fds: Vec<libc::pollfd>,
     /// The map of each file descriptor to data associated with it. This does not include the file
     /// descriptors `notify_read` or `notify_write`.
@@ -83,7 +78,11 @@ impl Poller {
             notify_read_flags | libc::O_NONBLOCK
         ))?;
 
-        log::trace!("new: notify_read={}, notify_write={}", notify_pipe[0], notify_pipe[1]);
+        log::trace!(
+            "new: notify_read={}, notify_write={}",
+            notify_pipe[0],
+            notify_pipe[1]
+        );
 
         Ok(Self {
             fds: Mutex::new(Fds {
@@ -108,7 +107,12 @@ impl Poller {
             return Err(io::Error::from(io::ErrorKind::InvalidInput));
         }
 
-        log::trace!("add: notify_read={}, fd={}, ev={:?}", self.notify_read, fd, ev);
+        log::trace!(
+            "add: notify_read={}, fd={}, ev={:?}",
+            self.notify_read,
+            fd,
+            ev
+        );
 
         self.modify_fds(|fds| {
             if fds.fd_data.contains_key(&fd) {
@@ -136,7 +140,12 @@ impl Poller {
 
     /// Modifies an existing file descriptor.
     pub fn modify(&self, fd: RawFd, ev: Event) -> io::Result<()> {
-        log::trace!("modify: notify_read={}, fd={}, ev={:?}", self.notify_read, fd, ev);
+        log::trace!(
+            "modify: notify_read={}, fd={}, ev={:?}",
+            self.notify_read,
+            fd,
+            ev
+        );
 
         self.modify_fds(|fds| {
             let data = fds.fd_data.get_mut(&fd).ok_or(io::ErrorKind::NotFound)?;
@@ -154,7 +163,13 @@ impl Poller {
 
         self.modify_fds(|fds| {
             let data = fds.fd_data.remove(&fd).ok_or(io::ErrorKind::NotFound)?;
-            fds.poll_fds[data.poll_fds_index].fd = REMOVE_FD;
+            fds.poll_fds.swap_remove(data.poll_fds_index);
+            if let Some(swapped_pollfd) = fds.poll_fds.get(data.poll_fds_index) {
+                fds.fd_data
+                    .get_mut(&swapped_pollfd.fd)
+                    .unwrap()
+                    .poll_fds_index = data.poll_fds_index;
+            }
 
             Ok(())
         })
@@ -162,7 +177,11 @@ impl Poller {
 
     /// Waits for I/O events with an optional timeout.
     pub fn wait(&self, events: &mut Events, timeout: Option<Duration>) -> io::Result<()> {
-        log::trace!("wait: notify_read={}, timeout={:?}", self.notify_read, timeout);
+        log::trace!(
+            "wait: notify_read={}, timeout={:?}",
+            self.notify_read,
+            timeout
+        );
 
         let deadline = timeout.map(|t| Instant::now() + t);
 
@@ -184,14 +203,15 @@ impl Poller {
                 fds = self.operations_complete.wait(fds).unwrap();
             }
 
-            // Remove all fds that have been marked to be removed.
-            fds.poll_fds.retain(|poll_fd| poll_fd.fd != REMOVE_FD);
-
             // Perform the poll.
             let num_events = poll(&mut fds.poll_fds, deadline)?;
             let notified = fds.poll_fds[0].revents != 0;
             let num_fd_events = if notified { num_events - 1 } else { num_events };
-            log::trace!("new events: notify_read={}, num={}", self.notify_read, num_events);
+            log::trace!(
+                "new events: notify_read={}, num={}",
+                self.notify_read,
+                num_events
+            );
 
             // Read all notifications.
             if notified {
