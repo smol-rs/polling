@@ -361,7 +361,7 @@ fn poll(fds: &mut [libc::pollfd], deadline: Option<Instant>) -> io::Result<usize
                 // Round up to a whole millisecond.
                 let mut ms = timeout.as_millis().try_into().unwrap_or(std::u64::MAX);
                 if Duration::from_millis(ms) < timeout {
-                    ms += 1;
+                    ms = ms.saturating_add(1);
                 }
                 ms.try_into().unwrap_or(std::i32::MAX)
             })

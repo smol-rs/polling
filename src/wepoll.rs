@@ -87,7 +87,7 @@ impl Poller {
                     // Round up to a whole millisecond.
                     let mut ms = t.as_millis().try_into().unwrap_or(std::u64::MAX);
                     if Duration::from_millis(ms) < t {
-                        ms += 1;
+                        ms = ms.saturating_add(1);
                     }
                     ms.try_into().unwrap_or(std::i32::MAX)
                 }
