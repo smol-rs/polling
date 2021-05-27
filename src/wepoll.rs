@@ -7,7 +7,7 @@ use std::ptr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
-use wepoll_sys as we;
+use wepoll_ffi as we;
 use winapi::ctypes;
 
 use crate::Event;
@@ -149,7 +149,7 @@ impl Poller {
             }
             we::epoll_event {
                 events: flags as u32,
-                data: we::epoll_data { u64: ev.key as u64 },
+                data: we::epoll_data { u64_: ev.key as u64 },
             }
         });
         wepoll!(epoll_ctl(
@@ -192,7 +192,7 @@ impl Events {
     pub fn new() -> Events {
         let ev = we::epoll_event {
             events: 0,
-            data: we::epoll_data { u64: 0 },
+            data: we::epoll_data { u64_: 0 },
         };
         Events {
             list: vec![ev; 1000].into_boxed_slice(),
@@ -203,7 +203,7 @@ impl Events {
     /// Iterates over I/O events.
     pub fn iter(&self) -> impl Iterator<Item = Event> + '_ {
         self.list[..self.len].iter().map(|ev| Event {
-            key: unsafe { ev.data.u64 } as usize,
+            key: unsafe { ev.data.u64_ } as usize,
             readable: (ev.events & READ_FLAGS) != 0,
             writable: (ev.events & WRITE_FLAGS) != 0,
         })
