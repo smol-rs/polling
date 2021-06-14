@@ -1,3 +1,7 @@
+# Version 2.1.0
+
+- Switch from `wepoll-sys` to `wepoll-ffi`.
+
 # Version 2.0.3
 
 - Update `cfg-if` dependency to 1.
