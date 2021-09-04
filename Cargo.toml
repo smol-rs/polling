@@ -21,7 +21,7 @@ cfg-if = "1"
 log = "0.4.11"
 
 [target.'cfg(any(unix, target_os = "fuchsia", target_os = "vxworks"))'.dependencies]
-libc = { version = "0.2.77", features = ["extra_traits"] }
+libc = "0.2.77"
 
 [target.'cfg(windows)'.dependencies]
 wepoll-sys = "3.0.0"

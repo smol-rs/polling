@@ -2,6 +2,7 @@
 
 use std::collections::HashMap;
 use std::convert::TryInto;
+use std::fmt::{self, Debug, Formatter};
 use std::io;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Condvar, Mutex};
@@ -48,10 +49,25 @@ struct Fds {
     ///
     /// The first file descriptor is always present and is used to notify the poller. It is also
     /// stored in `notify_read`.
-    poll_fds: Vec<libc::pollfd>,
+    poll_fds: Vec<PollFd>,
     /// The map of each file descriptor to data associated with it. This does not include the file
     /// descriptors `notify_read` or `notify_write`.
     fd_data: HashMap<RawFd, FdData>,
+}
+
+/// Transparent wrapper around `libc::pollfd`, used to support `Debug` derives without adding the
+/// `extra_traits` feature of `libc`.
+#[repr(transparent)]
+struct PollFd(libc::pollfd);
+
+impl Debug for PollFd {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        f.debug_struct("pollfd")
+            .field("fd", &self.0.fd)
+            .field("events", &self.0.events)
+            .field("revents", &self.0.revents)
+            .finish()
+    }
 }
 
 /// Data associated with a file descriptor in a poller.
@@ -86,11 +102,11 @@ impl Poller {
 
         Ok(Self {
             fds: Mutex::new(Fds {
-                poll_fds: vec![libc::pollfd {
+                poll_fds: vec![PollFd(libc::pollfd {
                     fd: notify_pipe[0],
                     events: libc::POLLRDNORM,
                     revents: 0,
-                }],
+                })],
                 fd_data: HashMap::new(),
             }),
             notify_read: notify_pipe[0],
@@ -128,11 +144,11 @@ impl Poller {
                 },
             );
 
-            fds.poll_fds.push(libc::pollfd {
+            fds.poll_fds.push(PollFd(libc::pollfd {
                 fd,
                 events: poll_events(ev),
                 revents: 0,
-            });
+            }));
 
             Ok(())
         })
@@ -151,7 +167,7 @@ impl Poller {
             let data = fds.fd_data.get_mut(&fd).ok_or(io::ErrorKind::NotFound)?;
             data.key = ev.key;
             let poll_fds_index = data.poll_fds_index;
-            fds.poll_fds[poll_fds_index].events = poll_events(ev);
+            fds.poll_fds[poll_fds_index].0.events = poll_events(ev);
 
             Ok(())
         })
@@ -166,7 +182,7 @@ impl Poller {
             fds.poll_fds.swap_remove(data.poll_fds_index);
             if let Some(swapped_pollfd) = fds.poll_fds.get(data.poll_fds_index) {
                 fds.fd_data
-                    .get_mut(&swapped_pollfd.fd)
+                    .get_mut(&swapped_pollfd.0.fd)
                     .unwrap()
                     .poll_fds_index = data.poll_fds_index;
             }
@@ -205,7 +221,7 @@ impl Poller {
 
             // Perform the poll.
             let num_events = poll(&mut fds.poll_fds, deadline)?;
-            let notified = fds.poll_fds[0].revents != 0;
+            let notified = fds.poll_fds[0].0.revents != 0;
             let num_fd_events = if notified { num_events - 1 } else { num_events };
             log::trace!(
                 "new events: notify_read={}, num={}",
@@ -233,7 +249,7 @@ impl Poller {
 
                 events.inner.reserve(num_fd_events);
                 for fd_data in fds.fd_data.values_mut() {
-                    let mut poll_fd = fds.poll_fds[fd_data.poll_fds_index];
+                    let PollFd(poll_fd) = &mut fds.poll_fds[fd_data.poll_fds_index];
                     if poll_fd.revents != 0 {
                         // Store event
                         events.inner.push(Event {
@@ -351,7 +367,7 @@ impl Events {
 }
 
 /// Helper function to call poll.
-fn poll(fds: &mut [libc::pollfd], deadline: Option<Instant>) -> io::Result<usize> {
+fn poll(fds: &mut [PollFd], deadline: Option<Instant>) -> io::Result<usize> {
     loop {
         // Convert the timeout to milliseconds.
         let timeout_ms = deadline
@@ -367,7 +383,11 @@ fn poll(fds: &mut [libc::pollfd], deadline: Option<Instant>) -> io::Result<usize
             })
             .unwrap_or(-1);
 
-        match syscall!(poll(fds.as_mut_ptr(), fds.len() as libc::nfds_t, timeout_ms,)) {
+        match syscall!(poll(
+            fds.as_mut_ptr() as *mut libc::pollfd,
+            fds.len() as libc::nfds_t,
+            timeout_ms,
+        )) {
             Ok(num_events) => break Ok(num_events as usize),
             // poll returns EAGAIN if we can retry it.
             Err(e) if e.raw_os_error() == Some(libc::EAGAIN) => continue,
