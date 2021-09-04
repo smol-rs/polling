@@ -367,7 +367,7 @@ fn poll(fds: &mut [libc::pollfd], deadline: Option<Instant>) -> io::Result<usize
             })
             .unwrap_or(-1);
 
-        match syscall!(poll(fds.as_mut_ptr(), fds.len() as u64, timeout_ms,)) {
+        match syscall!(poll(fds.as_mut_ptr(), fds.len() as libc::nfds_t, timeout_ms,)) {
             Ok(num_events) => break Ok(num_events as usize),
             // poll returns EAGAIN if we can retry it.
             Err(e) if e.raw_os_error() == Some(libc::EAGAIN) => continue,
