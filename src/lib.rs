@@ -74,7 +74,7 @@ macro_rules! syscall {
 }
 
 cfg_if! {
-    if #[cfg(any(/*target_os = "linux",*/ target_os = "android"))] {
+    if #[cfg(any(target_os = "linux", target_os = "android"))] {
         mod epoll;
         use epoll as sys;
     } else if #[cfg(any(
@@ -112,7 +112,7 @@ cfg_if! {
 const NOTIFY_KEY: usize = std::usize::MAX;
 
 /// Indicates that a file descriptor or socket can read or write without blocking.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Event {
     /// Key identifying the file descriptor or socket.
     pub key: usize,
