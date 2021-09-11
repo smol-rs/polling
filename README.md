@@ -16,6 +16,7 @@ Supported platforms:
 - [kqueue](https://en.wikipedia.org/wiki/Kqueue): macOS, iOS, FreeBSD, NetBSD, OpenBSD,
   DragonFly BSD
 - [event ports](https://illumos.org/man/port_create): illumos, Solaris
+- [poll](https://en.wikipedia.org/wiki/Poll_(Unix)): VxWorks, Fuchsia, other Unix systems
 - [wepoll](https://github.com/piscisaureus/wepoll): Windows
 
 Polling is done in oneshot mode, which means interest in I/O events needs to be reset after

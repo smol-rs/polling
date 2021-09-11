@@ -5,6 +5,7 @@
 //! - [kqueue](https://en.wikipedia.org/wiki/Kqueue): macOS, iOS, FreeBSD, NetBSD, OpenBSD,
 //!   DragonFly BSD
 //! - [event ports](https://illumos.org/man/port_create): illumos, Solaris
+//! - [poll](https://en.wikipedia.org/wiki/Poll_(Unix)): VxWorks, Fuchsia, other Unix systems
 //! - [wepoll](https://github.com/piscisaureus/wepoll): Windows
 //!
 //! Polling is done in oneshot mode, which means interest in I/O events needs to be re-enabled
@@ -92,6 +93,13 @@ cfg_if! {
     ))] {
         mod kqueue;
         use kqueue as sys;
+    } else if #[cfg(any(
+        target_os = "vxworks",
+        target_os = "fuchsia",
+        unix,
+    ))] {
+        mod poll;
+        use poll as sys;
     } else if #[cfg(target_os = "windows")] {
         mod wepoll;
         use wepoll as sys;
@@ -104,7 +112,7 @@ cfg_if! {
 const NOTIFY_KEY: usize = std::usize::MAX;
 
 /// Indicates that a file descriptor or socket can read or write without blocking.
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Event {
     /// Key identifying the file descriptor or socket.
     pub key: usize,

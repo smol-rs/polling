@@ -46,6 +46,14 @@ jobs:
       if: startsWith(matrix.os, 'ubuntu')
       run: cross check --target x86_64-unknown-linux-gnux32
 
+    - name: Add fuchsia target
+      if: startsWith(matrix.os, 'ubuntu')
+      run: rustup target add x86_64-fuchsia
+
+    - name: Fuchsia
+      if: startsWith(matrix.os, 'ubuntu')
+      run: cross build --target x86_64-fuchsia
+
     # - name: illumos
     #   if: startsWith(matrix.os, 'ubuntu')
     #   run: cross build --target x86_64-unknown-illumos
