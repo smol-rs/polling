@@ -1,3 +1,7 @@
+# Version 2.2.0
+
+- Support VxWorks, Fuchsia and other Unix systems by using poll. (#26)
+
 # Version 2.1.0
 
 - Switch from `wepoll-sys` to `wepoll-ffi`.

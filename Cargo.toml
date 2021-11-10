@@ -3,7 +3,7 @@ name = "polling"
 # When publishing a new version:
 # - Update CHANGELOG.md
 # - Create "v2.x.y" git tag
-version = "2.1.0"
+version = "2.2.0"
 authors = ["Stjepan Glavina <stjepang@gmail.com>"]
 edition = "2018"
 description = "Portable interface to epoll, kqueue, event ports, and wepoll"
