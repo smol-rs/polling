@@ -149,7 +149,9 @@ impl Poller {
             }
             we::epoll_event {
                 events: flags as u32,
-                data: we::epoll_data { u64_: ev.key as u64 },
+                data: we::epoll_data {
+                    u64_: ev.key as u64,
+                },
             }
         });
         wepoll!(epoll_ctl(

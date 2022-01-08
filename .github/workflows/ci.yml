@@ -1,0 +1,114 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - master
+  schedule:
+    - cron: '0 2 * * *'
+
+env:
+  RUSTFLAGS: -D warnings
+  RUST_BACKTRACE: 1
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        rust: [nightly, beta, stable]
+    steps:
+      - uses: actions/checkout@v2
+      - name: Install Rust
+        # --no-self-update is necessary because the windows environment cannot self-update rustup.exe.
+        run: rustup update ${{ matrix.rust }} --no-self-update && rustup default ${{ matrix.rust }}
+      - name: Install cargo-hack
+        uses: taiki-e/install-action@cargo-hack
+      - run: cargo build --all --all-features --all-targets
+      - run: cargo test
+      - run: cargo hack build --feature-powerset --no-dev-deps
+      - name: Clone async-io
+        run: git clone https://github.com/smol-rs/async-io.git
+      - name: Add patch section
+        run: echo '[patch.crates-io]' >> async-io/Cargo.toml
+      - name: Patch polling
+        run: echo 'polling = { path = ".." }' >> async-io/Cargo.toml
+      - name: Test async-io
+        run: cargo test --manifest-path=async-io/Cargo.toml
+
+  cross:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+    - uses: actions/checkout@v2
+    - name: Install Rust
+      run: rustup update stable
+    - name: Install cross
+      uses: taiki-e/install-action@cross
+    - name: Android
+      if: startsWith(matrix.os, 'ubuntu')
+      run: cross test --target arm-linux-androideabi
+    - name: NetBSD
+      if: startsWith(matrix.os, 'ubuntu')
+      run: cross build --target x86_64-unknown-netbsd
+    - name: FreeBSD
+      if: startsWith(matrix.os, 'ubuntu')
+      run: cross build --target x86_64-unknown-freebsd
+    - name: iOS
+      if: startsWith(matrix.os, 'macos')
+      run: cross build --target aarch64-apple-ios
+    - name: Linux x32
+      if: startsWith(matrix.os, 'ubuntu')
+      run: cross check --target x86_64-unknown-linux-gnux32
+    - name: Add fuchsia target
+      if: startsWith(matrix.os, 'ubuntu')
+      run: rustup target add x86_64-fuchsia
+    - name: Fuchsia
+      if: startsWith(matrix.os, 'ubuntu')
+      run: cross build --target x86_64-fuchsia
+    # - name: illumos
+    #   if: startsWith(matrix.os, 'ubuntu')
+    #   run: cross build --target x86_64-unknown-illumos
+
+  msrv:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        # When updating this, the reminder to update the minimum supported
+        # Rust version in Cargo.toml and .clippy.toml.
+        rust: ['1.31']
+    steps:
+      - uses: actions/checkout@v2
+      - name: Install Rust
+        run: rustup update ${{ matrix.rust }} && rustup default ${{ matrix.rust }}
+      - run: cargo build
+
+  clippy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: Install Rust
+        run: rustup update stable
+      - run: cargo clippy --all-features
+
+  fmt:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: Install Rust
+        run: rustup update stable
+      - run: cargo fmt --all -- --check
+
+  security_audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions-rs/audit-check@v1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}

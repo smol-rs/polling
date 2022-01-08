@@ -1,10 +1,10 @@
-use std::time::Duration;
+use std::io::{self, Write};
 use std::net::{TcpListener, TcpStream};
 use std::thread;
-use std::io::{self, Write};
+use std::time::Duration;
 
 use easy_parallel::Parallel;
-use polling::{Poller, Event};
+use polling::{Event, Poller};
 
 #[test]
 fn concurrent_add() -> io::Result<()> {
