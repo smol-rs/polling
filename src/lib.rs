@@ -76,13 +76,13 @@ macro_rules! syscall {
 cfg_if! {
     if #[cfg(any(target_os = "linux", target_os = "android"))] {
         mod epoll;
-        use self::epoll as sys;
+        use epoll as sys;
     } else if #[cfg(any(
         target_os = "illumos",
         target_os = "solaris",
     ))] {
         mod port;
-        use self::port as sys;
+        use port as sys;
     } else if #[cfg(any(
         target_os = "macos",
         target_os = "ios",
@@ -92,17 +92,17 @@ cfg_if! {
         target_os = "dragonfly",
     ))] {
         mod kqueue;
-        use self::kqueue as sys;
+        use kqueue as sys;
     } else if #[cfg(any(
         target_os = "vxworks",
         target_os = "fuchsia",
         unix,
     ))] {
         mod poll;
-        use self::poll as sys;
+        use poll as sys;
     } else if #[cfg(target_os = "windows")] {
         mod wepoll;
-        use self::wepoll as sys;
+        use wepoll as sys;
     } else {
         compile_error!("polling does not support this target OS");
     }

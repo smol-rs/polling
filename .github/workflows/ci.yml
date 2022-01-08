@@ -82,7 +82,7 @@ jobs:
       matrix:
         # When updating this, the reminder to update the minimum supported
         # Rust version in Cargo.toml and .clippy.toml.
-        rust: ['1.31']
+        rust: ['1.34']
     steps:
       - uses: actions/checkout@v2
       - name: Install Rust
