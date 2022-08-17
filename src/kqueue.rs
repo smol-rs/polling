@@ -6,6 +6,9 @@ use std::os::unix::net::UnixStream;
 use std::ptr;
 use std::time::Duration;
 
+#[cfg(not(polling_no_io_safety))]
+use std::os::unix::io::{AsFd, BorrowedFd};
+
 use crate::Event;
 
 /// Interface to kqueue.
@@ -174,6 +177,20 @@ impl Poller {
         log::trace!("notify: kqueue_fd={}", self.kqueue_fd);
         let _ = (&self.write_stream).write(&[1]);
         Ok(())
+    }
+}
+
+impl AsRawFd for Poller {
+    fn as_raw_fd(&self) -> RawFd {
+        self.kqueue_fd
+    }
+}
+
+#[cfg(not(polling_no_io_safety))]
+impl AsFd for Poller {
+    fn as_fd(&self) -> BorrowedFd<'_> {
+        // SAFETY: lifetime is bound by "self"
+        unsafe { BorrowedFd::borrow_raw(self.kqueue_fd) }
     }
 }
 
