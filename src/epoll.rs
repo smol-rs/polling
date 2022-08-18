@@ -2,9 +2,12 @@
 
 use std::convert::TryInto;
 use std::io;
-use std::os::unix::io::RawFd;
+use std::os::unix::io::{AsRawFd, RawFd};
 use std::ptr;
 use std::time::Duration;
+
+#[cfg(not(polling_no_io_safety))]
+use std::os::unix::io::{AsFd, BorrowedFd};
 
 use crate::Event;
 
@@ -222,6 +225,20 @@ impl Poller {
                 .unwrap_or(ptr::null_mut()),
         ))?;
         Ok(())
+    }
+}
+
+impl AsRawFd for Poller {
+    fn as_raw_fd(&self) -> RawFd {
+        self.epoll_fd
+    }
+}
+
+#[cfg(not(polling_no_io_safety))]
+impl AsFd for Poller {
+    fn as_fd(&self) -> BorrowedFd<'_> {
+        // SAFETY: lifetime is bound by "self"
+        unsafe { BorrowedFd::borrow_raw(self.as_raw_fd()) }
     }
 }
 

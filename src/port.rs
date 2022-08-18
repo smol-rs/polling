@@ -6,6 +6,9 @@ use std::os::unix::net::UnixStream;
 use std::ptr;
 use std::time::Duration;
 
+#[cfg(not(polling_no_io_safety))]
+use std::os::unix::io::{AsFd, BorrowedFd};
+
 use crate::Event;
 
 /// Interface to event ports.
@@ -140,6 +143,20 @@ impl Poller {
     pub fn notify(&self) -> io::Result<()> {
         let _ = (&self.write_stream).write(&[1]);
         Ok(())
+    }
+}
+
+impl AsRawFd for Poller {
+    fn as_raw_fd(&self) -> RawFd {
+        self.port_fd
+    }
+}
+
+#[cfg(not(polling_no_io_safety))]
+impl AsFd for Poller {
+    fn as_fd(&self) -> BorrowedFd<'_> {
+        // SAFETY: lifetime is bound by self
+        unsafe { BorrowedFd::new(self.port_fd) }
     }
 }
 

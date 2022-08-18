@@ -2,10 +2,13 @@
 
 use std::convert::TryInto;
 use std::io;
-use std::os::windows::io::RawSocket;
+use std::os::windows::io::{AsRawHandle, RawHandle, RawSocket};
 use std::ptr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
+
+#[cfg(not(polling_no_io_safety))]
+use std::os::windows::io::{AsHandle, BorrowedHandle};
 
 use wepoll_ffi as we;
 use winapi::ctypes;
@@ -163,6 +166,20 @@ impl Poller {
                 .unwrap_or(ptr::null_mut()),
         ))?;
         Ok(())
+    }
+}
+
+impl AsRawHandle for Poller {
+    fn as_raw_handle(&self) -> RawHandle {
+        self.handle as RawHandle
+    }
+}
+
+#[cfg(not(polling_no_io_safety))]
+impl AsHandle for Poller {
+    fn as_handle(&self) -> BorrowedHandle<'_> {
+        // SAFETY: lifetime is bound by "self"
+        unsafe { BorrowedHandle::borrow_raw(self.as_raw_handle()) }
     }
 }
 

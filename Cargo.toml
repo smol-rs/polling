@@ -24,6 +24,9 @@ std = []
 cfg-if = "1"
 log = "0.4.11"
 
+[build-dependencies]
+autocfg = "1"
+
 [target.'cfg(any(unix, target_os = "fuchsia", target_os = "vxworks"))'.dependencies]
 libc = "0.2.77"
 
