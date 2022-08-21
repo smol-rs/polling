@@ -1,3 +1,9 @@
+# Version 2.3.0
+
+- Implement `AsRawFd` for `Poller` on most Unix systems (#39)
+- Implement `AsRawHandle` for `Poller` on Windows (#39)
+- Implement I/O safety traits on Rust 1.63+ (#39)
+
 # Version 2.2.0
 
 - Support VxWorks, Fuchsia and other Unix systems by using poll. (#26)
