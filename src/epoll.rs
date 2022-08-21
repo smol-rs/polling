@@ -279,7 +279,7 @@ fn write_flags() -> libc::c_int {
 
 /// A list of reported I/O events.
 pub struct Events {
-    list: Box<[libc::epoll_event]>,
+    list: Box<[libc::epoll_event; 1024]>,
     len: usize,
 }
 
@@ -289,7 +289,7 @@ impl Events {
     /// Creates an empty list.
     pub fn new() -> Events {
         let ev = libc::epoll_event { events: 0, u64: 0 };
-        let list = vec![ev; 1000].into_boxed_slice();
+        let list = Box::new([ev; 1024]);
         let len = 0;
         Events { list, len }
     }

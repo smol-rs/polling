@@ -179,7 +179,7 @@ fn write_flags() -> libc::c_short {
 
 /// A list of reported I/O events.
 pub struct Events {
-    list: Box<[libc::port_event]>,
+    list: Box<[libc::port_event; 1024]>,
     len: usize,
 }
 
@@ -195,7 +195,7 @@ impl Events {
             portev_object: 0,
             portev_user: 0 as _,
         };
-        let list = vec![ev; 1000].into_boxed_slice();
+        let list = Box::new([ev; 1024]);
         let len = 0;
         Events { list, len }
     }

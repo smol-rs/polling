@@ -200,7 +200,7 @@ const WRITE_FLAGS: u32 = we::EPOLLOUT | we::EPOLLHUP | we::EPOLLERR;
 
 /// A list of reported I/O events.
 pub struct Events {
-    list: Box<[we::epoll_event]>,
+    list: Box<[we::epoll_event; 1024]>,
     len: usize,
 }
 
@@ -213,10 +213,8 @@ impl Events {
             events: 0,
             data: we::epoll_data { u64_: 0 },
         };
-        Events {
-            list: vec![ev; 1000].into_boxed_slice(),
-            len: 0,
-        }
+        let list = Box::new([ev; 1024]);
+        Events { list, len: 0 }
     }
 
     /// Iterates over I/O events.
