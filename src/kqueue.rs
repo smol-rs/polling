@@ -204,7 +204,7 @@ impl Drop for Poller {
 
 /// A list of reported I/O events.
 pub struct Events {
-    list: Box<[libc::kevent]>,
+    list: Box<[libc::kevent; 1024]>,
     len: usize,
 }
 
@@ -221,7 +221,7 @@ impl Events {
             data: 0,
             udata: 0 as _,
         };
-        let list = vec![ev; 1000].into_boxed_slice();
+        let list = Box::new([ev; 1024]);
         let len = 0;
         Events { list, len }
     }
