@@ -51,6 +51,7 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 #![warn(missing_docs, missing_debug_implementations, rust_2018_idioms)]
 #![allow(clippy::useless_conversion, clippy::unnecessary_cast)]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 
 use std::fmt;
 use std::io;
@@ -454,6 +455,21 @@ impl Poller {
     target_os = "openbsd",
     target_os = "dragonfly",
 ))]
+#[cfg_attr(
+    docsrs,
+    doc(cfg(any(
+        target_os = "linux",
+        target_os = "android",
+        target_os = "illumos",
+        target_os = "solaris",
+        target_os = "macos",
+        target_os = "ios",
+        target_os = "freebsd",
+        target_os = "netbsd",
+        target_os = "openbsd",
+        target_os = "dragonfly",
+    )))
+)]
 mod raw_fd_impl {
     use crate::Poller;
     use std::os::unix::io::{AsRawFd, RawFd};
@@ -476,6 +492,7 @@ mod raw_fd_impl {
 }
 
 #[cfg(windows)]
+#[cfg_attr(docsrs, doc(cfg(windows)))]
 mod raw_handle_impl {
     use crate::Poller;
     use std::os::windows::io::{AsRawHandle, RawHandle};

@@ -16,6 +16,9 @@ keywords = ["mio", "epoll", "kqueue", "iocp", "wepoll"]
 categories = ["asynchronous", "network-programming", "os"]
 exclude = ["/.*"]
 
+[package.metadata.docs.rs]
+rustdoc-args = ["--cfg", "docsrs"]
+
 [features]
 default = ["std"]
 std = []
