@@ -156,7 +156,7 @@ impl AsRawFd for Poller {
 impl AsFd for Poller {
     fn as_fd(&self) -> BorrowedFd<'_> {
         // SAFETY: lifetime is bound by self
-        unsafe { BorrowedFd::new(self.port_fd) }
+        unsafe { BorrowedFd::borrow_raw(self.port_fd) }
     }
 }
 
