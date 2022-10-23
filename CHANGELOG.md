@@ -1,3 +1,9 @@
+# Version 2.4.0
+
+- Fix the build error on illumos and Solaris (#43)
+- Bump MSRV to 1.47 (#40)
+- Optimize `Poller` internal representation (#40)
+
 # Version 2.3.0
 
 - Implement `AsRawFd` for `Poller` on most Unix systems (#39)
