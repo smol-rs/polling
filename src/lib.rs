@@ -240,7 +240,7 @@ impl Poller {
     /// poller.add(&source, Event::all(key))?;
     /// # std::io::Result::Ok(())
     /// ```
-    pub fn add(&self, source: impl Source, interest: Event) -> io::Result<()> {
+    pub fn add<S: Source + ?Sized>(&self, source: &S, interest: Event) -> io::Result<()> {
         if interest.key == NOTIFY_KEY {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
@@ -318,7 +318,7 @@ impl Poller {
     /// poller.modify(&source, Event::none(key))?;
     /// # std::io::Result::Ok(())
     /// ```
-    pub fn modify(&self, source: impl Source, interest: Event) -> io::Result<()> {
+    pub fn modify<S: Source + ?Sized>(&self, source: &S, interest: Event) -> io::Result<()> {
         if interest.key == NOTIFY_KEY {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
@@ -348,7 +348,7 @@ impl Poller {
     /// poller.delete(&socket)?;
     /// # std::io::Result::Ok(())
     /// ```
-    pub fn delete(&self, source: impl Source) -> io::Result<()> {
+    pub fn delete<S: Source + ?Sized>(&self, source: &S) -> io::Result<()> {
         self.poller.delete(source.raw())
     }
 
@@ -520,23 +520,22 @@ impl fmt::Debug for Poller {
     }
 }
 
+/// Platform-agnostic wrapper:
+/// - Windows: [`RawSocket`](std::os::windows::io::RawSocket), or a type implementing [`AsRawSocket`](std::os::windows::io::AsRawSocket).
+/// - UNIX: [`RawFd`](std::os::unix::io::RawFd), or a type implementing [`AsRawFd`](std::os::unix::io::AsRawFd).
+pub trait Source {
+    /// Returns the [`RawSource`] for this I/O object.
+    fn raw(&self) -> RawSource;
+}
+
 cfg_if! {
     if #[cfg(unix)] {
         use std::os::unix::io::{AsRawFd, RawFd};
 
-        /// A [`RawFd`] or a reference to a type implementing [`AsRawFd`].
-        pub trait Source {
-            /// Returns the [`RawFd`] for this I/O object.
-            fn raw(&self) -> RawFd;
-        }
+        /// The platform-agnostic return type for [`Source::raw`].
+        pub type RawSource = RawFd;
 
-        impl Source for RawFd {
-            fn raw(&self) -> RawFd {
-                *self
-            }
-        }
-
-        impl<T: AsRawFd> Source for &T {
+        impl<T: AsRawFd + ?Sized> Source for T {
             fn raw(&self) -> RawFd {
                 self.as_raw_fd()
             }
@@ -544,11 +543,8 @@ cfg_if! {
     } else if #[cfg(windows)] {
         use std::os::windows::io::{AsRawSocket, RawSocket};
 
-        /// A [`RawSocket`] or a reference to a type implementing [`AsRawSocket`].
-        pub trait Source {
-            /// Returns the [`RawSocket`] for this I/O object.
-            fn raw(&self) -> RawSocket;
-        }
+        /// The platform-agnostic return type for [`Source::raw`].
+        pub type RawSource = RawSocket;
 
         impl Source for RawSocket {
             fn raw(&self) -> RawSocket {
@@ -556,7 +552,7 @@ cfg_if! {
             }
         }
 
-        impl<T: AsRawSocket> Source for &T {
+        impl<T: AsRawSocket + ?Sized> Source for T {
             fn raw(&self) -> RawSocket {
                 self.as_raw_socket()
             }
