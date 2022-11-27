@@ -1,6 +1,7 @@
 //! Bindings to wepoll (Windows).
 
 use std::convert::TryInto;
+use std::ffi::c_int;
 use std::io;
 use std::os::windows::io::{AsRawHandle, RawHandle, RawSocket};
 use std::ptr;
@@ -11,7 +12,6 @@ use std::time::{Duration, Instant};
 use std::os::windows::io::{AsHandle, BorrowedHandle};
 
 use wepoll_ffi as we;
-use winapi::ctypes;
 
 use crate::Event;
 
@@ -100,7 +100,7 @@ impl Poller {
             events.len = wepoll!(epoll_wait(
                 self.handle,
                 events.list.as_mut_ptr(),
-                events.list.len() as ctypes::c_int,
+                events.list.len() as c_int,
                 timeout_ms,
             ))? as usize;
             log::trace!("new events: handle={:?}, len={}", self.handle, events.len);
@@ -129,8 +129,8 @@ impl Poller {
                 //
                 // The original wepoll does not support notifications triggered this way, which is
                 // why wepoll-sys includes a small patch to support them.
-                winapi::um::ioapiset::PostQueuedCompletionStatus(
-                    self.handle as winapi::um::winnt::HANDLE,
+                windows_sys::Win32::System::IO::PostQueuedCompletionStatus(
+                    self.handle as _,
                     0,
                     0,
                     ptr::null_mut(),
@@ -159,7 +159,7 @@ impl Poller {
         });
         wepoll!(epoll_ctl(
             self.handle,
-            op as ctypes::c_int,
+            op as c_int,
             sock as we::SOCKET,
             ev.as_mut()
                 .map(|ev| ev as *mut we::epoll_event)
