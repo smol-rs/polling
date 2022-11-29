@@ -1,8 +1,8 @@
 //! Bindings to wepoll (Windows).
 
 use std::convert::TryInto;
-use std::ffi::c_int;
 use std::io;
+use std::os::raw::c_int;
 use std::os::windows::io::{AsRawHandle, RawHandle, RawSocket};
 use std::ptr;
 use std::sync::atomic::{AtomicBool, Ordering};
