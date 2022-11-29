@@ -1,3 +1,7 @@
+# Version 2.5.1
+
+- Fix the build error with MSRV on Windows
+
 # Version 2.5.0
 
 - Switch from `winapi` to `windows-sys` (#47)
