@@ -43,7 +43,10 @@ impl Poller {
         let handle = unsafe { we::epoll_create1(0) };
         if handle.is_null() {
             return Err(io::Error::new(
+                #[cfg(not(polling_no_unsupported_error_kind))]
                 io::ErrorKind::Unsupported,
+                #[cfg(polling_no_unsupported_error_kind)]
+                io::ErrorKind::Other,
                 format!(
                     "Failed to initialize Wepoll: {}\nThis usually only happens for old Windows or Wine.",
                     io::Error::last_os_error()
