@@ -6,7 +6,7 @@
 //!   DragonFly BSD
 //! - [event ports](https://illumos.org/man/port_create): illumos, Solaris
 //! - [poll](https://en.wikipedia.org/wiki/Poll_(Unix)): VxWorks, Fuchsia, other Unix systems
-//! - [wepoll](https://github.com/piscisaureus/wepoll): Windows
+//! - [wepoll](https://github.com/piscisaureus/wepoll): Windows, Wine (version 7.13+)
 //!
 //! Polling is done in oneshot mode, which means interest in I/O events needs to be re-enabled
 //! after an event is delivered if we're interested in the next event of the same kind.
