@@ -18,4 +18,8 @@ fn main() {
     if !cfg.probe_rustc_version(1, 63) {
         autocfg::emit("polling_no_io_safety");
     }
+
+    if !cfg.probe_rustc_version(1, 53) {
+        autocfg::emit("polling_no_unsupported_error_kind");
+    }
 }
