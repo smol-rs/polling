@@ -116,15 +116,16 @@ impl Poller {
                 it_interval: TS_ZERO,
                 it_value: match timeout {
                     None => TS_ZERO,
-                    Some(t) => libc::timespec {
-                        tv_sec: t.as_secs() as libc::time_t,
-                        tv_nsec: (t.subsec_nanos() as libc::c_long).into(),
-                    },
+                    Some(t) => {
+                        let mut ts = TS_ZERO;
+                        ts.tv_sec = t.as_secs() as libc::time_t;
+                        ts.tv_nsec = (t.subsec_nanos() as libc::c_long).into();
+                        ts
+                    }
                 },
             };
 
-            syscall!(syscall(
-                libc::SYS_timerfd_settime,
+            syscall!(timerfd_settime(
                 timer_fd as libc::c_int,
                 0 as libc::c_int,
                 &new_val as *const libc::itimerspec,
@@ -262,10 +263,8 @@ impl Drop for Poller {
 }
 
 /// `timespec` value that equals zero.
-const TS_ZERO: libc::timespec = libc::timespec {
-    tv_sec: 0,
-    tv_nsec: 0,
-};
+const TS_ZERO: libc::timespec =
+    unsafe { std::mem::transmute([0u8; std::mem::size_of::<libc::timespec>()]) };
 
 /// Epoll flags for all possible readability events.
 fn read_flags() -> libc::c_int {
