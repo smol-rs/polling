@@ -212,7 +212,7 @@ unsafe impl Send for Events {}
 impl Events {
     /// Creates an empty list.
     pub fn new() -> Events {
-        let ev: libc::kevent  = unsafe { mem::zeroed() };
+        let ev: libc::kevent = unsafe { mem::zeroed() };
         let list = Box::new([ev; 1024]);
         let len = 0;
         Events { list, len }
