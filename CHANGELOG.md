@@ -1,3 +1,9 @@
+# Version 2.5.2
+
+- Update use of `libc::timespec` to prepare for future libc version (#55)
+- Update use of `libc::kevent` to prepare for future libc version (#56)
+- Add error message for Wepoll (#54)
+
 # Version 2.5.1
 
 - Fix the build error with MSRV on Windows
