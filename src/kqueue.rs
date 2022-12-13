@@ -1,6 +1,7 @@
 //! Bindings to kqueue (macOS, iOS, FreeBSD, NetBSD, OpenBSD, DragonFly BSD).
 
 use std::io::{self, Read, Write};
+use std::mem;
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::os::unix::net::UnixStream;
 use std::ptr;
@@ -85,17 +86,15 @@ impl Poller {
                 ident: fd as _,
                 filter: libc::EVFILT_READ,
                 flags: read_flags | libc::EV_RECEIPT,
-                fflags: 0,
-                data: 0,
                 udata: ev.key as _,
+                ..unsafe { mem::zeroed() }
             },
             libc::kevent {
                 ident: fd as _,
                 filter: libc::EVFILT_WRITE,
                 flags: write_flags | libc::EV_RECEIPT,
-                fflags: 0,
-                data: 0,
                 udata: ev.key as _,
+                ..unsafe { mem::zeroed() }
             },
         ];
 
@@ -213,14 +212,7 @@ unsafe impl Send for Events {}
 impl Events {
     /// Creates an empty list.
     pub fn new() -> Events {
-        let ev = libc::kevent {
-            ident: 0 as _,
-            filter: 0,
-            flags: 0,
-            fflags: 0,
-            data: 0,
-            udata: 0 as _,
-        };
+        let ev: libc::kevent = unsafe { mem::zeroed() };
         let list = Box::new([ev; 1024]);
         let len = 0;
         Events { list, len }
