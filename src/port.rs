@@ -9,7 +9,7 @@ use std::time::Duration;
 #[cfg(not(polling_no_io_safety))]
 use std::os::unix::io::{AsFd, BorrowedFd};
 
-use crate::Event;
+use crate::{Event, PollMode};
 
 /// Interface to event ports.
 #[derive(Debug)]
@@ -46,25 +46,46 @@ impl Poller {
                 readable: true,
                 writable: false,
             },
+            PollMode::Oneshot,
         )?;
 
         Ok(poller)
     }
 
+    /// Whether this poller supports level-triggered events.
+    pub fn supports_level(&self) -> bool {
+        false
+    }
+
+    /// Whether this poller supports edge-triggered events.
+    pub fn supports_edge(&self) -> bool {
+        false
+    }
+
     /// Adds a file descriptor.
-    pub fn add(&self, fd: RawFd, ev: Event) -> io::Result<()> {
+    pub fn add(&self, fd: RawFd, ev: Event, mode: PollMode) -> io::Result<()> {
         // File descriptors don't need to be added explicitly, so just modify the interest.
-        self.modify(fd, ev)
+        self.modify(fd, ev, mode)
     }
 
     /// Modifies an existing file descriptor.
-    pub fn modify(&self, fd: RawFd, ev: Event) -> io::Result<()> {
+    pub fn modify(&self, fd: RawFd, ev: Event, mode: PollMode) -> io::Result<()> {
         let mut flags = 0;
         if ev.readable {
             flags |= libc::POLLIN;
         }
         if ev.writable {
             flags |= libc::POLLOUT;
+        }
+
+        if let PollMode::Edge | PollMode::Level = mode {
+            return Err(io::Error::new(
+                #[cfg(not(polling_no_unsupported_error_kind))]
+                io::ErrorKind::Unsupported,
+                #[cfg(polling_no_unsupported_error_kind)]
+                io::ErrorKind::Other,
+                "this kind of event is not supported with event ports",
+            ));
         }
 
         syscall!(port_associate(
@@ -74,6 +95,7 @@ impl Poller {
             flags as _,
             ev.key as _,
         ))?;
+
         Ok(())
     }
 
@@ -134,6 +156,7 @@ impl Poller {
                 readable: true,
                 writable: false,
             },
+            PollMode::Oneshot,
         )?;
 
         Ok(())

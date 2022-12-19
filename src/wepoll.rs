@@ -13,7 +13,7 @@ use std::os::windows::io::{AsHandle, BorrowedHandle};
 
 use wepoll_ffi as we;
 
-use crate::Event;
+use crate::{Event, PollMode};
 
 /// Calls a wepoll function and results in `io::Result`.
 macro_rules! wepoll {
@@ -58,21 +58,31 @@ impl Poller {
         Ok(Poller { handle, notified })
     }
 
+    /// Whether this poller supports level-triggered events.
+    pub fn supports_level(&self) -> bool {
+        true
+    }
+
+    /// Whether this poller supports edge-triggered events.
+    pub fn supports_edge(&self) -> bool {
+        false
+    }
+
     /// Adds a socket.
-    pub fn add(&self, sock: RawSocket, ev: Event) -> io::Result<()> {
+    pub fn add(&self, sock: RawSocket, ev: Event, mode: PollMode) -> io::Result<()> {
         log::trace!("add: handle={:?}, sock={}, ev={:?}", self.handle, sock, ev);
-        self.ctl(we::EPOLL_CTL_ADD, sock, Some(ev))
+        self.ctl(we::EPOLL_CTL_ADD, sock, Some((ev, mode)))
     }
 
     /// Modifies a socket.
-    pub fn modify(&self, sock: RawSocket, ev: Event) -> io::Result<()> {
+    pub fn modify(&self, sock: RawSocket, ev: Event, mode: PollMode) -> io::Result<()> {
         log::trace!(
             "modify: handle={:?}, sock={}, ev={:?}",
             self.handle,
             sock,
             ev
         );
-        self.ctl(we::EPOLL_CTL_MOD, sock, Some(ev))
+        self.ctl(we::EPOLL_CTL_MOD, sock, Some((ev, mode)))
     }
 
     /// Deletes a socket.
@@ -150,22 +160,37 @@ impl Poller {
     }
 
     /// Passes arguments to `epoll_ctl`.
-    fn ctl(&self, op: u32, sock: RawSocket, ev: Option<Event>) -> io::Result<()> {
-        let mut ev = ev.map(|ev| {
-            let mut flags = we::EPOLLONESHOT;
-            if ev.readable {
-                flags |= READ_FLAGS;
-            }
-            if ev.writable {
-                flags |= WRITE_FLAGS;
-            }
-            we::epoll_event {
-                events: flags as u32,
-                data: we::epoll_data {
-                    u64_: ev.key as u64,
-                },
-            }
-        });
+    fn ctl(&self, op: u32, sock: RawSocket, ev: Option<(Event, PollMode)>) -> io::Result<()> {
+        let mut ev = ev
+            .map(|(ev, mode)| {
+                let mut flags = match mode {
+                    PollMode::Level => 0,
+                    PollMode::Oneshot => we::EPOLLONESHOT,
+                    PollMode::Edge => {
+                        return Err(io::Error::new(
+                            #[cfg(not(polling_no_unsupported_error_kind))]
+                            io::ErrorKind::Unsupported,
+                            #[cfg(polling_no_unsupported_error_kind)]
+                            io::ErrorKind::Other,
+                            "edge-triggered events are not supported with wepoll",
+                        ))
+                    }
+                };
+                if ev.readable {
+                    flags |= READ_FLAGS;
+                }
+                if ev.writable {
+                    flags |= WRITE_FLAGS;
+                }
+
+                Ok(we::epoll_event {
+                    events: flags as u32,
+                    data: we::epoll_data {
+                        u64_: ev.key as u64,
+                    },
+                })
+            })
+            .transpose()?;
         wepoll!(epoll_ctl(
             self.handle,
             op as c_int,

@@ -8,8 +8,10 @@
 //! - [poll](https://en.wikipedia.org/wiki/Poll_(Unix)): VxWorks, Fuchsia, other Unix systems
 //! - [wepoll](https://github.com/piscisaureus/wepoll): Windows, Wine (version 7.13+)
 //!
-//! Polling is done in oneshot mode, which means interest in I/O events needs to be re-enabled
-//! after an event is delivered if we're interested in the next event of the same kind.
+//! By default, polling is done in oneshot mode, which means interest in I/O events needs to
+//! be re-enabled after an event is delivered if we're interested in the next event of the same
+//! kind. However, level and edge triggered modes are also available for certain operating
+//! systems. See the documentation of the [`PollMode`] type for more information.
 //!
 //! Only one thread can be waiting for I/O events at a time.
 //!
@@ -127,6 +129,40 @@ pub struct Event {
     pub writable: bool,
 }
 
+/// The mode in which the poller waits for I/O events.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[non_exhaustive]
+pub enum PollMode {
+    /// Poll in oneshot mode.
+    ///
+    /// In this mode, the poller will only deliver one event per file descriptor or socket.
+    /// Once an event has been delivered, interest in the event needs to be re-enabled
+    /// by calling `Poller::modify` or `Poller::add`.
+    ///
+    /// This is the default mode.
+    Oneshot,
+
+    /// Poll in level-triggered mode.
+    ///
+    /// Once an event has been delivered, polling will continue to deliver that event
+    /// until interest in the event is disabled by calling `Poller::modify` or `Poller::delete`.
+    ///
+    /// Not all operating system support this mode. Trying to register a file descriptor with
+    /// this mode in an unsupported operating system will raise an error. You can check if
+    /// the operating system supports this mode by calling `Poller::supports_level`.
+    Level,
+
+    /// Poll in edge-triggered mode.
+    ///
+    /// Once an event has been delivered, polling will not deliver that event again unless
+    /// a new event occurs.
+    ///
+    /// Not all operating system support this mode. Trying to register a file descriptor with
+    /// this mode in an unsupported operating system will raise an error. You can check if
+    /// the operating system supports this mode by calling `Poller::supports_edge`.
+    Edge,
+}
+
 impl Event {
     /// All kinds of events (readable and writable).
     ///
@@ -199,6 +235,16 @@ impl Poller {
         })
     }
 
+    /// Tell whether or not this `Poller` supports level-triggered polling.
+    pub fn supports_level(&self) -> bool {
+        self.poller.supports_level()
+    }
+
+    /// Tell whether or not this `Poller` supports edge-triggered polling.
+    pub fn supports_edge(&self) -> bool {
+        self.poller.supports_edge()
+    }
+
     /// Adds a file descriptor or socket to the poller.
     ///
     /// A file descriptor or socket is considered readable or writable when a read or write
@@ -243,13 +289,31 @@ impl Poller {
     /// # std::io::Result::Ok(())
     /// ```
     pub fn add(&self, source: impl Source, interest: Event) -> io::Result<()> {
+        self.add_with_mode(source, interest, PollMode::Oneshot)
+    }
+
+    /// Adds a file descriptor or socket to the poller in the specified mode.
+    ///
+    /// This is identical to the `add()` function, but allows specifying the
+    /// polling mode to use for this socket.
+    ///
+    /// # Errors
+    ///
+    /// If the operating system does not support the specified mode, this function
+    /// will return an error.
+    pub fn add_with_mode(
+        &self,
+        source: impl Source,
+        interest: Event,
+        mode: PollMode,
+    ) -> io::Result<()> {
         if interest.key == NOTIFY_KEY {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 "the key is not allowed to be `usize::MAX`",
             ));
         }
-        self.poller.add(source.raw(), interest)
+        self.poller.add(source.raw(), interest, mode)
     }
 
     /// Modifies the interest in a file descriptor or socket.
@@ -321,13 +385,32 @@ impl Poller {
     /// # std::io::Result::Ok(())
     /// ```
     pub fn modify(&self, source: impl Source, interest: Event) -> io::Result<()> {
+        self.modify_with_mode(source, interest, PollMode::Oneshot)
+    }
+
+    /// Modifies interest in a file descriptor or socket to the poller, but with the
+    /// specified mode.
+    ///
+    /// This is identical to the `modify()` function, but allows specifying the
+    /// polling mode to use for this socket.
+    ///
+    /// # Errors
+    ///
+    /// If the operating system does not support the specified mode, this function
+    /// will return an error.
+    pub fn modify_with_mode(
+        &self,
+        source: impl Source,
+        interest: Event,
+        mode: PollMode,
+    ) -> io::Result<()> {
         if interest.key == NOTIFY_KEY {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 "the key is not allowed to be `usize::MAX`",
             ));
         }
-        self.poller.modify(source.raw(), interest)
+        self.poller.modify(source.raw(), interest, mode)
     }
 
     /// Removes a file descriptor or socket from the poller.
