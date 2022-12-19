@@ -2,7 +2,7 @@
 //!
 //! Supported platforms:
 //! - [epoll](https://en.wikipedia.org/wiki/Epoll): Linux, Android
-//! - [kqueue](https://en.wikipedia.org/wiki/Kqueue): macOS, iOS, FreeBSD, NetBSD, OpenBSD,
+//! - [kqueue](https://en.wikipedia.org/wiki/Kqueue): macOS, iOS, tvOS, watchOS, FreeBSD, NetBSD, OpenBSD,
 //!   DragonFly BSD
 //! - [event ports](https://illumos.org/man/port_create): illumos, Solaris
 //! - [poll](https://en.wikipedia.org/wiki/Poll_(Unix)): VxWorks, Fuchsia, other Unix systems
@@ -88,6 +88,8 @@ cfg_if! {
     } else if #[cfg(any(
         target_os = "macos",
         target_os = "ios",
+        target_os = "watchos",
+        target_os = "tvos",
         target_os = "freebsd",
         target_os = "netbsd",
         target_os = "openbsd",
