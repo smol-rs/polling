@@ -50,7 +50,7 @@ jobs:
     - name: Install Rust
       run: rustup update stable
     - name: Install cross
-      uses: taiki-e/install-action@v1
+      uses: taiki-e/install-action@v2
       with:
         # https://github.com/cross-rs/cross/issues/724
         tool: cross@0.2.1
