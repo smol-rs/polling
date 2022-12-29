@@ -76,7 +76,12 @@ macro_rules! syscall {
 }
 
 cfg_if! {
-    if #[cfg(any(target_os = "linux", target_os = "android"))] {
+    // Note: This cfg is intended to make it easy for polling developers to test
+    // the backend that uses poll, and is not a public API.
+    if #[cfg(polling_test_poll_backend)] {
+        mod poll;
+        use poll as sys;
+    } else if #[cfg(any(target_os = "linux", target_os = "android"))] {
         mod epoll;
         use epoll as sys;
     } else if #[cfg(any(
@@ -445,19 +450,22 @@ impl Poller {
     }
 }
 
-#[cfg(any(
-    target_os = "linux",
-    target_os = "android",
-    target_os = "illumos",
-    target_os = "solaris",
-    target_os = "macos",
-    target_os = "ios",
-    target_os = "tvos",
-    target_os = "watchos",
-    target_os = "freebsd",
-    target_os = "netbsd",
-    target_os = "openbsd",
-    target_os = "dragonfly",
+#[cfg(all(
+    any(
+        target_os = "linux",
+        target_os = "android",
+        target_os = "illumos",
+        target_os = "solaris",
+        target_os = "macos",
+        target_os = "ios",
+        target_os = "tvos",
+        target_os = "watchos",
+        target_os = "freebsd",
+        target_os = "netbsd",
+        target_os = "openbsd",
+        target_os = "dragonfly",
+    ),
+    not(polling_test_poll_backend),
 ))]
 #[cfg_attr(
     docsrs,

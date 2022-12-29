@@ -38,6 +38,12 @@ jobs:
         uses: taiki-e/install-action@cargo-hack
       - run: cargo build --all --all-features --all-targets
       - run: cargo test
+      - run: cargo test
+        env:
+          # Note: This cfg is intended to make it easy for polling developers to test
+          # the backend that uses poll, and is not a public API.
+          RUSTFLAGS: ${{ env.RUSTFLAGS }} --cfg polling_test_poll_backend
+        if: startsWith(matrix.os, 'ubuntu')
       - run: cargo hack build --feature-powerset --no-dev-deps
       - name: Clone async-io
         run: git clone https://github.com/smol-rs/async-io.git
