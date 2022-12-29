@@ -22,17 +22,20 @@ fn below_ms() -> io::Result<()> {
         lowest = lowest.min(elapsed);
     }
 
-    if cfg!(any(
-        target_os = "linux",
-        target_os = "android",
-        target_os = "macos",
-        target_os = "ios",
-        target_os = "tvos",
-        target_os = "watchos",
-        target_os = "freebsd",
-        target_os = "netbsd",
-        target_os = "openbsd",
-        target_os = "dragonfly",
+    if cfg!(all(
+        any(
+            target_os = "linux",
+            target_os = "android",
+            target_os = "macos",
+            target_os = "ios",
+            target_os = "tvos",
+            target_os = "watchos",
+            target_os = "freebsd",
+            target_os = "netbsd",
+            target_os = "openbsd",
+            target_os = "dragonfly",
+        ),
+        not(polling_test_poll_backend)
     )) {
         assert!(lowest < dur + margin);
     }
@@ -58,19 +61,22 @@ fn above_ms() -> io::Result<()> {
         lowest = lowest.min(elapsed);
     }
 
-    if cfg!(any(
-        target_os = "linux",
-        target_os = "android",
-        target_os = "illumos",
-        target_os = "solaris",
-        target_os = "macos",
-        target_os = "ios",
-        target_os = "tvos",
-        target_os = "watchos",
-        target_os = "freebsd",
-        target_os = "netbsd",
-        target_os = "openbsd",
-        target_os = "dragonfly",
+    if cfg!(all(
+        any(
+            target_os = "linux",
+            target_os = "android",
+            target_os = "illumos",
+            target_os = "solaris",
+            target_os = "macos",
+            target_os = "ios",
+            target_os = "tvos",
+            target_os = "watchos",
+            target_os = "freebsd",
+            target_os = "netbsd",
+            target_os = "openbsd",
+            target_os = "dragonfly",
+        ),
+        not(polling_test_poll_backend)
     )) {
         assert!(lowest < dur + margin);
     }
