@@ -79,11 +79,7 @@ impl Poller {
         }
 
         if let PollMode::Edge | PollMode::Level = mode {
-            return Err(io::Error::new(
-                #[cfg(not(polling_no_unsupported_error_kind))]
-                io::ErrorKind::Unsupported,
-                #[cfg(polling_no_unsupported_error_kind)]
-                io::ErrorKind::Other,
+            return Err(crate::unsupported_error(
                 "this kind of event is not supported with event ports",
             ));
         }

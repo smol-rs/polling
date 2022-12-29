@@ -652,3 +652,14 @@ cfg_if! {
         }
     }
 }
+
+#[allow(unused)]
+fn unsupported_error(err: impl Into<String>) -> io::Error {
+    io::Error::new(
+        #[cfg(not(polling_no_unsupported_error_kind))]
+        io::ErrorKind::Unsupported,
+        #[cfg(polling_no_unsupported_error_kind)]
+        io::ErrorKind::Other,
+        err.into(),
+    )
+}

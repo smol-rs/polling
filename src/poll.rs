@@ -153,19 +153,7 @@ impl Poller {
                 FdData {
                     poll_fds_index,
                     key: ev.key,
-                    remove: match mode {
-                        PollMode::Oneshot => true,
-                        PollMode::Level => false,
-                        PollMode::Edge => {
-                            return Err(io::Error::new(
-                                #[cfg(not(polling_no_unsupported_error_kind))]
-                                io::ErrorKind::Unsupported,
-                                #[cfg(polling_no_unsupported_error_kind)]
-                                io::ErrorKind::Other,
-                                "edge-triggered events are not supported with poll()",
-                            ))
-                        }
-                    },
+                    remove: cvt_mode_as_remove(mode)?,
                 },
             );
 
@@ -193,19 +181,7 @@ impl Poller {
             data.key = ev.key;
             let poll_fds_index = data.poll_fds_index;
             fds.poll_fds[poll_fds_index].0.events = poll_events(ev);
-            data.remove = match mode {
-                PollMode::Oneshot => true,
-                PollMode::Level => false,
-                PollMode::Edge => {
-                    return Err(io::Error::new(
-                        #[cfg(not(polling_no_unsupported_error_kind))]
-                        io::ErrorKind::Unsupported,
-                        #[cfg(polling_no_unsupported_error_kind)]
-                        io::ErrorKind::Other,
-                        "edge-triggered events are not supported with poll()",
-                    ))
-                }
-            };
+            data.remove = cvt_mode_as_remove(mode)?;
 
             Ok(())
         })
@@ -433,5 +409,15 @@ fn poll(fds: &mut [PollFd], deadline: Option<Instant>) -> io::Result<usize> {
             Err(e) if e.raw_os_error() == Some(libc::EAGAIN) => continue,
             Err(e) => return Err(e),
         }
+    }
+}
+
+fn cvt_mode_as_remove(mode: PollMode) -> io::Result<bool> {
+    match mode {
+        PollMode::Oneshot => Ok(true),
+        PollMode::Level => Ok(false),
+        PollMode::Edge => Err(crate::unsupported_error(
+            "edge-triggered I/O events are not supported in poll()",
+        )),
     }
 }
