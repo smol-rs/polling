@@ -94,7 +94,7 @@ impl Poller {
             notify_read_flags | libc::O_NONBLOCK
         ))?;
 
-        log::trace!(
+        tracing::trace!(
             "new: notify_read={}, notify_write={}",
             notify_pipe[0],
             notify_pipe[1]
@@ -123,7 +123,7 @@ impl Poller {
             return Err(io::Error::from(io::ErrorKind::InvalidInput));
         }
 
-        log::trace!(
+        tracing::trace!(
             "add: notify_read={}, fd={}, ev={:?}",
             self.notify_read,
             fd,
@@ -156,7 +156,7 @@ impl Poller {
 
     /// Modifies an existing file descriptor.
     pub fn modify(&self, fd: RawFd, ev: Event) -> io::Result<()> {
-        log::trace!(
+        tracing::trace!(
             "modify: notify_read={}, fd={}, ev={:?}",
             self.notify_read,
             fd,
@@ -175,7 +175,7 @@ impl Poller {
 
     /// Deletes a file descriptor.
     pub fn delete(&self, fd: RawFd) -> io::Result<()> {
-        log::trace!("delete: notify_read={}, fd={}", self.notify_read, fd);
+        tracing::trace!("delete: notify_read={}, fd={}", self.notify_read, fd);
 
         self.modify_fds(|fds| {
             let data = fds.fd_data.remove(&fd).ok_or(io::ErrorKind::NotFound)?;
@@ -193,7 +193,7 @@ impl Poller {
 
     /// Waits for I/O events with an optional timeout.
     pub fn wait(&self, events: &mut Events, timeout: Option<Duration>) -> io::Result<()> {
-        log::trace!(
+        tracing::trace!(
             "wait: notify_read={}, timeout={:?}",
             self.notify_read,
             timeout
@@ -223,7 +223,7 @@ impl Poller {
             let num_events = poll(&mut fds.poll_fds, deadline)?;
             let notified = fds.poll_fds[0].0.revents != 0;
             let num_fd_events = if notified { num_events - 1 } else { num_events };
-            log::trace!(
+            tracing::trace!(
                 "new events: notify_read={}, num={}",
                 self.notify_read,
                 num_events
@@ -275,7 +275,7 @@ impl Poller {
 
     /// Sends a notification to wake up the current or next `wait()` call.
     pub fn notify(&self) -> io::Result<()> {
-        log::trace!("notify: notify_read={}", self.notify_read);
+        tracing::trace!("notify: notify_read={}", self.notify_read);
 
         if !self.notified.swap(true, Ordering::SeqCst) {
             self.notify_inner()?;
@@ -299,7 +299,7 @@ impl Poller {
             let _ = self.pop_notification();
         }
 
-        let res = f(&mut *fds);
+        let res = f(&mut fds);
 
         if self.waiting_operations.fetch_sub(1, Ordering::SeqCst) == 1 {
             self.operations_complete.notify_one();
@@ -323,7 +323,7 @@ impl Poller {
 
 impl Drop for Poller {
     fn drop(&mut self) {
-        log::trace!("drop: notify_read={}", self.notify_read);
+        tracing::trace!("drop: notify_read={}", self.notify_read);
         let _ = syscall!(close(self.notify_read));
         let _ = syscall!(close(self.notify_write));
     }

@@ -49,7 +49,7 @@ impl Poller {
             },
         )?;
 
-        log::trace!(
+        tracing::trace!(
             "new: kqueue_fd={}, read_stream={:?}",
             kqueue_fd,
             poller.read_stream
@@ -66,7 +66,7 @@ impl Poller {
     /// Modifies an existing file descriptor.
     pub fn modify(&self, fd: RawFd, ev: Event) -> io::Result<()> {
         if fd != self.read_stream.as_raw_fd() {
-            log::trace!("add: kqueue_fd={}, fd={}, ev={:?}", self.kqueue_fd, fd, ev);
+            tracing::trace!("add: kqueue_fd={}, fd={}, ev={:?}", self.kqueue_fd, fd, ev);
         }
 
         let read_flags = if ev.readable {
@@ -132,7 +132,7 @@ impl Poller {
 
     /// Waits for I/O events with an optional timeout.
     pub fn wait(&self, events: &mut Events, timeout: Option<Duration>) -> io::Result<()> {
-        log::trace!("wait: kqueue_fd={}, timeout={:?}", self.kqueue_fd, timeout);
+        tracing::trace!("wait: kqueue_fd={}, timeout={:?}", self.kqueue_fd, timeout);
 
         // Convert the `Duration` to `libc::timespec`.
         let timeout = timeout.map(|t| libc::timespec {
@@ -155,7 +155,7 @@ impl Poller {
             }
         ))?;
         events.len = res as usize;
-        log::trace!("new events: kqueue_fd={}, res={}", self.kqueue_fd, res);
+        tracing::trace!("new events: kqueue_fd={}, res={}", self.kqueue_fd, res);
 
         // Clear the notification (if received) and re-register interest in it.
         while (&self.read_stream).read(&mut [0; 64]).is_ok() {}
@@ -173,7 +173,7 @@ impl Poller {
 
     /// Sends a notification to wake up the current or next `wait()` call.
     pub fn notify(&self) -> io::Result<()> {
-        log::trace!("notify: kqueue_fd={}", self.kqueue_fd);
+        tracing::trace!("notify: kqueue_fd={}", self.kqueue_fd);
         let _ = (&self.write_stream).write(&[1]);
         Ok(())
     }
@@ -195,7 +195,7 @@ impl AsFd for Poller {
 
 impl Drop for Poller {
     fn drop(&mut self) {
-        log::trace!("drop: kqueue_fd={}", self.kqueue_fd);
+        tracing::trace!("drop: kqueue_fd={}", self.kqueue_fd);
         let _ = self.delete(self.read_stream.as_raw_fd());
         let _ = syscall!(close(self.kqueue_fd));
     }

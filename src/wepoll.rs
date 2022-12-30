@@ -54,19 +54,19 @@ impl Poller {
             ));
         }
         let notified = AtomicBool::new(false);
-        log::trace!("new: handle={:?}", handle);
+        tracing::trace!("new: handle={:?}", handle);
         Ok(Poller { handle, notified })
     }
 
     /// Adds a socket.
     pub fn add(&self, sock: RawSocket, ev: Event) -> io::Result<()> {
-        log::trace!("add: handle={:?}, sock={}, ev={:?}", self.handle, sock, ev);
+        tracing::trace!("add: handle={:?}, sock={}, ev={:?}", self.handle, sock, ev);
         self.ctl(we::EPOLL_CTL_ADD, sock, Some(ev))
     }
 
     /// Modifies a socket.
     pub fn modify(&self, sock: RawSocket, ev: Event) -> io::Result<()> {
-        log::trace!(
+        tracing::trace!(
             "modify: handle={:?}, sock={}, ev={:?}",
             self.handle,
             sock,
@@ -77,7 +77,7 @@ impl Poller {
 
     /// Deletes a socket.
     pub fn delete(&self, sock: RawSocket) -> io::Result<()> {
-        log::trace!("remove: handle={:?}, sock={}", self.handle, sock);
+        tracing::trace!("remove: handle={:?}, sock={}", self.handle, sock);
         self.ctl(we::EPOLL_CTL_DEL, sock, None)
     }
 
@@ -88,7 +88,7 @@ impl Poller {
     /// If a notification occurs, this method will return but the notification event will not be
     /// included in the `events` list nor contribute to the returned count.
     pub fn wait(&self, events: &mut Events, timeout: Option<Duration>) -> io::Result<()> {
-        log::trace!("wait: handle={:?}, timeout={:?}", self.handle, timeout);
+        tracing::trace!("wait: handle={:?}, timeout={:?}", self.handle, timeout);
         let deadline = timeout.map(|t| Instant::now() + t);
 
         loop {
@@ -112,7 +112,7 @@ impl Poller {
                 events.list.len() as c_int,
                 timeout_ms,
             ))? as usize;
-            log::trace!("new events: handle={:?}, len={}", self.handle, events.len);
+            tracing::trace!("new events: handle={:?}, len={}", self.handle, events.len);
 
             // Break if there was a notification or at least one event, or if deadline is reached.
             if self.notified.swap(false, Ordering::SeqCst) || events.len > 0 || timeout_ms == 0 {
@@ -125,7 +125,7 @@ impl Poller {
 
     /// Sends a notification to wake up the current or next `wait()` call.
     pub fn notify(&self) -> io::Result<()> {
-        log::trace!("notify: handle={:?}", self.handle);
+        tracing::trace!("notify: handle={:?}", self.handle);
 
         if self
             .notified
@@ -194,7 +194,7 @@ impl AsHandle for Poller {
 
 impl Drop for Poller {
     fn drop(&mut self) {
-        log::trace!("drop: handle={:?}", self.handle);
+        tracing::trace!("drop: handle={:?}", self.handle);
         unsafe {
             we::epoll_close(self.handle);
         }

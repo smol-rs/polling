@@ -48,6 +48,11 @@ impl Poller {
             },
         )?;
 
+        tracing::trace!(
+            "new: port_fd={}, read_stream={:?}",
+            port_fd,
+            poller.read_stream
+        );
         Ok(poller)
     }
 
@@ -59,6 +64,10 @@ impl Poller {
 
     /// Modifies an existing file descriptor.
     pub fn modify(&self, fd: RawFd, ev: Event) -> io::Result<()> {
+        if fd != self.read_stream.as_raw_fd() {
+            tracing::trace!("modify: port_fd={}, fd={}, ev={:?}", self.port_fd, fd, ev);
+        }
+
         let mut flags = 0;
         if ev.readable {
             flags |= libc::POLLIN;
@@ -79,6 +88,10 @@ impl Poller {
 
     /// Deletes a file descriptor.
     pub fn delete(&self, fd: RawFd) -> io::Result<()> {
+        if fd != self.read_stream.as_raw_fd() {
+            tracing::trace!("delete: port_fd={}, fd={}", self.port_fd, fd);
+        }
+
         if let Err(e) = syscall!(port_dissociate(
             self.port_fd,
             libc::PORT_SOURCE_FD,
@@ -95,6 +108,8 @@ impl Poller {
 
     /// Waits for I/O events with an optional timeout.
     pub fn wait(&self, events: &mut Events, timeout: Option<Duration>) -> io::Result<()> {
+        tracing::trace!("wait: port_fd={}, timeout={:?}", self.port_fd, timeout);
+
         let mut timeout = timeout.map(|t| libc::timespec {
             tv_sec: t.as_secs() as libc::time_t,
             tv_nsec: t.subsec_nanos() as libc::c_long,
@@ -123,6 +138,7 @@ impl Poller {
             },
             Ok(_) => nget as usize,
         };
+        tracing::trace!("new events: port_fd={}, nevents={}", self.port_fd, nevents);
         events.len = nevents;
 
         // Clear the notification (if received) and re-register interest in it.
@@ -141,6 +157,7 @@ impl Poller {
 
     /// Sends a notification to wake up the current or next `wait()` call.
     pub fn notify(&self) -> io::Result<()> {
+        tracing::trace!("notify: port_fd={}", self.port_fd);
         let _ = (&self.write_stream).write(&[1]);
         Ok(())
     }
@@ -162,6 +179,7 @@ impl AsFd for Poller {
 
 impl Drop for Poller {
     fn drop(&mut self) {
+        tracing::trace!("drop: port_fd={}", self.port_fd);
         let _ = self.delete(self.read_stream.as_raw_fd());
         let _ = syscall!(close(self.port_fd));
     }

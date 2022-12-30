@@ -79,7 +79,7 @@ impl Poller {
             },
         )?;
 
-        log::trace!(
+        tracing::trace!(
             "new: epoll_fd={}, event_fd={}, timer_fd={:?}",
             epoll_fd,
             event_fd,
@@ -90,25 +90,25 @@ impl Poller {
 
     /// Adds a new file descriptor.
     pub fn add(&self, fd: RawFd, ev: Event) -> io::Result<()> {
-        log::trace!("add: epoll_fd={}, fd={}, ev={:?}", self.epoll_fd, fd, ev);
+        tracing::trace!("add: epoll_fd={}, fd={}, ev={:?}", self.epoll_fd, fd, ev);
         self.ctl(libc::EPOLL_CTL_ADD, fd, Some(ev))
     }
 
     /// Modifies an existing file descriptor.
     pub fn modify(&self, fd: RawFd, ev: Event) -> io::Result<()> {
-        log::trace!("modify: epoll_fd={}, fd={}, ev={:?}", self.epoll_fd, fd, ev);
+        tracing::trace!("modify: epoll_fd={}, fd={}, ev={:?}", self.epoll_fd, fd, ev);
         self.ctl(libc::EPOLL_CTL_MOD, fd, Some(ev))
     }
 
     /// Deletes a file descriptor.
     pub fn delete(&self, fd: RawFd) -> io::Result<()> {
-        log::trace!("remove: epoll_fd={}, fd={}", self.epoll_fd, fd);
+        tracing::trace!("remove: epoll_fd={}, fd={}", self.epoll_fd, fd);
         self.ctl(libc::EPOLL_CTL_DEL, fd, None)
     }
 
     /// Waits for I/O events with an optional timeout.
     pub fn wait(&self, events: &mut Events, timeout: Option<Duration>) -> io::Result<()> {
-        log::trace!("wait: epoll_fd={}, timeout={:?}", self.epoll_fd, timeout);
+        tracing::trace!("wait: epoll_fd={}, timeout={:?}", self.epoll_fd, timeout);
 
         if let Some(timer_fd) = self.timer_fd {
             // Configure the timeout using timerfd.
@@ -165,7 +165,7 @@ impl Poller {
             timeout_ms as libc::c_int,
         ))?;
         events.len = res as usize;
-        log::trace!("new events: epoll_fd={}, res={}", self.epoll_fd, res);
+        tracing::trace!("new events: epoll_fd={}, res={}", self.epoll_fd, res);
 
         // Clear the notification (if received) and re-register interest in it.
         let mut buf = [0u8; 8];
@@ -187,7 +187,7 @@ impl Poller {
 
     /// Sends a notification to wake up the current or next `wait()` call.
     pub fn notify(&self) -> io::Result<()> {
-        log::trace!(
+        tracing::trace!(
             "notify: epoll_fd={}, event_fd={}",
             self.epoll_fd,
             self.event_fd
@@ -245,7 +245,7 @@ impl AsFd for Poller {
 
 impl Drop for Poller {
     fn drop(&mut self) {
-        log::trace!(
+        tracing::trace!(
             "drop: epoll_fd={}, event_fd={}, timer_fd={:?}",
             self.epoll_fd,
             self.event_fd,
