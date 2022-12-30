@@ -83,7 +83,7 @@ impl Poller {
         let mode_flags = match mode {
             PollMode::Oneshot => libc::EV_ONESHOT,
             PollMode::Level => 0,
-            PollMode::Edge => libc::EV_DISPATCH,
+            PollMode::Edge => libc::EV_CLEAR,
         };
 
         let read_flags = if ev.readable {

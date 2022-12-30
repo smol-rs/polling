@@ -388,16 +388,21 @@ impl Poller {
         self.modify_with_mode(source, interest, PollMode::Oneshot)
     }
 
-    /// Modifies interest in a file descriptor or socket to the poller, but with the
-    /// specified mode.
+    /// Modifies interest in a file descriptor or socket to the poller, but with the specified
+    /// mode.
     ///
-    /// This is identical to the `modify()` function, but allows specifying the
-    /// polling mode to use for this socket.
+    /// This is identical to the `modify()` function, but allows specifying the polling mode
+    /// to use for this socket.
+    ///
+    /// # Performance Notes
+    ///
+    /// This function can be used to change a source from one polling mode to another. However,
+    /// on some platforms, this switch can cause delays in the delivery of events.
     ///
     /// # Errors
     ///
-    /// If the operating system does not support the specified mode, this function
-    /// will return an error.
+    /// If the operating system does not support the specified mode, this function will return
+    /// an error.
     pub fn modify_with_mode(
         &self,
         source: impl Source,
