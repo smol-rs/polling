@@ -9,7 +9,7 @@ use std::time::Duration;
 #[cfg(not(polling_no_io_safety))]
 use std::os::unix::io::{AsFd, BorrowedFd};
 
-use crate::Event;
+use crate::{Event, PollMode};
 
 /// Interface to epoll.
 #[derive(Debug)]
@@ -67,7 +67,7 @@ impl Poller {
         };
 
         if let Some(timer_fd) = timer_fd {
-            poller.add(timer_fd, Event::none(crate::NOTIFY_KEY))?;
+            poller.add(timer_fd, Event::none(crate::NOTIFY_KEY), PollMode::Oneshot)?;
         }
 
         poller.add(
@@ -77,6 +77,7 @@ impl Poller {
                 readable: true,
                 writable: false,
             },
+            PollMode::Oneshot,
         )?;
 
         log::trace!(
@@ -88,16 +89,26 @@ impl Poller {
         Ok(poller)
     }
 
+    /// Whether this poller supports level-triggered events.
+    pub fn supports_level(&self) -> bool {
+        true
+    }
+
+    /// Whether the poller supports edge-triggered events.
+    pub fn supports_edge(&self) -> bool {
+        true
+    }
+
     /// Adds a new file descriptor.
-    pub fn add(&self, fd: RawFd, ev: Event) -> io::Result<()> {
+    pub fn add(&self, fd: RawFd, ev: Event, mode: PollMode) -> io::Result<()> {
         log::trace!("add: epoll_fd={}, fd={}, ev={:?}", self.epoll_fd, fd, ev);
-        self.ctl(libc::EPOLL_CTL_ADD, fd, Some(ev))
+        self.ctl(libc::EPOLL_CTL_ADD, fd, Some((ev, mode)))
     }
 
     /// Modifies an existing file descriptor.
-    pub fn modify(&self, fd: RawFd, ev: Event) -> io::Result<()> {
+    pub fn modify(&self, fd: RawFd, ev: Event, mode: PollMode) -> io::Result<()> {
         log::trace!("modify: epoll_fd={}, fd={}, ev={:?}", self.epoll_fd, fd, ev);
-        self.ctl(libc::EPOLL_CTL_MOD, fd, Some(ev))
+        self.ctl(libc::EPOLL_CTL_MOD, fd, Some((ev, mode)))
     }
 
     /// Deletes a file descriptor.
@@ -140,6 +151,7 @@ impl Poller {
                     readable: true,
                     writable: false,
                 },
+                PollMode::Oneshot,
             )?;
         }
 
@@ -181,6 +193,7 @@ impl Poller {
                 readable: true,
                 writable: false,
             },
+            PollMode::Oneshot,
         )?;
         Ok(())
     }
@@ -203,9 +216,13 @@ impl Poller {
     }
 
     /// Passes arguments to `epoll_ctl`.
-    fn ctl(&self, op: libc::c_int, fd: RawFd, ev: Option<Event>) -> io::Result<()> {
-        let mut ev = ev.map(|ev| {
-            let mut flags = libc::EPOLLONESHOT;
+    fn ctl(&self, op: libc::c_int, fd: RawFd, ev: Option<(Event, PollMode)>) -> io::Result<()> {
+        let mut ev = ev.map(|(ev, mode)| {
+            let mut flags = match mode {
+                PollMode::Oneshot => libc::EPOLLONESHOT,
+                PollMode::Level => 0,
+                PollMode::Edge => libc::EPOLLET,
+            };
             if ev.readable {
                 flags |= read_flags();
             }

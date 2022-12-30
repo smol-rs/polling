@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 // std::os::unix doesn't exist on Fuchsia
 use libc::c_int as RawFd;
 
-use crate::Event;
+use crate::{Event, PollMode};
 
 /// Interface to poll.
 #[derive(Debug)]
@@ -77,6 +77,8 @@ struct FdData {
     poll_fds_index: usize,
     /// The key of the `Event` associated with this file descriptor.
     key: usize,
+    /// Whether to remove this file descriptor from the poller on the next call to `wait`.
+    remove: bool,
 }
 
 impl Poller {
@@ -117,8 +119,18 @@ impl Poller {
         })
     }
 
+    /// Whether this poller supports level-triggered events.
+    pub fn supports_level(&self) -> bool {
+        true
+    }
+
+    /// Whether the poller supports edge-triggered events.
+    pub fn supports_edge(&self) -> bool {
+        false
+    }
+
     /// Adds a new file descriptor.
-    pub fn add(&self, fd: RawFd, ev: Event) -> io::Result<()> {
+    pub fn add(&self, fd: RawFd, ev: Event, mode: PollMode) -> io::Result<()> {
         if fd == self.notify_read || fd == self.notify_write {
             return Err(io::Error::from(io::ErrorKind::InvalidInput));
         }
@@ -141,6 +153,7 @@ impl Poller {
                 FdData {
                     poll_fds_index,
                     key: ev.key,
+                    remove: cvt_mode_as_remove(mode)?,
                 },
             );
 
@@ -155,7 +168,7 @@ impl Poller {
     }
 
     /// Modifies an existing file descriptor.
-    pub fn modify(&self, fd: RawFd, ev: Event) -> io::Result<()> {
+    pub fn modify(&self, fd: RawFd, ev: Event, mode: PollMode) -> io::Result<()> {
         log::trace!(
             "modify: notify_read={}, fd={}, ev={:?}",
             self.notify_read,
@@ -168,6 +181,7 @@ impl Poller {
             data.key = ev.key;
             let poll_fds_index = data.poll_fds_index;
             fds.poll_fds[poll_fds_index].0.events = poll_events(ev);
+            data.remove = cvt_mode_as_remove(mode)?;
 
             Ok(())
         })
@@ -257,8 +271,10 @@ impl Poller {
                             readable: poll_fd.revents & READ_REVENTS != 0,
                             writable: poll_fd.revents & WRITE_REVENTS != 0,
                         });
-                        // Remove interest
-                        poll_fd.events = 0;
+                        // Remove interest if necessary
+                        if fd_data.remove {
+                            poll_fd.events = 0;
+                        }
 
                         if events.inner.len() == num_fd_events {
                             break;
@@ -299,7 +315,7 @@ impl Poller {
             let _ = self.pop_notification();
         }
 
-        let res = f(&mut *fds);
+        let res = f(&mut fds);
 
         if self.waiting_operations.fetch_sub(1, Ordering::SeqCst) == 1 {
             self.operations_complete.notify_one();
@@ -393,5 +409,15 @@ fn poll(fds: &mut [PollFd], deadline: Option<Instant>) -> io::Result<usize> {
             Err(e) if e.raw_os_error() == Some(libc::EAGAIN) => continue,
             Err(e) => return Err(e),
         }
+    }
+}
+
+fn cvt_mode_as_remove(mode: PollMode) -> io::Result<bool> {
+    match mode {
+        PollMode::Oneshot => Ok(true),
+        PollMode::Level => Ok(false),
+        PollMode::Edge => Err(crate::unsupported_error(
+            "edge-triggered I/O events are not supported in poll()",
+        )),
     }
 }

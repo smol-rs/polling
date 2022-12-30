@@ -10,7 +10,7 @@ use std::time::Duration;
 #[cfg(not(polling_no_io_safety))]
 use std::os::unix::io::{AsFd, BorrowedFd};
 
-use crate::Event;
+use crate::{Event, PollMode};
 
 /// Interface to kqueue.
 #[derive(Debug)]
@@ -47,6 +47,7 @@ impl Poller {
                 readable: true,
                 writable: false,
             },
+            PollMode::Oneshot,
         )?;
 
         log::trace!(
@@ -57,25 +58,41 @@ impl Poller {
         Ok(poller)
     }
 
+    /// Whether this poller supports level-triggered events.
+    pub fn supports_level(&self) -> bool {
+        true
+    }
+
+    /// Whether this poller supports edge-triggered events.
+    pub fn supports_edge(&self) -> bool {
+        true
+    }
+
     /// Adds a new file descriptor.
-    pub fn add(&self, fd: RawFd, ev: Event) -> io::Result<()> {
+    pub fn add(&self, fd: RawFd, ev: Event, mode: PollMode) -> io::Result<()> {
         // File descriptors don't need to be added explicitly, so just modify the interest.
-        self.modify(fd, ev)
+        self.modify(fd, ev, mode)
     }
 
     /// Modifies an existing file descriptor.
-    pub fn modify(&self, fd: RawFd, ev: Event) -> io::Result<()> {
+    pub fn modify(&self, fd: RawFd, ev: Event, mode: PollMode) -> io::Result<()> {
         if fd != self.read_stream.as_raw_fd() {
             log::trace!("add: kqueue_fd={}, fd={}, ev={:?}", self.kqueue_fd, fd, ev);
         }
 
+        let mode_flags = match mode {
+            PollMode::Oneshot => libc::EV_ONESHOT,
+            PollMode::Level => 0,
+            PollMode::Edge => libc::EV_CLEAR,
+        };
+
         let read_flags = if ev.readable {
-            libc::EV_ADD | libc::EV_ONESHOT
+            libc::EV_ADD | mode_flags
         } else {
             libc::EV_DELETE
         };
         let write_flags = if ev.writable {
-            libc::EV_ADD | libc::EV_ONESHOT
+            libc::EV_ADD | mode_flags
         } else {
             libc::EV_DELETE
         };
@@ -127,7 +144,7 @@ impl Poller {
     /// Deletes a file descriptor.
     pub fn delete(&self, fd: RawFd) -> io::Result<()> {
         // Simply delete interest in the file descriptor.
-        self.modify(fd, Event::none(0))
+        self.modify(fd, Event::none(0), PollMode::Oneshot)
     }
 
     /// Waits for I/O events with an optional timeout.
@@ -166,6 +183,7 @@ impl Poller {
                 readable: true,
                 writable: false,
             },
+            PollMode::Oneshot,
         )?;
 
         Ok(())
