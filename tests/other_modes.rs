@@ -188,14 +188,18 @@ fn ping_source_edge_check() {
 
     // Write to the first writer.
     writer1.write_all(&[1]).unwrap();
-    poller.wait(&mut events, Some(Duration::from_secs(10))).unwrap();
+    poller
+        .wait(&mut events, Some(Duration::from_secs(10)))
+        .unwrap();
     assert_eq!(events, [Event::readable(1)]);
     reader1.read_exact(&mut [0; 1]).unwrap();
 
     // Write to the second writer.
     writer2.write_all(&[1]).unwrap();
     events.clear();
-    poller.wait(&mut events, Some(Duration::from_secs(10))).unwrap();
+    poller
+        .wait(&mut events, Some(Duration::from_secs(10)))
+        .unwrap();
     assert_eq!(events, [Event::readable(2)]);
     reader2.read_exact(&mut [0; 1]).unwrap();
 
@@ -203,7 +207,9 @@ fn ping_source_edge_check() {
     writer1.write_all(&[1]).unwrap();
     writer2.write_all(&[1]).unwrap();
     events.clear();
-    poller.wait(&mut events, Some(Duration::from_secs(10))).unwrap();
+    poller
+        .wait(&mut events, Some(Duration::from_secs(10)))
+        .unwrap();
 
     // Order is not guaranteed.
     assert_eq!(events.len(), 2);
