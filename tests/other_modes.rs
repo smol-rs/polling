@@ -162,6 +162,58 @@ fn edge_triggered() {
     assert_eq!(events, [Event::readable(reader_token)]);
 }
 
+#[cfg_attr(
+    any(target_os = "solaris", target_os = "illumos"),
+    ignore = "Solaris doesn't support level triggered mode"
+)]
+#[test]
+fn ping_source_edge_check() {
+    // Create two ping sources.
+    let (mut reader1, mut writer1) = tcp_pair().unwrap();
+    let (mut reader2, mut writer2) = tcp_pair().unwrap();
+
+    reader1.set_nonblocking(true).unwrap();
+    reader2.set_nonblocking(true).unwrap();
+
+    // Create our poller and register our streams.
+    let poller = Poller::new().unwrap();
+    poller
+        .add_with_mode(&reader1, Event::readable(1), PollMode::Level)
+        .unwrap();
+    poller
+        .add_with_mode(&reader2, Event::readable(2), PollMode::Level)
+        .unwrap();
+
+    let mut events = vec![];
+
+    // Write to the first writer.
+    writer1.write_all(&[1]).unwrap();
+    poller.wait(&mut events, Some(Duration::from_secs(10))).unwrap();
+    assert_eq!(events, [Event::readable(1)]);
+    reader1.read_exact(&mut [0; 1]).unwrap();
+
+    // Write to the second writer.
+    writer2.write_all(&[1]).unwrap();
+    events.clear();
+    poller.wait(&mut events, Some(Duration::from_secs(10))).unwrap();
+    assert_eq!(events, [Event::readable(2)]);
+    reader2.read_exact(&mut [0; 1]).unwrap();
+
+    // Write to both at once.
+    writer1.write_all(&[1]).unwrap();
+    writer2.write_all(&[1]).unwrap();
+    events.clear();
+    poller.wait(&mut events, Some(Duration::from_secs(10))).unwrap();
+
+    // Order is not guaranteed.
+    assert_eq!(events.len(), 2);
+    assert!(events.contains(&Event::readable(1)));
+    assert!(events.contains(&Event::readable(2)));
+
+    reader1.read_exact(&mut [0; 1]).unwrap();
+    reader2.read_exact(&mut [0; 1]).unwrap();
+}
+
 fn tcp_pair() -> io::Result<(TcpStream, TcpStream)> {
     let listener = TcpListener::bind("127.0.0.1:0")?;
     let a = TcpStream::connect(listener.local_addr()?)?;
