@@ -113,8 +113,9 @@ cfg_if! {
         mod poll;
         use poll as sys;
     } else if #[cfg(target_os = "windows")] {
+        mod iocp;
         mod wepoll;
-        use wepoll as sys;
+        use iocp as sys;
     } else {
         compile_error!("polling does not support this target OS");
     }

@@ -42,12 +42,7 @@ impl Poller {
     pub fn new() -> io::Result<Poller> {
         let handle = unsafe { we::epoll_create1(0) };
         if handle.is_null() {
-            return Err(crate::unsupported_error(
-                format!(
-                    "Failed to initialize Wepoll: {}\nThis usually only happens for old Windows or Wine.",
-                    io::Error::last_os_error()
-                )
-            ));
+            return Err(todo!());
         }
         let notified = AtomicBool::new(false);
         log::trace!("new: handle={:?}", handle);
