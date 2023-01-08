@@ -213,7 +213,7 @@ impl Poller {
             timeout
         );
 
-        let deadline = timeout.map(|t| Instant::now() + t);
+        let deadline = timeout.and_then(|t| Instant::now().checked_add(t));
 
         events.inner.clear();
 

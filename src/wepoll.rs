@@ -95,7 +95,7 @@ impl Poller {
     /// included in the `events` list nor contribute to the returned count.
     pub fn wait(&self, events: &mut Events, timeout: Option<Duration>) -> io::Result<()> {
         log::trace!("wait: handle={:?}, timeout={:?}", self.handle, timeout);
-        let deadline = timeout.map(|t| Instant::now() + t);
+        let deadline = timeout.and_then(|t| Instant::now().checked_add(t));
 
         loop {
             // Convert the timeout to milliseconds.
