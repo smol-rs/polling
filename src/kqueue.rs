@@ -80,12 +80,7 @@ impl Poller {
             log::trace!("add: kqueue_fd={}, fd={}, ev={:?}", self.kqueue_fd, fd, ev);
         }
 
-        let mode_flags = match mode {
-            PollMode::Oneshot => libc::EV_ONESHOT,
-            PollMode::Level => 0,
-            PollMode::Edge => libc::EV_CLEAR,
-        };
-
+        let mode_flags = poll_mode_to_flag(mode);
         let read_flags = if ev.readable {
             libc::EV_ADD | mode_flags
         } else {
@@ -115,19 +110,58 @@ impl Poller {
             },
         ];
 
+        self.change(changelist)
+    }
+
+    /// Add a signal to the poller.
+    pub(super) fn add_signal(&self, signal: i32, token: usize, mode: PollMode) -> io::Result<()> {
+        log::trace!(
+            "add_signal: kqueue_fd={}, signal={}, token={}",
+            self.kqueue_fd,
+            signal,
+            token
+        );
+
+        let mode_flags = poll_mode_to_flag(mode);
+        let flags = libc::EV_ADD | libc::EV_RECEIPT | mode_flags;
+
+        // A list of changes for kqueue.
+        let changelist = [libc::kevent {
+            ident: signal as _,
+            filter: libc::EVFILT_SIGNAL,
+            flags,
+            udata: token as _,
+            ..unsafe { mem::zeroed() }
+        }];
+
+        self.change(changelist)
+    }
+
+    /// Submit the following changelist to the kernel.
+    #[inline]
+    fn change(
+        &self,
+        changelist: impl Copy + AsRef<[libc::kevent]> + AsMut<[libc::kevent]>,
+    ) -> io::Result<()> {
         // Apply changes.
         let mut eventlist = changelist;
-        syscall!(kevent(
-            self.kqueue_fd,
-            changelist.as_ptr() as *const libc::kevent,
-            changelist.len() as _,
-            eventlist.as_mut_ptr() as *mut libc::kevent,
-            eventlist.len() as _,
-            ptr::null(),
-        ))?;
+
+        {
+            let changelist = changelist.as_ref();
+            let eventlist = eventlist.as_mut();
+
+            syscall!(kevent(
+                self.kqueue_fd,
+                changelist.as_ptr() as *const libc::kevent,
+                changelist.len() as _,
+                eventlist.as_mut_ptr() as *mut libc::kevent,
+                eventlist.len() as _,
+                ptr::null(),
+            ))?;
+        }
 
         // Check for errors.
-        for ev in &eventlist {
+        for ev in eventlist.as_mut() {
             // Explanation for ignoring EPIPE: https://github.com/tokio-rs/mio/issues/582
             if (ev.flags & libc::EV_ERROR) != 0
                 && ev.data != 0
@@ -244,9 +278,18 @@ impl Events {
         // https://github.com/golang/go/commit/23aad448b1e3f7c3b4ba2af90120bde91ac865b4
         self.list[..self.len].iter().map(|ev| Event {
             key: ev.udata as usize,
-            readable: ev.filter == libc::EVFILT_READ,
+            readable: ev.filter == libc::EVFILT_READ || ev.filter == libc::EVFILT_SIGNAL,
             writable: ev.filter == libc::EVFILT_WRITE
                 || (ev.filter == libc::EVFILT_READ && (ev.flags & libc::EV_EOF) != 0),
         })
+    }
+}
+
+/// Convert a poll mode to a `kqueue` flag.
+fn poll_mode_to_flag(mode: PollMode) -> libc::c_ushort {
+    match mode {
+        PollMode::Oneshot => libc::EV_ONESHOT,
+        PollMode::Level => 0,
+        PollMode::Edge => libc::EV_DISPATCH,
     }
 }

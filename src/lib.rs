@@ -538,6 +538,70 @@ impl Poller {
     }
 }
 
+/// OS-specific functionality for the types in this crate.
+pub mod os {
+    /// OS-specific functionality for platforms that use `kqueue`.
+    ///
+    /// These platforms include:
+    ///
+    /// - macOS/iOS/tvOS/watchOS
+    /// - FreeBSD/OpenBSD/NetBSD/DragonFlyBSD
+    #[cfg(all(
+        any(
+            target_os = "macos",
+            target_os = "ios",
+            target_os = "tvos",
+            target_os = "watchos",
+            target_os = "freebsd",
+            target_os = "netbsd",
+            target_os = "openbsd",
+            target_os = "dragonfly",
+        ),
+        not(polling_test_poll_backend),
+    ))]
+    #[cfg_attr(
+        docsrs,
+        doc(cfg(any(
+            target_os = "macos",
+            target_os = "ios",
+            target_os = "tvos",
+            target_os = "watchos",
+            target_os = "freebsd",
+            target_os = "netbsd",
+            target_os = "openbsd",
+            target_os = "dragonfly",
+        )))
+    )]
+    pub mod kqueue {
+        use crate::{PollMode, Poller};
+        use std::io;
+
+        /// An extension trait for [`Poller`] that uses `kqueue` to implement the [`Poller`].
+        ///
+        /// [`Poller`]: crate::Poller
+        pub trait PollerExt: __sealed::Sealed {
+            /// Register a signal in this poller.
+            ///
+            /// Once the application receives the signal, it will be returned in the next `wait` call
+            /// with the provided `key` as a `readable` event.
+            fn add_signal(&self, signal: i32, key: usize, mode: PollMode) -> io::Result<()>;
+        }
+
+        impl __sealed::Sealed for Poller {}
+
+        impl PollerExt for Poller {
+            fn add_signal(&self, signal: i32, key: usize, mode: PollMode) -> io::Result<()> {
+                self.poller.add_signal(signal, key, mode)
+            }
+        }
+
+        mod __sealed {
+            #[doc(hidden)]
+            pub trait Sealed {}
+        }
+    }
+}
+
 #[cfg(all(
     any(
         target_os = "linux",
