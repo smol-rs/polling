@@ -18,7 +18,7 @@ pub struct Poller {
     kqueue_fd: RawFd,
 
     /// Notification pipe for waking up the poller.
-    /// 
+    ///
     /// On platforms that support `EVFILT_USER`, this uses that to wake up the poller. Otherwise, it
     /// uses a pipe.
     notify: notify::Notify,
@@ -273,7 +273,7 @@ mod notify {
             poller.submit_changes([libc::kevent {
                 ident: 0,
                 filter: libc::EVFILT_USER,
-                flags: libc::EV_RECEIPT | libc::EV_CLEAR,
+                flags: libc::EV_ADD | libc::EV_RECEIPT | libc::EV_CLEAR,
                 udata: crate::NOTIFY_KEY as _,
                 ..unsafe { mem::zeroed() }
             }])
@@ -291,7 +291,7 @@ mod notify {
             poller.submit_changes([libc::kevent {
                 ident: 0,
                 filter: libc::EVFILT_USER,
-                flags: libc::EV_RECEIPT | libc::EV_CLEAR,
+                flags: libc::EV_ADD | libc::EV_RECEIPT,
                 fflags: libc::NOTE_TRIGGER,
                 udata: crate::NOTIFY_KEY as _,
                 ..unsafe { mem::zeroed() }
