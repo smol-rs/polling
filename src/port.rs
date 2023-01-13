@@ -1,8 +1,7 @@
 //! Bindings to event port (illumos, Solaris).
 
-use std::io::{self, Read, Write};
+use std::io;
 use std::os::unix::io::{AsRawFd, RawFd};
-use std::os::unix::net::UnixStream;
 use std::ptr;
 use std::time::Duration;
 
@@ -16,10 +15,6 @@ use crate::{Event, PollMode};
 pub struct Poller {
     /// File descriptor for the port instance.
     port_fd: RawFd,
-    /// Read side of a pipe for consuming notifications.
-    read_stream: UnixStream,
-    /// Write side of a pipe for producing notifications.
-    write_stream: UnixStream,
 }
 
 impl Poller {
@@ -29,27 +24,7 @@ impl Poller {
         let flags = syscall!(fcntl(port_fd, libc::F_GETFD))?;
         syscall!(fcntl(port_fd, libc::F_SETFD, flags | libc::FD_CLOEXEC))?;
 
-        // Set up the notification pipe.
-        let (read_stream, write_stream) = UnixStream::pair()?;
-        read_stream.set_nonblocking(true)?;
-        write_stream.set_nonblocking(true)?;
-
-        let poller = Poller {
-            port_fd,
-            read_stream,
-            write_stream,
-        };
-        poller.add(
-            poller.read_stream.as_raw_fd(),
-            Event {
-                key: crate::NOTIFY_KEY,
-                readable: true,
-                writable: false,
-            },
-            PollMode::Oneshot,
-        )?;
-
-        Ok(poller)
+        Ok(Poller { port_fd })
     }
 
     /// Whether this poller supports level-triggered events.
@@ -143,24 +118,18 @@ impl Poller {
         };
         events.len = nevents;
 
-        // Clear the notification (if received) and re-register interest in it.
-        while (&self.read_stream).read(&mut [0; 64]).is_ok() {}
-        self.modify(
-            self.read_stream.as_raw_fd(),
-            Event {
-                key: crate::NOTIFY_KEY,
-                readable: true,
-                writable: false,
-            },
-            PollMode::Oneshot,
-        )?;
-
         Ok(())
     }
 
     /// Sends a notification to wake up the current or next `wait()` call.
     pub fn notify(&self) -> io::Result<()> {
-        let _ = (&self.write_stream).write(&[1]);
+        // Use port_send to send a notification to the port.
+        syscall!(port_send(
+            self.port_fd,
+            libc::PORT_SOURCE_USER,
+            crate::NOTIFY_KEY as _
+        ))?;
+
         Ok(())
     }
 }
@@ -181,7 +150,6 @@ impl AsFd for Poller {
 
 impl Drop for Poller {
     fn drop(&mut self) {
-        let _ = self.delete(self.read_stream.as_raw_fd());
         let _ = syscall!(close(self.port_fd));
     }
 }
