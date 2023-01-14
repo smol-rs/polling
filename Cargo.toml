@@ -33,10 +33,7 @@ libc = "0.2.77"
 
 [target.'cfg(windows)'.dependencies]
 async-lock = "2.6.0"
-io-lifetimes = "1.0.3"
 pin-project-lite = "0.2.9"
-slab = "0.4.7"
-wepoll-ffi = { version = "0.1.2", features = ["null-overlapped-wakeups-patch"] }
 
 [target.'cfg(windows)'.dependencies.windows-sys]
 version = "0.45"

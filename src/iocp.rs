@@ -1,45 +1,53 @@
-//! Bindings to IOCP (Windows).
+//! Bindings to I/O Completion Ports (Windows).
+//!
+//! I/O Completion Ports are an API in Windows that enables asynchronous I/O. However, this interface
+//! is completion-based, not event based. This is incompatible with the event-based interface
+//! of `polling`. However, Windows exposes an undocumented, unstable interface called '\Device\Afd'
+//! that emits I/O completion events when readiness signals are available. This module uses that
+//! interface to emulate event-based I/O.
+//!
+//! There is little danger of this interface changing, since it is also used by Node.js.
+//! (Recommendation: It may be wise to monitor `libuv` in case any changes do become necessary.)
+//!
+//! Previously, this crate used `wepoll`, which also used this strategy.
 
 /// Safe bindings to the Windows API.
 mod syscalls {
     use async_lock::OnceCell;
-    use io_lifetimes::{
-        AsHandle, AsSocket, BorrowedHandle, BorrowedSocket, OwnedHandle, OwnedSocket,
-    };
 
-    use std::cell::{Cell, UnsafeCell};
+    use std::cell::UnsafeCell;
     use std::fmt;
     use std::io;
     use std::marker::{PhantomData, PhantomPinned};
     use std::mem::{self, MaybeUninit};
-    use std::os::windows::prelude::{AsRawHandle, AsRawSocket, FromRawHandle, RawSocket, RawHandle};
+    use std::os::windows::prelude::{AsRawHandle, RawHandle, RawSocket};
     use std::pin::Pin;
     use std::ptr;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
 
-    use windows_sys::Win32::Foundation::DuplicateHandle;
+    use windows_sys::Win32::Foundation::{CloseHandle, GetLastError};
     use windows_sys::Win32::Foundation::{HANDLE, HINSTANCE, NTSTATUS, UNICODE_STRING};
     use windows_sys::Win32::Foundation::{
         INVALID_HANDLE_VALUE, STATUS_CANCELLED, STATUS_NOT_FOUND, STATUS_PENDING, STATUS_SUCCESS,
     };
 
     use windows_sys::Win32::Networking::WinSock::WSAIoctl;
-    use windows_sys::Win32::Networking::WinSock::{SIO_BASE_HANDLE, SOCKET_ERROR};
+    use windows_sys::Win32::Networking::WinSock::{
+        INVALID_SOCKET, SIO_BASE_HANDLE, SIO_BSP_HANDLE_POLL, SOCKET_ERROR, WSAENOTSOCK,
+    };
 
     use windows_sys::Win32::Storage::FileSystem::SetFileCompletionNotificationModes;
-    use windows_sys::Win32::Storage::FileSystem::NT_CREATE_FILE_DISPOSITION;
     use windows_sys::Win32::Storage::FileSystem::{
         FILE_OPEN, FILE_SHARE_READ, FILE_SHARE_WRITE, SYNCHRONIZE,
     };
 
+    use windows_sys::Win32::System::IO::OVERLAPPED_ENTRY;
     use windows_sys::Win32::System::IO::{
         CreateIoCompletionPort, GetQueuedCompletionStatusEx, PostQueuedCompletionStatus,
     };
-    use windows_sys::Win32::System::IO::{OVERLAPPED, OVERLAPPED_ENTRY};
 
     use windows_sys::Win32::System::LibraryLoader::{GetModuleHandleA, GetProcAddress};
-    use windows_sys::Win32::System::Threading::GetCurrentProcess;
 
     use windows_sys::Win32::System::WindowsProgramming::FILE_SKIP_SET_EVENT_ON_HANDLE;
     use windows_sys::Win32::System::WindowsProgramming::{
@@ -48,6 +56,7 @@ mod syscalls {
 
     pub(super) use windows_sys::Win32::System::WindowsProgramming::INFINITE;
 
+    #[allow(clippy::upper_case_acronyms)]
     pub(super) type ULONG = u32;
 
     /// Macro for defining a structure that contains function pointers to the unsafe Win32 functions.
@@ -100,12 +109,14 @@ mod syscalls {
     }
 
     ntdll_import! {
+        /// Cancel an ongoing file operation.
         fn NtCancelIoFileEx(
             FileHandle: HANDLE,
             IoRequestToCancel: *mut IO_STATUS_BLOCK,
             IoStatusBlock: *mut IO_STATUS_BLOCK,
         ) -> NTSTATUS;
 
+        /// Create a new file handle.
         fn NtCreateFile(
             FileHandle: *mut HANDLE,
             DesiredAccess: u32,
@@ -120,6 +131,9 @@ mod syscalls {
             EaLength: ULONG,
         ) -> NTSTATUS;
 
+        /// Call a command associated with a file.
+        ///
+        /// This is similar to Linux's `ioctl` function.
         fn NtDeviceIoControlFile(
             FileHandle: HANDLE,
             Event: HANDLE,
@@ -133,6 +147,7 @@ mod syscalls {
             OutputBufferLength: ULONG,
         ) -> NTSTATUS;
 
+        /// Convert an `NTSTATUS` to a Win32 error code.
         fn RtlNtStatusToDosError(
             Status: NTSTATUS,
         ) -> ULONG;
@@ -141,9 +156,9 @@ mod syscalls {
     impl NtdllImports {
         /// Get the global instance of `NtdllImports`.
         fn get() -> io::Result<&'static NtdllImports> {
-            static NTDLL_IMPORTS: OnceCell<Result<NtdllImports, io::Error>> = OnceCell::new();
+            static NTDLL_IMPORTS: OnceCell<NtdllImports> = OnceCell::new();
 
-            let result = NTDLL_IMPORTS.get_or_init_blocking(|| unsafe {
+            NTDLL_IMPORTS.get_or_try_init_blocking(|| unsafe {
                 // Get a handle to ntdll.dll.
                 let ntdll = GetModuleHandleA("ntdll.dll\0".as_ptr() as *const _);
                 if ntdll == 0 {
@@ -152,24 +167,58 @@ mod syscalls {
 
                 // Load the imports.
                 NtdllImports::load(ntdll)
-            });
-
-            match result {
-                Ok(imports) => Ok(imports),
-                Err(e) => Err(io::Error::from(e.kind())),
-            }
+            })
         }
     }
 
+    /// Get the last Win32 error.
+    pub(super) fn last_error() -> u32 {
+        unsafe { GetLastError() }
+    }
+
     /// Get the base socket for a `BorrowedSocket` type.
-    fn base_socket(sock: BorrowedSocket<'_>) -> io::Result<RawSocket> {
+    ///
+    /// The AFD driver only operates on base sockets, so we need to convert the socket to a base
+    /// socket before we can use it.
+    ///
+    /// # I/O Safety
+    ///
+    /// `sock` must be a valid socket.
+    fn base_socket(sock: RawSocket) -> io::Result<RawSocket> {
+        // Try to get the base socket.
+        if let Ok(base) = unsafe { try_ioctl(sock, SIO_BASE_HANDLE) } {
+            return Ok(base);
+        }
+
+        if last_error() == WSAENOTSOCK as _ {
+            return Err(io::Error::from_raw_os_error(WSAENOTSOCK));
+        }
+
+        // Some buggy systems handle SIO_BASE_HANDLE improperly. However, we can try to get at
+        // the base socket by bypassing the current layer with SIO_BSP_HANDLE_POLL, and then
+        // getting the base handle of that.
+        let poll_handle = unsafe { try_ioctl(sock, SIO_BSP_HANDLE_POLL)? };
+        if poll_handle == sock {
+            return Err(io::Error::last_os_error());
+        }
+
+        // Try again.
+        unsafe { try_ioctl(poll_handle, SIO_BASE_HANDLE) }
+    }
+
+    /// Run the IOCTL on a socket.
+    ///
+    /// # Safety
+    ///
+    /// The IOCTL must return a socket.
+    unsafe fn try_ioctl(sock: RawSocket, ioctl: u32) -> io::Result<RawSocket> {
         let mut socket: MaybeUninit<RawSocket> = MaybeUninit::uninit();
         let mut bytes: MaybeUninit<u32> = MaybeUninit::uninit();
 
         let result = unsafe {
             WSAIoctl(
-                sock.as_raw_socket() as _,
-                SIO_BASE_HANDLE,
+                sock as _,
+                ioctl,
                 ptr::null_mut(),
                 0,
                 socket.as_mut_ptr() as *mut _,
@@ -183,7 +232,14 @@ mod syscalls {
         if result == SOCKET_ERROR {
             Err(io::Error::last_os_error())
         } else {
-            Ok(unsafe { socket.assume_init() })
+            let socket = unsafe { socket.assume_init() };
+
+            // Also check for invalid sockets.
+            if socket == INVALID_SOCKET as _ || socket == 0 {
+                Err(io::Error::last_os_error())
+            } else {
+                Ok(socket)
+            }
         }
     }
 
@@ -200,23 +256,23 @@ mod syscalls {
     /// The poll handle structure the AFD expects.
     #[repr(C)]
     pub(super) struct AfdPollHandleInfo {
-        pub(super) handle: RawSocket,
-        pub(super) events: ULONG,
-        pub(super) status: NTSTATUS,
+        handle: RawSocket,
+        events: ULONG,
+        status: NTSTATUS,
     }
 
     /// The poll info structure the AFD expects.
     #[repr(C)]
     pub(super) struct AfdPollInfo {
-        pub(super) timeout: i64,
-        pub(super) number_of_handles: ULONG,
-        pub(super) exclusive: i8,
-        pub(super) handles: [AfdPollHandleInfo; 1],
+        timeout: i64,
+        number_of_handles: ULONG,
+        exclusive: i8,
+        handles: [AfdPollHandleInfo; 1],
     }
 
     pin_project_lite::pin_project! {
-        /// A type that contains an AFD poll info structure.
-        pub struct AfdWrapper {
+        /// A wrapper around AFD information.
+        pub struct AfdInfo {
             // AFD polling info.
             //
             // This is wrapped in `UnsafeCell` to indicate that it may be changed outside of Rust's
@@ -225,15 +281,24 @@ mod syscalls {
             poll_info: UnsafeCell<AfdPollInfo>,
 
             // The raw base socket.
+            //
+            // Since this belongs (strangely) to another socket, we shouldn't close it.
             base_socket: RawSocket,
+
+            // This type needs to be `!Unpin`, since it contains data that is invalidated on move.
+            #[pin]
+            _pinned: PhantomPinned,
         }
     }
 
-    impl AfdWrapper {
-        /// Create a new `AfdWrapper` around a socket type.
-        pub(super) fn new(socket: &impl AsSocket) -> io::Result<Self> {
+    unsafe impl Send for AfdInfo {}
+    unsafe impl Sync for AfdInfo {}
+
+    impl AfdInfo {
+        /// Create a new `AfdInfo` for a socket type.
+        pub(super) fn new(socket: RawSocket) -> io::Result<Self> {
             // Get the base socket.
-            let base_socket = base_socket(socket.as_socket())?;
+            let base_socket = base_socket(socket)?;
 
             // Create the poll info.
             let poll_info = AfdPollInfo {
@@ -250,6 +315,7 @@ mod syscalls {
             Ok(Self {
                 poll_info: UnsafeCell::new(poll_info),
                 base_socket,
+                _pinned: PhantomPinned,
             })
         }
 
@@ -262,7 +328,7 @@ mod syscalls {
             &*self.poll_info.get()
         }
 
-        /// Replenish the AFD poll info structure.
+        /// Replenish the AFD poll info structure in preparation for another poll.
         ///
         /// # Safety
         ///
@@ -282,27 +348,51 @@ mod syscalls {
             };
         }
 
+        /// Get a raw pointer to the AFD information.
+        ///
+        /// Since we are `Pin`ned, we shouldn't be able to move, so the pointer should never be
+        /// invalidated mid operation.
         fn afd_info(self: Pin<&Self>) -> *mut AfdPollInfo {
             self.project_ref().poll_info.get()
         }
     }
 
     /// A type that contains an AFD poll info structure.
+    ///
+    /// This is used to allow types with other external data to be used with AFD.
     pub(super) trait AfdCompatible {
         /// Get the AFD poll info structure.
-        fn afd_info(self: Pin<&Self>) -> Pin<&AfdWrapper>;
+        fn afd_info(self: Pin<&Self>) -> Pin<&AfdInfo>;
 
         /// The AFD events that we want to poll.
         fn afd_events(&self) -> ULONG;
     }
 
     /// Wrapper around the `\Device\Afd` device.
+    ///
+    /// The '\Device\Afd' device is used to poll sockets for events. By submitting a poll operation,
+    /// we can wait for a socket to become readable or writable using IOCP.
+    ///
+    /// This is an unstable system API. However, the only other alternative is to either a). rewrite
+    /// futures to use a completion model or b). have a fleet of threads that are each dedicated to
+    /// `poll`ing one single socket. Neither of these options are particularly appealing; however,
+    /// in the future we may want to add the second one as an alternative for users who don't want to
+    /// rely on unstable APIs, or are using platforms without AFD available (Windows XP?).
     pub(super) struct Afd<T> {
         /// Handle to the AFD device.
-        handle: OwnedHandle,
+        handle: HANDLE,
 
         /// Capture the `T` generic.
         _marker: PhantomData<Pin<Arc<T>>>,
+    }
+
+    impl<T> Drop for Afd<T> {
+        fn drop(&mut self) {
+            // Ignore errors.
+            unsafe {
+                CloseHandle(self.handle);
+            }
+        }
     }
 
     impl<T> fmt::Debug for Afd<T> {
@@ -311,9 +401,9 @@ mod syscalls {
         }
     }
 
-    impl<T> AsHandle for Afd<T> {
-        fn as_handle(&self) -> BorrowedHandle<'_> {
-            self.handle.as_handle()
+    impl<T> AsRawHandle for Afd<T> {
+        fn as_raw_handle(&self) -> RawHandle {
+            self.handle as _
         }
     }
 
@@ -364,9 +454,11 @@ mod syscalls {
             };
 
             // Create the file handle.
-            let mut handle: MaybeUninit<OwnedHandle> = MaybeUninit::uninit();
+            let mut handle: MaybeUninit<HANDLE> = MaybeUninit::uninit();
             let mut status_block: MaybeUninit<IO_STATUS_BLOCK> = MaybeUninit::uninit();
 
+            // Creating a file handle without any extended attributes (using `NtCreateFile`) allows
+            // us to open a handle for communication with the AFD driver.
             let status = unsafe {
                 NtdllImports::get()?.NtCreateFile(
                     handle.as_mut_ptr() as *mut _,
@@ -395,6 +487,8 @@ mod syscalls {
         }
 
         /// Begin polling the provided AFD info structure on this AFD.
+        ///
+        /// This clones the `iosb` and uses its pointer as an IOSB submission.
         pub(super) fn poll(&self, iosb: &StatusBlock<T>) -> io::Result<()>
         where
             T: AfdCompatible,
@@ -421,22 +515,28 @@ mod syscalls {
             }
 
             // Clear out state in the IOSB.
+            // SAFETY:
+            //  - Since we are now "pending", other users won't access the raw IOSB's fields.
+            //  - We haven't begun an operation yet, so we can access the raw AFD fields.
+            let iosb = iosb.clone();
             unsafe {
-                iosb.user_data().afd_info().replenish(iosb.user_data().afd_events());
+                iosb.user_data()
+                    .afd_info()
+                    .replenish(iosb.user_data().afd_events());
                 let iosb = &mut *iosb.status_block().get();
                 iosb.Anonymous.Status = STATUS_PENDING;
             }
 
             let poll_info = iosb.user_data().afd_info().afd_info();
 
-            // Poll the AFD.
+            // Poll the AFD using the IOCTL_AFD_POLL control.
             let status = unsafe {
                 NtdllImports::get()?.NtDeviceIoControlFile(
-                    self.handle.as_raw_handle() as HANDLE,
+                    self.handle,
                     0,
                     None,
                     ptr::null_mut(),
-                    iosb.status_block().get(),
+                    iosb.into_ptr() as _,
                     IOCTL_AFD_POLL,
                     poll_info as _,
                     mem::size_of::<AfdPollInfo>() as _,
@@ -444,6 +544,8 @@ mod syscalls {
                     mem::size_of::<AfdPollInfo>() as _,
                 )
             };
+
+            // SAFETY: The reference to the IOSB is now held by AFD; into_ptr prevents refcount from dropping.
 
             match status {
                 STATUS_SUCCESS => Ok(()),
@@ -457,9 +559,8 @@ mod syscalls {
 
         /// Cancel the pending operation on this AFD.
         ///
-        /// # Safety
-        ///
-        /// `iosb` must be an `IO_STATUS_BLOCK` structure that was passed to `poll`.
+        /// This function will raise an error if the operation is not pending, or if the
+        /// operation is not registered in this AFD.
         pub(super) fn cancel(&self, iosb: &StatusBlock<T>) -> io::Result<()>
         where
             T: AfdCompatible,
@@ -483,7 +584,7 @@ mod syscalls {
             let mut cancel_iosb = MaybeUninit::uninit();
             let status = unsafe {
                 NtdllImports::get()?.NtCancelIoFileEx(
-                    self.handle.as_raw_handle() as HANDLE,
+                    self.handle,
                     iosb.status_block().get(),
                     cancel_iosb.as_mut_ptr(),
                 )
@@ -499,26 +600,36 @@ mod syscalls {
     }
 
     /// Wrapper around an I/O completion port.
+    ///
+    /// I/O completion ports are the standard way of polling operations in Windows.
     pub(super) struct IoCompletionPort<T> {
         /// The handle to the I/O completion port.
-        handle: OwnedHandle,
+        handle: HANDLE,
 
         /// Captures the `T` type parameter.
         _marker: PhantomData<T>,
     }
 
+    impl<T> Drop for IoCompletionPort<T> {
+        fn drop(&mut self) {
+            unsafe {
+                CloseHandle(self.handle);
+            }
+        }
+    }
+
     impl<T> fmt::Debug for IoCompletionPort<T> {
         fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-            struct DebugHandle<'a>(BorrowedHandle<'a>);
+            struct DebugHandle(HANDLE);
 
-            impl fmt::Debug for DebugHandle<'_> {
+            impl fmt::Debug for DebugHandle {
                 fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                    fmt::Pointer::fmt(&self.0.as_raw_handle(), f)
+                    write!(f, "{:#010x}", self.0)
                 }
             }
 
             f.debug_tuple("IoCompletionPort")
-                .field(&DebugHandle(self.handle.as_handle()))
+                .field(&DebugHandle(self.handle))
                 .finish()
         }
     }
@@ -534,7 +645,7 @@ mod syscalls {
             }
 
             Ok(Self {
-                handle: unsafe { OwnedHandle::from_raw_handle(handle as _) },
+                handle,
                 _marker: PhantomData,
             })
         }
@@ -542,13 +653,12 @@ mod syscalls {
         /// Register a handle with the I/O completion port.
         pub(super) fn register(
             &self,
-            handle: &impl AsHandle,
+            handle: &impl AsRawHandle,
             skip_set_event: bool,
         ) -> io::Result<()> {
             // Register the handle.
-            let raw = handle.as_handle().as_raw_handle() as _;
-            let handle =
-                unsafe { CreateIoCompletionPort(raw, self.handle.as_raw_handle() as _, 0, 0) };
+            let raw = handle.as_raw_handle() as _;
+            let handle = unsafe { CreateIoCompletionPort(raw, self.handle, 0, 0) };
 
             if handle == 0 {
                 return Err(io::Error::last_os_error());
@@ -568,16 +678,12 @@ mod syscalls {
         }
 
         /// Post a new completion packet to the I/O completion port.
-        pub(super) fn post(&self, sb: StatusBlock<T>) -> io::Result<()> {
+        pub(super) fn post(&self, sb: &StatusBlock<T>) -> io::Result<()> {
+            let sb = sb.clone();
+
             // Post the completion packet.
-            let status = unsafe {
-                PostQueuedCompletionStatus(
-                    self.handle.as_raw_handle() as _,
-                    0,
-                    0,
-                    sb.status_block().get() as _,
-                )
-            };
+            let status =
+                unsafe { PostQueuedCompletionStatus(self.handle, 0, 0, sb.into_ptr() as _) };
 
             if status == 0 {
                 return Err(io::Error::last_os_error());
@@ -587,20 +693,22 @@ mod syscalls {
         }
 
         /// Get the next completion packets from the I/O completion port.
+        ///
+        /// `timeout` is in milliseconds. Returns the number of entries initialized.
         pub(super) fn wait(
             &self,
             entries: &mut OverlappedBuffer<T>,
             timeout: u32,
         ) -> io::Result<usize> {
             // Wait for the completion packets.
-            let mut num_entries = 0;
+            let mut num_entries = MaybeUninit::uninit();
 
             let status = unsafe {
                 GetQueuedCompletionStatusEx(
-                    self.handle.as_raw_handle() as _,
+                    self.handle,
                     entries.as_mut_ptr() as _,
                     entries.capacity() as _,
-                    &mut num_entries,
+                    num_entries.as_mut_ptr(),
                     timeout,
                     false as _,
                 )
@@ -612,26 +720,25 @@ mod syscalls {
             }
 
             // Update the number of entries.
+            let num_entries = unsafe { num_entries.assume_init() as usize };
             unsafe {
-                entries.entries.set_len(num_entries as _);
+                entries.entries.set_len(num_entries);
             }
-            Ok(num_entries as _)
+            Ok(num_entries)
         }
     }
 
     impl<T> AsRawHandle for IoCompletionPort<T> {
         fn as_raw_handle(&self) -> RawHandle {
-            self.handle.as_raw_handle()
-        }
-    }
-
-    impl<T> AsHandle for IoCompletionPort<T> {
-        fn as_handle(&self) -> BorrowedHandle<'_> {
-            self.handle.as_handle()
+            self.handle as _
         }
     }
 
     /// An `IO_STATUS_BLOCK` entry combined with a user data type.
+    ///
+    /// This type is a reference counted heap allocation. During I/O operations, it is actively
+    /// owned by the I/O completion port. When the I/O operation completes, the I/O completion port
+    /// will return a reference to the `StatusBlock` to the caller through the `OverlappedBuffer`.
     pub(super) struct StatusBlock<T>(Pin<Arc<IosbInner<T>>>);
 
     impl<T: fmt::Debug> fmt::Debug for StatusBlock<T> {
@@ -675,11 +782,16 @@ mod syscalls {
         }
     }
 
+    // SAFETY: All access to `UnsafeCell` is synchronized.
+    unsafe impl<T: Send + Sync> Send for IosbInner<T> {}
+    unsafe impl<T: Send + Sync> Sync for IosbInner<T> {}
+
+    /// The current state of the I/O operation.
     #[repr(usize)]
     #[derive(Debug, Copy, Clone, PartialEq, Eq)]
     pub(super) enum IosbState {
         /// The I/O operation has completed.
-        Completed = 0,
+        Idle = 0,
 
         /// The I/O operation is pending.
         Pending = 1,
@@ -691,7 +803,7 @@ mod syscalls {
     impl From<usize> for IosbState {
         fn from(value: usize) -> Self {
             match value {
-                0 => Self::Completed,
+                0 => Self::Idle,
                 1 => Self::Pending,
                 2 => Self::Cancelled,
                 _ => unreachable!(),
@@ -705,6 +817,18 @@ mod syscalls {
         }
     }
 
+    /// The result of an IOSB operation.
+    pub(super) enum IosbResult {
+        /// The operation completed successfully.
+        Success,
+
+        /// The operation was cancelled.
+        Cancelled,
+
+        /// The operation is still pending.
+        Pending,
+    }
+
     impl<T> StatusBlock<T> {
         /// Create a new `StatusBlock` with the given user data.
         pub(super) fn new(data: T) -> Self {
@@ -714,7 +838,7 @@ mod syscalls {
                     iosb.Anonymous.Status = STATUS_PENDING;
                     UnsafeCell::new(iosb)
                 },
-                state: AtomicUsize::new(IosbState::Completed.into()),
+                state: AtomicUsize::new(IosbState::Idle.into()),
                 data,
                 _pin: PhantomPinned,
             }))
@@ -725,23 +849,25 @@ mod syscalls {
             self.0.state.load(Ordering::Acquire).into()
         }
 
-        /// Was this block cancelled in its last operation?
-        pub(super) fn cancelled(&self) -> bool {
-            assert_eq!(self.state(), IosbState::Completed);
+        /// Get the status block's I/O result.
+        ///
+        /// # Panics
+        ///
+        /// If the operation is still pending, this function will panic.
+        pub(super) fn result(&self) -> io::Result<IosbResult> {
+            assert_ne!(self.state(), IosbState::Pending);
 
             unsafe {
+                // SAFETY: Our toes are not being stepped on.
                 let iosb = self.0.iosb.get();
-                (*iosb).Anonymous.Status == STATUS_CANCELLED
-            }
-        }
+                let status = (*iosb).Anonymous.Status;
 
-        /// Did this block have an error?
-        pub(super) fn error(&self) -> bool {
-            assert_eq!(self.state(), IosbState::Completed);
-
-            unsafe {
-                let iosb = self.0.iosb.get();
-                (*iosb).Anonymous.Status != STATUS_SUCCESS
+                match status {
+                    STATUS_SUCCESS => Ok(IosbResult::Success),
+                    STATUS_CANCELLED => Ok(IosbResult::Cancelled),
+                    STATUS_PENDING => Ok(IosbResult::Pending),
+                    err => Err(io::Error::from_raw_os_error(err as _)),
+                }
             }
         }
 
@@ -761,18 +887,40 @@ mod syscalls {
         pub(super) fn user_data(&self) -> Pin<&T> {
             self.0.as_ref().project_ref().data
         }
+
+        /// Are two `StatusBlock` instances equal?
+        pub(super) fn ptr_eq(a: &Self, b: &Self) -> bool {
+            unsafe {
+                Arc::ptr_eq(
+                    &*(a as *const _ as *const Arc<IosbInner<T>>),
+                    &*(b as *const _ as *const Arc<IosbInner<T>>),
+                )
+            }
+        }
     }
 
     impl<T: AfdCompatible> StatusBlock<T> {
         /// Get the AFD block associated with this `StatusBlock`.
-        pub(super) fn afd_block(&self) -> &AfdPollInfo{
-            assert_eq!(self.state(), IosbState::Completed);
+        fn afd_block(&self) -> &AfdPollInfo {
+            assert_ne!(self.state(), IosbState::Pending);
 
             unsafe { self.user_data().afd_info().afd_handle() }
+        }
+
+        /// Get the `number_of_handles` field of the AFD block.
+        pub(super) fn number_of_handles(&self) -> u32 {
+            self.afd_block().number_of_handles
+        }
+
+        /// Get the `events` field of the AFD block.
+        pub(super) fn events(&self) -> u32 {
+            self.afd_block().handles[0].events
         }
     }
 
     /// A buffer for `OVERLAPPED_ENTRY` structures.
+    ///
+    /// This is used to hold the result of an I/O completion port wait operation.
     pub(super) struct OverlappedBuffer<T> {
         /// Unmovable vector of `OVERLAPPED_ENTRY` structures.
         ///
@@ -781,8 +929,11 @@ mod syscalls {
         entries: Vec<OVERLAPPED_ENTRY>,
 
         /// `OVERLAPPED_ENTRY` contains several `Arc<T>`'s.
-        _marker: PhantomData<Vec<Pin<Arc<T>>>>,
+        _marker: PhantomData<Vec<StatusBlock<T>>>,
     }
+
+    unsafe impl<T: Send + Sync> Send for OverlappedBuffer<T> {}
+    unsafe impl<T: Send + Sync> Sync for OverlappedBuffer<T> {}
 
     impl<T> OverlappedBuffer<T> {
         /// Create a new `OverlappedBuffer` with the given capacity.
@@ -825,7 +976,7 @@ mod syscalls {
                 // Mark the I/O operation as completed.
                 iosb.0
                     .state
-                    .store(IosbState::Completed.into(), Ordering::Release);
+                    .store(IosbState::Idle.into(), Ordering::Release);
 
                 iosb
             })
@@ -858,23 +1009,20 @@ mod syscalls {
 
 use crate::{Event, PollMode};
 
-use io_lifetimes::BorrowedSocket;
-use slab::Slab;
-
 use std::collections::{HashMap, VecDeque};
 use std::convert::TryInto;
-use std::io;
 use std::fmt;
-use std::os::windows::io::{RawSocket, AsRawHandle};
+use std::io;
+use std::os::windows::io::{AsRawHandle, RawHandle, RawSocket};
 use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use syscalls::{Afd, AfdCompatible, AfdWrapper, IoCompletionPort, OverlappedBuffer};
-use windows_sys::Win32::Foundation::{STATUS_SUCCESS, GetLastError, ERROR_INVALID_HANDLE};
-
-use self::syscalls::{IosbState, AFD_POLL_LOCAL_CLOSE};
+use syscalls::{
+    Afd, AfdCompatible, AfdInfo, IoCompletionPort, IosbResult, IosbState, OverlappedBuffer,
+};
+use windows_sys::Win32::Foundation::ERROR_INVALID_HANDLE;
 
 /// Interface to IOCP.
 #[derive(Debug)]
@@ -886,31 +1034,33 @@ pub(crate) struct Poller {
     notify_status_block: StatusBlock,
 
     /// The list of AFD handles we're using to poll sockets.
+    ///
+    /// Each AFD handle has a limited number of sockets that can be polled at once, so we need to
+    /// create multiple AFD handles to poll more sockets.
     afd_handles: Mutex<Vec<Arc<Afd<Notification>>>>,
 
     /// Map between the raw sockets and their associated completion handles.
+    ///
+    /// Handles not in this map may still be being actively polled.
     socket_map: Mutex<HashMap<RawSocket, StatusBlock>>,
 
     /// Queue of sockets waiting to be updated.
     update_queue: Mutex<VecDeque<StatusBlock>>,
-
-    /// List of sockets waiting to be deleted.
-    waiting_for_delete: Mutex<Slab<StatusBlock>>,
 
     /// The number of concurrent polling operations that currently exist on this poller.
     wait_count: AtomicUsize,
 }
 
 impl AsRawHandle for Poller {
-    fn as_raw_handle(&self) -> std::os::windows::io::RawHandle {
-        todo!()
+    fn as_raw_handle(&self) -> RawHandle {
+        self.iocp.as_raw_handle()
     }
 }
 
 #[cfg(not(polling_no_io_safety))]
 impl std::os::windows::io::AsHandle for Poller {
     fn as_handle(&self) -> std::os::windows::io::BorrowedHandle<'_> {
-        self.iocp.as_handle()
+        unsafe { std::os::windows::io::BorrowedHandle::borrow_raw(self.iocp.as_raw_handle()) }
     }
 }
 
@@ -939,7 +1089,6 @@ impl Poller {
             afd_handles: Mutex::new(Vec::new()),
             socket_map: Mutex::new(HashMap::new()),
             update_queue: Mutex::new(VecDeque::new()),
-            waiting_for_delete: Mutex::new(Slab::new()),
             wait_count: AtomicUsize::new(0),
         })
     }
@@ -951,6 +1100,11 @@ impl Poller {
 
     /// Whether this poller supports edge-triggered events.
     pub fn supports_edge(&self) -> bool {
+        // If we had control over the I/O operations, it would be possible to support edge
+        // triggered mode. The idea would be:
+        //  - When we receive an event, clear that event and only that event from the interest.
+        //  - When the I/O encounters `WouldBlock`, set the event back to the interest.
+        // This would also be possible to do with the `poll()` backend.
         false
     }
 
@@ -965,7 +1119,7 @@ impl Poller {
         let status_block = StatusBlock::new(Notification::Socket {
             sock: SocketState {
                 raw: socket,
-                afd_poll: AfdWrapper::new(&unsafe { BorrowedSocket::borrow_raw(socket) })?,
+                afd_poll: AfdInfo::new(socket)?,
                 afd_handle: afd,
                 events: Mutex::new(EventState {
                     interest,
@@ -973,20 +1127,21 @@ impl Poller {
                     write_pending: false,
                     mode,
                 }),
-                deletion_index: AtomicUsize::new(usize::MAX),
-                _pinned: core::marker::PhantomPinned
-            }
+                delete: AtomicBool::new(false),
+                _pinned: core::marker::PhantomPinned,
+            },
         });
 
         // Add it to the update queue.
-        self.update_queue.lock().unwrap().push_back(status_block.clone());
-
-        // Add the socket to the socket map.
-        self.socket_map
+        self.update_queue
             .lock()
             .unwrap()
-            .insert(socket, status_block);
+            .push_back(status_block.clone());
 
+        // Add the socket to the socket map.
+        self.socket_map.lock().unwrap().insert(socket, status_block);
+
+        // Update it now if we're mid-poll.
         self.update_if_polling()?;
 
         Ok(())
@@ -1014,14 +1169,7 @@ impl Poller {
         let mut socket_map = self.socket_map.lock().unwrap();
         if let Some(status_block) = socket_map.remove(&socket) {
             // Queue for deletion.
-            let index = self.waiting_for_delete.lock().unwrap().insert(status_block.clone());
-
-            match status_block.user_data().project_ref() {
-                NotificationProj::Socket { sock } => {
-                    sock.deletion_index.store(index, Ordering::SeqCst);
-                }
-                _ => unreachable!(),
-            }
+            status_block.delete(self)?;
         }
 
         self.update_if_polling()?;
@@ -1043,10 +1191,10 @@ impl Poller {
         self.update_sockets()?;
 
         // We are currently waiting; indicate as such.
-        self.wait_count.fetch_add(1, Ordering::SeqCst);
+        self.wait_count.fetch_add(1, Ordering::Relaxed);
         let _poll_guard = CallOnDrop(|| {
             // Drop the guard; we are no longer waiting.
-            self.wait_count.fetch_sub(1, Ordering::SeqCst);
+            self.wait_count.fetch_sub(1, Ordering::Release);
         });
 
         loop {
@@ -1093,16 +1241,30 @@ impl Poller {
 
     /// Notify the poller.
     pub fn notify(&self) -> io::Result<()> {
-        self.iocp.post(self.notify_status_block.clone())
+        // Post a notification to the IOCP.
+        self.iocp.post(&self.notify_status_block)
     }
 
     /// Run updates for every socket that is waiting to be updated.
     fn update_sockets(&self) -> io::Result<()> {
-        self.update_queue
-            .lock()
-            .unwrap()
+        // Take out the update queue to prevent mutex contention.
+        let mut update_queue = std::mem::take(&mut *self.update_queue.lock().unwrap());
+
+        // Poll every socket.
+        let result = update_queue
             .drain(..)
-            .try_for_each(|status_block| status_block.update(self))
+            .try_for_each(|status_block| status_block.update(self));
+
+        // Reuse capacity if possible.
+        if let Ok(mut lock) = self.update_queue.try_lock() {
+            let mut new_updates = std::mem::replace(&mut *lock, update_queue);
+
+            if !new_updates.is_empty() {
+                lock.append(&mut new_updates);
+            }
+        }
+
+        result
     }
 
     /// Run updates for the sockets if we are in the middle of polling.
@@ -1128,20 +1290,23 @@ impl Poller {
             return Ok(afd.clone());
         }
 
-        // Otherwise, make a new one.
+        // Otherwise, make a new handle.
         let afd = {
             let afd = Afd::new().map_err(|e| {
-            // Return a more descriptive error message for Wine users.
-            crate::unsupported_error(
-                format!(
-                    "Failed to initialize polling: {}\nThis usually only happens for old Windows or Wine.",
-                    e
+                // Return a more descriptive error message for Wine users.
+                crate::unsupported_error(
+                    format!(
+                        "Failed to initialize polling: {}\nThis usually only happens for old Windows or Wine.",
+                        e
+                    )
                 )
-            )
-        })?;
+            })?;
 
             Arc::new(afd)
         };
+
+        // Register it in our IOCP.
+        self.iocp.register(&*afd, true)?;
 
         // Add it to the list.
         afd_handles.push(afd.clone());
@@ -1166,12 +1331,6 @@ impl Events {
             buffer: OverlappedBuffer::new(1024),
             events: Vec::new(),
         }
-    }
-
-    /// Clear the events.
-    pub fn clear(&mut self) {
-        self.buffer.clear();
-        self.events.clear();
     }
 
     /// Get the events.
@@ -1203,7 +1362,7 @@ pin_project_lite::pin_project! {
 
         // Information used by the AFD backend for polling.
         #[pin]
-        afd_poll: AfdWrapper,
+        afd_poll: AfdInfo,
 
         // The AFD handle used to poll the socket.
         afd_handle: Arc<Afd<Notification>>,
@@ -1211,8 +1370,8 @@ pin_project_lite::pin_project! {
         // State of the socket's events.
         events: Mutex<EventState>,
 
-        // The index in the deletion list we're at, or `MAX` if we're not in the deletion list.
-        deletion_index: AtomicUsize,
+        // Whether this socket should be deleted once it is no longer in use.
+        delete: AtomicBool,
 
         // Make sure we're pinned.
         #[pin]
@@ -1227,7 +1386,7 @@ impl fmt::Debug for SocketState {
 }
 
 impl AfdCompatible for Notification {
-    fn afd_info(self: Pin<&Self>) -> Pin<&AfdWrapper> {
+    fn afd_info(self: Pin<&Self>) -> Pin<&AfdInfo> {
         match self.project_ref() {
             NotificationProj::Notify { .. } => unreachable!("cannot AFD poll a notification"),
             NotificationProj::Socket { sock } => sock.project_ref().afd_poll,
@@ -1239,7 +1398,7 @@ impl AfdCompatible for Notification {
             Notification::Notify { .. } => unreachable!("cannot AFD poll a notification"),
             Notification::Socket { sock } => {
                 let mut events = 0;
-                let mut state = sock.events.lock().unwrap();
+                let state = sock.events.lock().unwrap();
 
                 if state.interest.readable {
                     events |= AFD_READ_EVENTS;
@@ -1259,7 +1418,9 @@ impl StatusBlock {
     /// Set the interest of this status block.
     fn set_interest(&self, interest: Event, poller: &Poller, mode: PollMode) -> io::Result<()> {
         match self.user_data().project_ref() {
-            NotificationProj::Notify { .. } => unreachable!("cannot set interest of a notification"),
+            NotificationProj::Notify { .. } => {
+                unreachable!("cannot set interest of a notification")
+            }
             NotificationProj::Socket { sock } => {
                 let mut state = sock.events.lock().unwrap();
 
@@ -1268,11 +1429,11 @@ impl StatusBlock {
                     state.interest = interest;
 
                     // If the socket is registered, we need to update it.
-                    if (state.interest.readable && !state.read_pending) || (
-                        state.interest.writable && !state.write_pending
-                    ) {
+                    if (state.interest.readable && !state.read_pending)
+                        || (state.interest.writable && !state.write_pending)
+                    {
                         // We need to update the socket.
-                        poller.update_queue.lock().unwrap().push_back(self.clone()); 
+                        poller.update_queue.lock().unwrap().push_back(self.clone());
                     }
                 }
 
@@ -1308,7 +1469,7 @@ impl StatusBlock {
                 // Do nothing, since we're waiting for it to return.
             }
 
-            IosbState::Completed => {
+            IosbState::Idle => {
                 // There is no polling operation, start one.
                 let result = socket.afd_handle.poll(self);
 
@@ -1317,7 +1478,7 @@ impl StatusBlock {
                         io::ErrorKind::WouldBlock => {
                             // The socket is not ready yet, so we'll just wait for the next event.
                         }
-                        _ if unsafe { GetLastError() } == ERROR_INVALID_HANDLE => {
+                        _ if syscalls::last_error() == ERROR_INVALID_HANDLE => {
                             // Remove the socket from the poller.
                             poller.socket_map.lock().unwrap().remove(&socket.raw);
                             return Ok(());
@@ -1327,9 +1488,9 @@ impl StatusBlock {
                             return Err(e);
                         }
                     }
-                } 
+                }
 
-                // Update pending events.
+                // Operation was submitted; update pending events.
                 let mut event_state = socket.events.lock().unwrap();
                 event_state.read_pending = event_state.interest.readable;
                 event_state.write_pending = event_state.interest.writable;
@@ -1342,9 +1503,7 @@ impl StatusBlock {
     /// An IOCP event has occurred involving this socket; update it accordingly.
     #[allow(clippy::never_loop)]
     fn on_event(&self, poller: &Poller) -> io::Result<OnEventResult> {
-        let user_data = self.user_data().project_ref();
-
-        let socket_state = match user_data {
+        let socket_state = match self.user_data().project_ref() {
             NotificationProj::Notify { .. } => {
                 // Got a notification; indicate as such.
                 return Ok(OnEventResult::Notification);
@@ -1359,59 +1518,70 @@ impl StatusBlock {
         event_state.read_pending = false;
         event_state.write_pending = false;
 
-        // See if we're about to be deleted; if so, delete us from the list.
-        let deleted_index = socket_state.deletion_index.load(Ordering::Acquire);
-        if deleted_index != std::usize::MAX {
-            let mut deleted = poller.waiting_for_delete.lock().unwrap();
-            deleted.remove(deleted_index);
+        // See if we're about to be deleted; don't return if we do, and just quietly drop.
+        if socket_state.delete.load(Ordering::SeqCst) {
             return Ok(OnEventResult::NoEvents);
         }
 
-        // Request to be added again.
+        // Request to be updated again.
         poller.update_queue.lock().unwrap().push_back(self.clone());
 
         // Figure out what events we got.
         let event = loop {
-            // If we were cancelled, we received no events.
-            if self.cancelled() {
-                return Ok(OnEventResult::NoEvents);
+            // Check the IOSB status to see what happened.
+            match self.result() {
+                Ok(IosbResult::Cancelled) => {
+                    // The operation was cancelled.
+                    return Ok(OnEventResult::NoEvents);
+                }
+                Ok(IosbResult::Pending) => unreachable!("I/O operation is still pending"),
+                Ok(IosbResult::Success) => {}
+                Err(_) => {
+                    // An error occurred.
+                    break Event::all(event_state.interest.key);
+                }
             }
-
-            // If there was an error, report it.
-            if self.error() {
-                break Event::all(event_state.interest.key);
-            }
-
-            // Get the AFD block.
-            let afd_block = self.afd_block();
 
             // If no socket events were reported, we received no events.
-            if afd_block.number_of_handles == 0 { 
+            if self.number_of_handles() == 0 {
                 return Ok(OnEventResult::NoEvents);
             }
 
-            let afd_events = afd_block.handles[0].events;
+            let afd_events = self.events();
             if afd_events & syscalls::AFD_POLL_LOCAL_CLOSE != 0 {
-                // We need to remove this block.
-                poller.socket_map.lock().unwrap().remove(&socket_state.raw);
+                // The handle was closed; remove it from the poller.
+                self.delete(poller)?;
                 return Ok(OnEventResult::NoEvents);
             }
 
-            // Convert AFD events to polling events.
+            // Convert AFD events to polling events, and make sure we only use events that the
+            // user asked for.
             let mut interest = Event::none(event_state.interest.key);
 
-            if afd_events & AFD_READ_EVENTS != 0 {
+            if afd_events & AFD_READ_EVENTS != 0 && event_state.interest.readable {
                 interest.readable = true;
             }
 
-            if afd_events & AFD_WRITE_EVENTS != 0 {
+            if afd_events & AFD_WRITE_EVENTS != 0 && event_state.interest.writable {
                 interest.writable = true;
+            }
+
+            // Connect failure triggers both events.
+            if afd_events & syscalls::AFD_POLL_CONNECT_FAIL != 0 {
+                if event_state.interest.readable {
+                    interest.readable = true;
+                }
+
+                if event_state.interest.writable {
+                    interest.writable = true;
+                }
             }
 
             break interest;
         };
 
         if !event.readable && !event.writable {
+            // No events occurred.
             return Ok(OnEventResult::NoEvents);
         }
 
@@ -1435,8 +1605,36 @@ impl StatusBlock {
         state.afd_handle.cancel(self)?;
         Ok(())
     }
+
+    /// Queue this socket for deletion.
+    fn delete(&self, poller: &Poller) -> io::Result<()> {
+        // Indicate that we're about to be deleted.
+        let state = match self.user_data().project_ref() {
+            NotificationProj::Notify { .. } => return Ok(()),
+            NotificationProj::Socket { sock } => sock,
+        };
+        state.delete.store(true, Ordering::Release);
+
+        // Cancel any pending I/O operations, if any.
+        if self.state() == IosbState::Pending {
+            self.cancel()?;
+        }
+
+        // Remove ourselves from the poller's socket map.
+        poller.socket_map.lock().unwrap().remove(&state.raw);
+
+        // Remove this socket from the update list.
+        poller
+            .update_queue
+            .lock()
+            .unwrap()
+            .retain(|x| !StatusBlock::ptr_eq(self, x));
+
+        Ok(())
+    }
 }
 
+/// The result of polling a single socket for events.
 enum OnEventResult {
     /// We yielded no events.
     NoEvents,
@@ -1448,6 +1646,7 @@ enum OnEventResult {
     Notification,
 }
 
+/// Event-related state for a socket.
 struct EventState {
     /// The event that the user is interested in.
     interest: Event,
@@ -1462,7 +1661,9 @@ struct EventState {
     mode: PollMode,
 }
 
+/// Events we poll for no matter what.
 const AFD_UNIVERSAL_EVENTS: u32 = syscalls::AFD_POLL_LOCAL_CLOSE;
+/// Read-related events.
 const AFD_READ_EVENTS: u32 = AFD_UNIVERSAL_EVENTS
     | syscalls::AFD_POLL_RECEIVE
     | syscalls::AFD_POLL_RECEIVE_EXPEDITED
@@ -1470,6 +1671,7 @@ const AFD_READ_EVENTS: u32 = AFD_UNIVERSAL_EVENTS
     | syscalls::AFD_POLL_DISCONNECT
     | syscalls::AFD_POLL_ABORT
     | syscalls::AFD_POLL_CONNECT_FAIL;
+/// Write-related events.
 const AFD_WRITE_EVENTS: u32 = AFD_UNIVERSAL_EVENTS | syscalls::AFD_POLL_SEND;
 
 /// Call this closure on drop.
