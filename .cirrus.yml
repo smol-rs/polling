@@ -1,0 +1,28 @@
+only_if: $CIRRUS_TAG == '' && ($CIRRUS_PR != '' || $CIRRUS_BRANCH == 'master')
+auto_cancellation: $CIRRUS_BRANCH != 'master'
+env:
+  CARGO_INCREMENTAL: '0'
+  CARGO_NET_GIT_FETCH_WITH_CLI: 'true'
+  CARGO_NET_RETRY: '10'
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: '1'
+  RUSTDOCFLAGS: -D warnings
+  RUSTFLAGS: -D warnings
+  RUSTUP_MAX_RETRIES: '10'
+
+freebsd_task:
+  freebsd_instance:
+    image: freebsd-12-4-release-amd64
+  matrix:
+    - name: test (x86_64-unknown-freebsd)
+      env:
+        TARGET: x86_64-unknown-freebsd
+    - name: test (i686-unknown-freebsd)
+      env:
+        TARGET: i686-unknown-freebsd
+  setup_script:
+    - pkg install -y bash git
+    - curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable --target $TARGET
+  test_script:
+    - . $HOME/.cargo/env
+    - cargo test --target $TARGET
