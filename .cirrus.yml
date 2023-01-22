@@ -21,7 +21,7 @@ freebsd_task:
       env:
         TARGET: i686-unknown-freebsd
   setup_script:
-    - pkg install -y bash git
+    - pkg install -y git
     - curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable --target $TARGET
   test_script:
     - . $HOME/.cargo/env
