@@ -76,12 +76,6 @@ jobs:
     - name: Android
       if: startsWith(matrix.os, 'ubuntu')
       run: cross test --target arm-linux-androideabi
-    - name: NetBSD
-      if: startsWith(matrix.os, 'ubuntu')
-      run: cross build --target x86_64-unknown-netbsd
-    - name: FreeBSD
-      if: startsWith(matrix.os, 'ubuntu')
-      run: cross build --target x86_64-unknown-freebsd
     - name: iOS
       if: startsWith(matrix.os, 'macos')
       run: cross build --target aarch64-apple-ios
@@ -98,6 +92,55 @@ jobs:
       run: |
         rustup target add x86_64-unknown-illumos
         cargo build --target x86_64-unknown-illumos
+
+  netbsd:
+    runs-on: macos-12
+    steps:
+    - uses: actions/checkout@v3
+    - name: Test NetBSD
+      id: test
+      uses: vmactions/netbsd-vm@v0
+      with:
+        envs: CARGO_INCREMENTAL CARGO_NET_GIT_FETCH_WITH_CLI CARGO_NET_RETRY RUST_BACKTRACE RUSTFLAGS RUSTDOCFLAGS RUSTUP_MAX_RETRIES
+        usesh: true
+        prepare: |
+          pkg_add curl git
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable
+        run: |
+          . $HOME/.cargo/env
+          cargo test
+
+  openbsd:
+    runs-on: macos-12
+    steps:
+    - uses: actions/checkout@v3
+    - name: Test OpenBSD
+      id: test
+      uses: vmactions/openbsd-vm@v0
+      with:
+        envs: CARGO_INCREMENTAL CARGO_NET_GIT_FETCH_WITH_CLI CARGO_NET_RETRY RUST_BACKTRACE RUSTFLAGS RUSTDOCFLAGS RUSTUP_MAX_RETRIES
+        usesh: true
+        # OpenBSD is tier 3 target, so install rust from package manager instead of rustup
+        prepare: |
+          pkg_add git rust
+        run: |
+          cargo test
+
+  dragonfly:
+    runs-on: macos-12
+    steps:
+    - uses: actions/checkout@v3
+    - name: Test Dragonfly BSD
+      id: test
+      uses: vmactions/dragonflybsd-vm@v0
+      with:
+        envs: CARGO_INCREMENTAL CARGO_NET_GIT_FETCH_WITH_CLI CARGO_NET_RETRY RUST_BACKTRACE RUSTFLAGS RUSTDOCFLAGS RUSTUP_MAX_RETRIES
+        usesh: true
+        # Dragonfly BSD is tier 3 target, so install rust from package manager instead of rustup
+        prepare: |
+          pkg install -y rust
+        run: |
+          cargo test
 
   wine:
     runs-on: ubuntu-22.04
