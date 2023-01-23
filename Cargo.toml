@@ -35,7 +35,7 @@ libc = "0.2.77"
 wepoll-ffi = { version = "0.1.2", features = ["null-overlapped-wakeups-patch"] }
 
 [target.'cfg(windows)'.dependencies.windows-sys]
-version = "0.42"
+version = "0.45"
 features = [
     "Win32_System_IO",
     "Win32_Foundation"
