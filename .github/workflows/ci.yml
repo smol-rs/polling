@@ -169,6 +169,11 @@ jobs:
         # --no-self-update is necessary because the windows environment cannot self-update rustup.exe.
         run: rustup update ${{ matrix.rust }} --no-self-update && rustup default ${{ matrix.rust }}
       - run: cargo build
+      - name: Install Other Targets
+        if: startsWith(matrix.os, 'ubuntu')
+        run: rustup target add x86_64-unknown-freebsd x86_64-unknown-netbsd
+      - run: cargo build --target x86_64-unknown-freebsd
+      - run: cargo build --target x86_64-unknown-netbsd
 
   clippy:
     runs-on: ubuntu-latest
