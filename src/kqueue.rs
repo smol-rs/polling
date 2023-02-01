@@ -225,7 +225,7 @@ impl Events {
 
     /// Iterates over I/O events.
     pub fn iter(&self) -> impl Iterator<Item = Event> + '_ {
-        const READABLES: &[libc::c_short] = &[
+        const READABLES: &[FilterName] = &[
             libc::EVFILT_READ,
             libc::EVFILT_VNODE,
             libc::EVFILT_PROC,
@@ -246,13 +246,25 @@ impl Events {
     }
 }
 
-pub(crate) fn mode_to_flags(mode: PollMode) -> libc::c_ushort {
+pub(crate) fn mode_to_flags(mode: PollMode) -> FilterFlags {
     match mode {
         PollMode::Oneshot => libc::EV_ONESHOT,
         PollMode::Level => 0,
         PollMode::Edge => libc::EV_CLEAR,
     }
 }
+
+#[cfg(target_os = "netbsd")]
+pub(crate) type FilterFlags = u32;
+
+#[cfg(not(target_os = "netbsd"))]
+pub(crate) type FilterFlags = libc::c_ushort;
+
+#[cfg(target_os = "netbsd")]
+pub(crate) type FilterName = u32;
+
+#[cfg(not(target_os = "netbsd"))]
+pub(crate) type FilterName = libc::c_short;
 
 #[cfg(any(
     target_os = "freebsd",

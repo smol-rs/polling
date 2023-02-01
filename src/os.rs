@@ -15,14 +15,17 @@
 ))]
 /// Functionality that is only available for `kqueue`-based platforms.
 pub mod kqueue {
-    use crate::sys::mode_to_flags;
+    use crate::sys::{mode_to_flags, FilterFlags};
     use crate::{PollMode, Poller};
     use __private::{FilterSealed, PollerSealed};
-    use std::convert::TryInto;
     use std::os::unix::prelude::*;
     use std::process::Child;
-    use std::time::Duration;
     use std::{io, mem};
+
+    #[cfg(not(any(target_os = "dragonfly", target_os = "netbsd")))]
+    use std::convert::TryInto;
+    #[cfg(not(any(target_os = "dragonfly", target_os = "netbsd")))]
+    use std::time::Duration;
 
     /// Functionality that is only available for `kqueue`-based platforms.
     ///
@@ -82,7 +85,7 @@ pub mod kqueue {
         /// Remove a filter from the poller.
         ///
         /// This is used to remove filters that were previously added with
-        /// [`add_filter`].
+        /// [`add_filter`](PollerKqueueExt::add_filter).
         ///
         /// # Examples
         ///
@@ -130,7 +133,7 @@ pub mod kqueue {
     pub trait Filter: FilterSealed {}
 
     unsafe impl<T: FilterSealed + ?Sized> FilterSealed for &T {
-        fn filter(&self, flags: u16, key: usize) -> libc::kevent {
+        fn filter(&self, flags: FilterFlags, key: usize) -> libc::kevent {
             (**self).filter(flags, key)
         }
     }
@@ -161,7 +164,7 @@ pub mod kqueue {
     pub type c_int = i32;
 
     unsafe impl FilterSealed for Signal {
-        fn filter(&self, flags: u16, key: usize) -> libc::kevent {
+        fn filter(&self, flags: FilterFlags, key: usize) -> libc::kevent {
             libc::kevent {
                 ident: self.0 as _,
                 filter: libc::EVFILT_SIGNAL,
@@ -206,7 +209,7 @@ pub mod kqueue {
     }
 
     unsafe impl FilterSealed for Process<'_> {
-        fn filter(&self, flags: u16, key: usize) -> libc::kevent {
+        fn filter(&self, flags: FilterFlags, key: usize) -> libc::kevent {
             let fflags = match self.ops {
                 ProcessOps::Exit => libc::NOTE_EXIT,
                 ProcessOps::Fork => libc::NOTE_FORK,
@@ -243,7 +246,7 @@ pub mod kqueue {
     }
 
     unsafe impl FilterSealed for Vnode {
-        fn filter(&self, flags: u16, key: usize) -> libc::kevent {
+        fn filter(&self, flags: FilterFlags, key: usize) -> libc::kevent {
             libc::kevent {
                 ident: self.0 as _,
                 filter: libc::EVFILT_VNODE,
@@ -259,6 +262,11 @@ pub mod kqueue {
     /// Wait for a timeout to expire.
     ///
     /// Modifying the timeout after it has been added to the poller will reset it.
+    #[cfg(not(any(target_os = "dragonfly", target_os = "netbsd")))]
+    #[cfg_attr(
+        docsrs,
+        doc(cfg(not(any(target_os = "dragonfly", target_os = "netbsd"))))
+    )]
     #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
     pub struct Timer {
         /// Identifier for the timer.
@@ -268,6 +276,7 @@ pub mod kqueue {
         timeout: Duration,
     }
 
+    #[cfg(not(any(target_os = "dragonfly", target_os = "netbsd")))]
     impl Timer {
         /// Create a new timer.
         pub fn new(id: usize, timeout: Duration) -> Self {
@@ -285,31 +294,47 @@ pub mod kqueue {
         }
     }
 
+    #[cfg(not(any(target_os = "dragonfly", target_os = "netbsd")))]
     unsafe impl FilterSealed for Timer {
-        fn filter(&self, flags: u16, key: usize) -> libc::kevent {
+        fn filter(&self, flags: FilterFlags, key: usize) -> libc::kevent {
             // Figure out the granularity of the timer.
             let (fflags, data) = {
-                let subsec_nanos = self.timeout.subsec_nanos();
+                #[cfg(not(target_os = "openbsd"))]
+                {
+                    let subsec_nanos = self.timeout.subsec_nanos();
 
-                match (subsec_nanos % 1_000, subsec_nanos) {
-                    (_, 0) => (
-                        libc::NOTE_SECONDS,
-                        self.timeout.as_secs().try_into().expect("too many seconds"),
-                    ),
-                    (0, _) => (
-                        libc::NOTE_USECONDS,
+                    match (subsec_nanos % 1_000, subsec_nanos) {
+                        (_, 0) => (
+                            libc::NOTE_SECONDS,
+                            self.timeout.as_secs().try_into().expect("too many seconds"),
+                        ),
+                        (0, _) => (
+                            libc::NOTE_USECONDS,
+                            self.timeout
+                                .as_micros()
+                                .try_into()
+                                .expect("too many microseconds"),
+                        ),
+                        (_, _) => (
+                            libc::NOTE_NSECONDS,
+                            self.timeout
+                                .as_nanos()
+                                .try_into()
+                                .expect("too many nanoseconds"),
+                        ),
+                    }
+                }
+
+                #[cfg(target_os = "openbsd")]
+                {
+                    // OpenBSD only supports milliseconds.
+                    (
+                        0,
                         self.timeout
-                            .as_micros()
+                            .as_millis()
                             .try_into()
-                            .expect("too many microseconds"),
-                    ),
-                    (_, _) => (
-                        libc::NOTE_NSECONDS,
-                        self.timeout
-                            .as_nanos()
-                            .try_into()
-                            .expect("too many nanoseconds"),
-                    ),
+                            .expect("too many milliseconds"),
+                    )
                 }
             };
 
@@ -326,9 +351,12 @@ pub mod kqueue {
         }
     }
 
+    #[cfg(not(any(target_os = "dragonfly", target_os = "netbsd")))]
     impl Filter for Timer {}
 
     mod __private {
+        use crate::sys::FilterFlags;
+
         #[doc(hidden)]
         pub trait PollerSealed {}
 
@@ -337,7 +365,7 @@ pub mod kqueue {
             /// Get the filter for the given event.
             ///
             /// This filter's flags must have `EV_RECEIPT`.
-            fn filter(&self, flags: u16, key: usize) -> libc::kevent;
+            fn filter(&self, flags: FilterFlags, key: usize) -> libc::kevent;
         }
     }
 }
