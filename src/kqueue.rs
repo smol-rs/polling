@@ -65,11 +65,7 @@ impl Poller {
             log::trace!("add: kqueue_fd={}, fd={}, ev={:?}", self.kqueue_fd, fd, ev);
         }
 
-        let mode_flags = match mode {
-            PollMode::Oneshot => libc::EV_ONESHOT,
-            PollMode::Level => 0,
-            PollMode::Edge => libc::EV_CLEAR,
-        };
+        let mode_flags = mode_to_flags(mode);
 
         let read_flags = if ev.readable {
             libc::EV_ADD | mode_flags
@@ -105,7 +101,7 @@ impl Poller {
     }
 
     /// Submit one or more changes to the kernel queue and check to see if they succeeded.
-    fn submit_changes<A>(&self, changelist: A) -> io::Result<()>
+    pub(crate) fn submit_changes<A>(&self, changelist: A) -> io::Result<()>
     where
         A: Copy + AsRef<[libc::kevent]> + AsMut<[libc::kevent]>,
     {
@@ -229,16 +225,32 @@ impl Events {
 
     /// Iterates over I/O events.
     pub fn iter(&self) -> impl Iterator<Item = Event> + '_ {
+        const READABLES: &[libc::c_short] = &[
+            libc::EVFILT_READ,
+            libc::EVFILT_VNODE,
+            libc::EVFILT_PROC,
+            libc::EVFILT_SIGNAL,
+            libc::EVFILT_TIMER,
+        ];
+
         // On some platforms, closing the read end of a pipe wakes up writers, but the
         // event is reported as EVFILT_READ with the EV_EOF flag.
         //
         // https://github.com/golang/go/commit/23aad448b1e3f7c3b4ba2af90120bde91ac865b4
         self.list[..self.len].iter().map(|ev| Event {
             key: ev.udata as usize,
-            readable: ev.filter == libc::EVFILT_READ,
+            readable: READABLES.contains(&ev.filter),
             writable: ev.filter == libc::EVFILT_WRITE
                 || (ev.filter == libc::EVFILT_READ && (ev.flags & libc::EV_EOF) != 0),
         })
+    }
+}
+
+pub(crate) fn mode_to_flags(mode: PollMode) -> libc::c_ushort {
+    match mode {
+        PollMode::Oneshot => libc::EV_ONESHOT,
+        PollMode::Level => 0,
+        PollMode::Edge => libc::EV_CLEAR,
     }
 }
 
