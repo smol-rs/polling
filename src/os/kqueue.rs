@@ -8,8 +8,8 @@ use std::process::Child;
 use std::time::Duration;
 use std::{io, mem};
 
-use __private::FilterSealed;
 use super::__private::PollerSealed;
+use __private::FilterSealed;
 
 // TODO(notgull): We should also have EVFILT_AIO, EVFILT_VNODE and EVFILT_USER. However, the current
 // API makes it difficult to effectively express events from these filters. At the next breaking
