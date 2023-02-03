@@ -20,7 +20,7 @@ mod example {
         let poller = Poller::new().unwrap();
 
         // Register SIGINT in the poller.
-        let sigint = Signal::new(libc::SIGINT);
+        let sigint = Signal(libc::SIGINT);
         poller.add_filter(sigint, 1, PollMode::Oneshot).unwrap();
 
         let mut events = vec![];
