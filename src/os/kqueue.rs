@@ -136,19 +136,7 @@ impl<T: Filter + ?Sized> Filter for &T {}
 /// No matter what `PollMode` is specified, this filter will always be
 /// oneshot-only.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct Signal(c_int);
-
-impl Signal {
-    /// Monitor this signal number.
-    pub fn new(signal: c_int) -> Self {
-        Self(signal)
-    }
-
-    /// Get the signal number.
-    pub fn signal(self) -> c_int {
-        self.0
-    }
-}
+pub struct Signal(pub c_int);
 
 /// Alias for `libc::c_int`.
 #[allow(non_camel_case_types)]
@@ -228,27 +216,10 @@ impl Filter for Process<'_> {}
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Timer {
     /// Identifier for the timer.
-    id: usize,
+    pub id: usize,
 
     /// The timeout to wait for.
-    timeout: Duration,
-}
-
-impl Timer {
-    /// Create a new timer.
-    pub fn new(id: usize, timeout: Duration) -> Self {
-        Self { id, timeout }
-    }
-
-    /// Get the identifier for the timer.
-    pub fn id(self) -> usize {
-        self.id
-    }
-
-    /// Get the timeout to wait for.
-    pub fn timeout(self) -> Duration {
-        self.timeout
-    }
+    pub timeout: Duration,
 }
 
 unsafe impl FilterSealed for Timer {
