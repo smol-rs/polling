@@ -2,11 +2,14 @@
 
 use crate::sys::{mode_to_flags, FilterFlags};
 use crate::{PollMode, Poller};
-use __private::{FilterSealed, PollerSealed};
+
 use std::convert::TryInto;
 use std::process::Child;
 use std::time::Duration;
 use std::{io, mem};
+
+use __private::FilterSealed;
+use super::__private::PollerSealed;
 
 // TODO(notgull): We should also have EVFILT_AIO, EVFILT_VNODE and EVFILT_USER. However, the current
 // API makes it difficult to effectively express events from these filters. At the next breaking
@@ -93,6 +96,7 @@ pub trait PollerKqueueExt<F: Filter>: PollerSealed {
 impl PollerSealed for Poller {}
 
 impl<F: Filter> PollerKqueueExt<F> for Poller {
+    #[inline(always)]
     fn add_filter(&self, filter: F, key: usize, mode: PollMode) -> io::Result<()> {
         // No difference between adding and modifying in kqueue.
         self.modify_filter(filter, key, mode)
@@ -119,6 +123,7 @@ impl<F: Filter> PollerKqueueExt<F> for Poller {
 pub trait Filter: FilterSealed {}
 
 unsafe impl<T: FilterSealed + ?Sized> FilterSealed for &T {
+    #[inline(always)]
     fn filter(&self, flags: FilterFlags, key: usize) -> libc::kevent {
         (**self).filter(flags, key)
     }
@@ -150,6 +155,7 @@ impl Signal {
 pub type c_int = i32;
 
 unsafe impl FilterSealed for Signal {
+    #[inline(always)]
     fn filter(&self, flags: FilterFlags, key: usize) -> libc::kevent {
         libc::kevent {
             ident: self.0 as _,
@@ -195,6 +201,7 @@ impl<'a> Process<'a> {
 }
 
 unsafe impl FilterSealed for Process<'_> {
+    #[inline(always)]
     fn filter(&self, flags: FilterFlags, key: usize) -> libc::kevent {
         let fflags = match self.ops {
             ProcessOps::Exit => libc::NOTE_EXIT,
@@ -315,9 +322,6 @@ impl Filter for Timer {}
 
 mod __private {
     use crate::sys::FilterFlags;
-
-    #[doc(hidden)]
-    pub trait PollerSealed {}
 
     #[doc(hidden)]
     pub unsafe trait FilterSealed {

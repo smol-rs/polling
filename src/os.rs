@@ -14,3 +14,8 @@
     not(polling_test_poll_backend),
 ))]
 pub mod kqueue;
+
+mod __private {
+    #[doc(hidden)]
+    pub trait PollerSealed {}
+}
