@@ -120,6 +120,8 @@ cfg_if! {
     }
 }
 
+pub mod os;
+
 /// Key associated with notifications.
 const NOTIFY_KEY: usize = std::usize::MAX;
 
