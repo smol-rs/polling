@@ -41,5 +41,10 @@ features = [
     "Win32_Foundation"
 ]
 
+[target.'cfg(target_os = "wasi")'.dependencies.wasi]
+version = "0.12.0-experimental.0"
+git = "https://github.com/sunfishcode/rust-wasi/"
+branch = "sunfishcode/experiment"
+
 [dev-dependencies]
 easy-parallel = "3.1.0"

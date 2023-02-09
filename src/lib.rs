@@ -7,6 +7,7 @@
 //! - [event ports](https://illumos.org/man/port_create): illumos, Solaris
 //! - [poll](https://en.wikipedia.org/wiki/Poll_(Unix)): VxWorks, Fuchsia, other Unix systems
 //! - [wepoll](https://github.com/piscisaureus/wepoll): Windows, Wine (version 7.13+)
+//! - [wasi](https://wasi.dev/): WASI-preview-2
 //!
 //! By default, polling is done in oneshot mode, which means interest in I/O events needs to
 //! be re-enabled after an event is delivered if we're interested in the next event of the same
