@@ -1,0 +1,17 @@
+[package]
+name = "polling-c-api"
+version = "0.1.0"
+edition = "2018"
+description = "C API for polling"
+authors = ["John Nunley <jtnunley01@gmail.com>"]
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/smol-rs/polling"
+keywords = ["polling", "c-api"]
+
+[lib]
+name = "polling"
+crate-type = ["staticlib"]
+
+[dependencies]
+libc = "0.2.139"
+polling = { path = ".." }
