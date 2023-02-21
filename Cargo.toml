@@ -7,10 +7,10 @@ version = "2.5.2"
 authors = ["Stjepan Glavina <stjepang@gmail.com>"]
 edition = "2018"
 rust-version = "1.47"
-description = "Portable interface to epoll, kqueue, event ports, and wepoll"
+description = "Portable interface to epoll, kqueue, event ports, and IOCP"
 license = "Apache-2.0 OR MIT"
 repository = "https://github.com/smol-rs/polling"
-keywords = ["mio", "epoll", "kqueue", "iocp", "wepoll"]
+keywords = ["mio", "epoll", "kqueue", "iocp"]
 categories = ["asynchronous", "network-programming", "os"]
 exclude = ["/.*"]
 

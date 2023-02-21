@@ -1,4 +1,29 @@
 //! Bindings to Windows I/O Completion Ports.
+//!
+//! I/O Completion Ports is a completion-based API rather than a polling-based API, like
+//! epoll or kqueue. Therefore, we have to adapt the IOCP API to the crate's API.
+//!
+//! WinSock is powered by the Auxillary Function Driver (AFD) subsystem, which can be
+//! accessed directly by using unstable `ntdll` functions. AFD exposes features that are not
+//! available through the normal WinSock interface, such as IOCTL_AFD_POLL. This function is
+//! similar to the exposed `WSAPoll` method. However, once the targeted socket is "ready",
+//! a completion packet is queued to an I/O completion port.
+//!
+//! We take advantage of IOCTL_AFD_POLL to "translate" this crate's polling-based API
+//! to the one Windows expects. When a device is added to the `Poller`, an IOCTL_AFD_POLL
+//! operation is started and queued to the IOCP. To modify a currently registered device
+//! (e.g. with `modify()` or `delete()`), the ongoing POLL is cancelled and then restarted
+//! with new parameters. Whn the POLL eventually completes, the packet is posted to the IOCP.
+//! From here it's a simple matter of using `GetQueuedCompletionStatusEx` to read the packets
+//! from the IOCP and react accordingly. Notifying the poller is trivial, because we can
+//! simply post a packet to the IOCP to wake it up.
+//!
+//! The main disadvantage of this strategy is that it relies on unstable Windows APIs.
+//! However, as `libuv` (the backing I/O library for Node.JS) relies on the same unstable
+//! AFD strategy, it is unlikely to be broken without plenty of advanced warning.
+//!
+//! Previously, this crate used the `wepoll` library for polling. `wepoll` uses a similar
+//! AFD-based strategy for polling.
 
 mod afd;
 mod port;
@@ -60,18 +85,28 @@ impl Poller {
         // Make sure AFD is able to be used.
         if let Err(e) = afd::NtdllImports::force_load() {
             return Err(crate::unsupported_error(format!(
-                "Failed to initialize I/O completion ports: {}\nThis usually only happens for old Windows or Wine.",
+                "Failed to initialize unstable Windows functions: {}\nThis usually only happens for old Windows or Wine.",
                 e
             )));
         }
+        
+        // Create a single AFD to test if we support it.
+        let afd = match Afd::new() {
+            Ok(afd) => afd,
+            Err(e) => return Err(crate::unsupported_error(format!(
+                "Failed to initialize \\Device\\Afd: {}\nThis usually only happens for old Windows or Wine.",
+                e,
+            ))),
+        };
 
         let port = IoCompletionPort::new(0)?;
+        port.register(&afd, true)?;
 
         log::trace!("new: handle={:?}", &port);
 
         Ok(Poller {
             port,
-            afd: Mutex::new(Vec::new()),
+            afd: Mutex::new(vec![Arc::new(afd)]),
             sources: RwLock::new(HashMap::new()),
             pending_updates: ConcurrentQueue::bounded(1024),
             polling: AtomicBool::new(false),

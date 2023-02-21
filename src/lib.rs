@@ -1,4 +1,4 @@
-//! Portable interface to epoll, kqueue, event ports, and wepoll.
+//! Portable interface to epoll, kqueue, event ports, and IOCP.
 //!
 //! Supported platforms:
 //! - [epoll](https://en.wikipedia.org/wiki/Epoll): Linux, Android
@@ -6,7 +6,7 @@
 //!   DragonFly BSD
 //! - [event ports](https://illumos.org/man/port_create): illumos, Solaris
 //! - [poll](https://en.wikipedia.org/wiki/Poll_(Unix)): VxWorks, Fuchsia, other Unix systems
-//! - [wepoll](https://github.com/piscisaureus/wepoll): Windows, Wine (version 7.13+)
+//! - [IOCP](https://learn.microsoft.com/en-us/windows/win32/fileio/i-o-completion-ports): Windows, Wine (version 7.13+)
 //!
 //! By default, polling is done in oneshot mode, which means interest in I/O events needs to
 //! be re-enabled after an event is delivered if we're interested in the next event of the same
