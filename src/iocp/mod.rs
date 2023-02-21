@@ -89,7 +89,7 @@ impl Poller {
                 e
             )));
         }
-        
+
         // Create a single AFD to test if we support it.
         let afd = match Afd::new() {
             Ok(afd) => afd,
