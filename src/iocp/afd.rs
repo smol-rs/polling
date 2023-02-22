@@ -67,6 +67,7 @@ impl AfdPollInfo {
 
 bitflags::bitflags! {
     #[derive(Default)]
+    #[repr(transparent)]
     pub(super) struct AfdPollMask: u32 {
         const RECEIVE = 0x001;
         const RECEIVE_EXPEDITED = 0x002;
@@ -582,7 +583,7 @@ pub(super) fn base_socket(sock: RawSocket) -> io::Result<RawSocket> {
 ///
 /// # Safety
 ///
-/// The socket must be valid.
+/// The `ioctl` parameter must be a valid I/O control that returns a valid socket.
 unsafe fn try_socket_ioctl(sock: RawSocket, ioctl: u32) -> io::Result<RawSocket> {
     let mut out = MaybeUninit::<RawSocket>::uninit();
     let mut bytes = MaybeUninit::<u32>::uninit();
