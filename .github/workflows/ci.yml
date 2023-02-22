@@ -33,6 +33,13 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
         rust: [nightly, beta, stable]
+        include:
+          - os: windows-latest
+            rust: nightly-x86_64-pc-windows-gnu
+          - os: windows-latest
+            rust: nightly-i686-pc-windows-msvc
+          - os: windows-latest
+            rust: nightly-i686-pc-windows-gnu
     steps:
       - uses: actions/checkout@v3
       - name: Install Rust
@@ -153,6 +160,14 @@ jobs:
           target: x86_64-pc-windows-gnu
           runner: wine@7.13
       - run: cargo test --target x86_64-pc-windows-gnu
+      - name: Clone async-io
+        run: git clone https://github.com/smol-rs/async-io.git
+      - name: Add patch section
+        run: echo '[patch.crates-io]' >> async-io/Cargo.toml
+      - name: Patch polling
+        run: echo 'polling = { path = ".." }' >> async-io/Cargo.toml
+      - name: Test async-io
+        run: cargo test --manifest-path=async-io/Cargo.toml
 
   msrv:
     runs-on: ${{ matrix.os }}
