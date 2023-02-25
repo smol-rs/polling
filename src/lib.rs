@@ -83,36 +83,19 @@ cfg_if! {
     if #[cfg(polling_test_poll_backend)] {
         mod poll;
         use poll as sys;
-    } else if #[cfg(any(target_os = "linux", target_os = "android"))] {
+    } else if #[cfg(polling_epoll)] {
         mod epoll;
         use epoll as sys;
-    } else if #[cfg(any(
-        target_os = "illumos",
-        target_os = "solaris",
-    ))] {
+    } else if #[cfg(polling_event_port)] {
         mod port;
         use port as sys;
-    } else if #[cfg(any(
-        target_os = "macos",
-        target_os = "ios",
-        target_os = "tvos",
-        target_os = "watchos",
-        target_os = "freebsd",
-        target_os = "netbsd",
-        target_os = "openbsd",
-        target_os = "dragonfly",
-    ))] {
+    } else if #[cfg(polling_kqueue)] {
         mod kqueue;
         use kqueue as sys;
-    } else if #[cfg(any(
-        target_os = "vxworks",
-        target_os = "fuchsia",
-        target_os = "horizon",
-        unix,
-    ))] {
+    } else if #[cfg(polling_poll)] {
         mod poll;
         use poll as sys;
-    } else if #[cfg(target_os = "windows")] {
+    } else if #[cfg(polling_iocp)] {
         mod wepoll;
         use wepoll as sys;
     } else {
@@ -542,18 +525,9 @@ impl Poller {
 
 #[cfg(all(
     any(
-        target_os = "linux",
-        target_os = "android",
-        target_os = "illumos",
-        target_os = "solaris",
-        target_os = "macos",
-        target_os = "ios",
-        target_os = "tvos",
-        target_os = "watchos",
-        target_os = "freebsd",
-        target_os = "netbsd",
-        target_os = "openbsd",
-        target_os = "dragonfly",
+        polling_epoll,
+        polling_kqueue,
+        polling_event_port
     ),
     not(polling_test_poll_backend),
 ))]
@@ -595,7 +569,7 @@ mod raw_fd_impl {
     }
 }
 
-#[cfg(windows)]
+#[cfg(polling_iocp)]
 #[cfg_attr(docsrs, doc(cfg(windows)))]
 mod raw_handle_impl {
     use crate::Poller;
