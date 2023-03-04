@@ -145,7 +145,7 @@ jobs:
         usesh: true
         # Dragonfly BSD is tier 3 target, so install rust from package manager instead of rustup
         prepare: |
-          pkg install -y rust
+          pkg install -y git rust
         run: |
           cargo test
 
