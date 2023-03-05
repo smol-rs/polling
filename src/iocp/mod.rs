@@ -45,11 +45,18 @@ use std::marker::PhantomPinned;
 use std::os::windows::io::{AsRawHandle, RawHandle, RawSocket};
 use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard, RwLock};
+use std::sync::{Arc, Mutex, MutexGuard, RwLock, Weak};
 use std::time::{Duration, Instant};
 
 #[cfg(not(polling_no_io_safety))]
 use std::os::windows::io::{AsHandle, BorrowedHandle};
+
+/// Macro to lock and ignore lock poisoning.
+macro_rules! lock {
+    ($lock_result:expr) => {{
+        ($lock_result).unwrap_or_else(|e| e.into_inner())
+    }};
+}
 
 /// Interface to I/O completion ports.
 #[derive(Debug)]
@@ -58,7 +65,10 @@ pub(super) struct Poller {
     port: IoCompletionPort<Packet>,
 
     /// List of currently active AFD instances.
-    afd: Mutex<Vec<Arc<Afd<Packet>>>>,
+    ///
+    /// Weak references are kept here so that the AFD handle is automatically dropped
+    /// when the last associated socket is dropped.
+    afd: Mutex<Vec<Weak<Afd<Packet>>>>,
 
     /// The state of the sources registered with this poller.
     sources: RwLock<HashMap<RawSocket, Packet>>,
@@ -90,23 +100,19 @@ impl Poller {
             )));
         }
 
-        // Create a single AFD to test if we support it.
-        let afd = match Afd::new() {
-            Ok(afd) => afd,
-            Err(e) => return Err(crate::unsupported_error(format!(
-                "Failed to initialize \\Device\\Afd: {}\nThis usually only happens for old Windows or Wine.",
-                e,
-            ))),
-        };
+        // Create and destroy a single AFD to test if we support it.
+        Afd::<Packet>::new().map_err(|e| crate::unsupported_error(format!(
+            "Failed to initialize \\Device\\Afd: {}\nThis usually only happens for old Windows or Wine.",
+            e,
+        )))?;
 
         let port = IoCompletionPort::new(0)?;
-        port.register(&afd, true)?;
 
         log::trace!("new: handle={:?}", &port);
 
         Ok(Poller {
             port,
-            afd: Mutex::new(vec![Arc::new(afd)]),
+            afd: Mutex::new(vec![]),
             sources: RwLock::new(HashMap::new()),
             pending_updates: ConcurrentQueue::bounded(1024),
             polling: AtomicBool::new(false),
@@ -168,7 +174,7 @@ impl Poller {
 
         // Keep track of the source in the poller.
         {
-            let mut sources = self.sources.write().unwrap_or_else(|e| e.into_inner());
+            let mut sources = lock!(self.sources.write());
 
             match sources.entry(socket) {
                 Entry::Vacant(v) => {
@@ -209,14 +215,12 @@ impl Poller {
 
         // Get a reference to the source.
         let source = {
-            let sources = self.sources.read().unwrap_or_else(|e| e.into_inner());
+            let sources = lock!(self.sources.read());
 
-            match sources.get(&socket) {
-                Some(s) => s.clone(),
-                None => {
-                    return Err(io::Error::from(io::ErrorKind::NotFound));
-                }
-            }
+            sources
+                .get(&socket)
+                .cloned()
+                .ok_or_else(|| io::Error::from(io::ErrorKind::NotFound))?
         };
 
         // Set the new event.
@@ -233,12 +237,12 @@ impl Poller {
 
         // Get a reference to the source.
         let source = {
-            let mut sources = self.sources.write().unwrap_or_else(|e| e.into_inner());
+            let mut sources = lock!(self.sources.write());
 
             match sources.remove(&socket) {
                 Some(s) => s,
                 None => {
-                    // Just return.
+                    // If the source has already been removed, then we can just return.
                     return Ok(());
                 }
             }
@@ -254,7 +258,7 @@ impl Poller {
         log::trace!("wait: handle={:?}, timeout={:?}", self.port, timeout);
 
         let deadline = timeout.and_then(|timeout| Instant::now().checked_add(timeout));
-        let mut packets = self.packets.lock().unwrap_or_else(|e| e.into_inner());
+        let mut packets = lock!(self.packets.lock());
         let mut notified = false;
         events.packets.clear();
 
@@ -266,7 +270,8 @@ impl Poller {
             debug_assert!(!was_polling);
 
             let guard = CallOnDrop(|| {
-                debug_assert!(self.polling.swap(false, Ordering::SeqCst));
+                let was_polling = self.polling.swap(false, Ordering::SeqCst);
+                debug_assert!(was_polling);
             });
 
             // Process every entry in the queue before we start polling.
@@ -347,38 +352,56 @@ impl Poller {
         };
 
         // Only drain the queue's capacity, since this could in theory run forever.
-        for _ in 0..max {
-            if let Ok(packet) = self.pending_updates.pop() {
-                packet.update()?;
-            } else {
-                return Ok(());
-            }
-        }
-
-        Ok(())
+        core::iter::from_fn(|| self.pending_updates.pop().ok())
+            .take(max)
+            .try_for_each(|packet| packet.update())
     }
 
     /// Get a handle to the AFD reference.
     fn afd_handle(&self) -> io::Result<Arc<Afd<Packet>>> {
         const AFD_MAX_SIZE: usize = 32;
 
-        // See if there are any existing AFD instances that we can use.
-        let mut afd_handles = self.afd.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some(handle) = afd_handles.iter().find(|h| {
-            let ref_count = Arc::strong_count(h).saturating_sub(1);
-            ref_count < AFD_MAX_SIZE
-        }) {
-            return Ok(handle.clone());
+        // Crawl the list and see if there are any existing AFD instances that we can use.
+        // Remove any unused AFD pointers.
+        let mut afd_handles = lock!(self.afd.lock());
+        let mut i = 0;
+        while i < afd_handles.len() {
+            // Get the reference count of the AFD instance.
+            let refcount = Weak::strong_count(&afd_handles[i]);
+
+            match refcount {
+                0 => {
+                    // Prune the AFD pointer if it has no references.
+                    afd_handles.swap_remove(i);
+                }
+
+                refcount if refcount >= AFD_MAX_SIZE => {
+                    // Skip this one, since it is already at the maximum size.
+                    i += 1;
+                }
+
+                _ => {
+                    // We can use this AFD instance.
+                    match afd_handles[i].upgrade() {
+                        Some(afd) => return Ok(afd),
+                        None => {
+                            // The last socket dropped the AFD before we could acquire it.
+                            // Prune the AFD pointer and continue.
+                            afd_handles.swap_remove(i);
+                        }
+                    }
+                }
+            }
         }
 
-        // Create a new AFD instance.
+        // No available handles, create a new AFD instance.
         let afd = Arc::new(Afd::new()?);
 
         // Register the AFD instance with the I/O completion port.
         self.port.register(&*afd, true)?;
 
-        // Insert a copy of the AFD instance into the list.
-        afd_handles.push(afd.clone());
+        // Insert a weak pointer to the AFD instance into the list.
+        afd_handles.push(Arc::downgrade(&afd));
 
         Ok(afd)
     }
@@ -573,7 +596,7 @@ impl PacketUnwrapped {
             }
         };
 
-        let mut socket_state = socket.lock().unwrap_or_else(|e| e.into_inner());
+        let mut socket_state = lock!(socket.lock());
         let mut event = Event::none(socket_state.interest.key);
 
         // Put ourselves into the idle state.
@@ -609,11 +632,9 @@ impl PacketUnwrapped {
 
                         // If we closed the socket, remove it from being polled.
                         if events.contains(AfdPollMask::LOCAL_CLOSE) {
-                            let source = {
-                                let mut sources =
-                                    poller.sources.write().unwrap_or_else(|e| e.into_inner());
-                                sources.remove(&socket_state.socket).unwrap()
-                            };
+                            let source = lock!(poller.sources.write())
+                                .remove(&socket_state.socket)
+                                .unwrap();
                             return source.begin_delete().map(|()| FeedEventResult::NoEvent);
                         }
 
@@ -627,15 +648,8 @@ impl PacketUnwrapped {
         }
 
         // Filter out events that the user didn't ask for.
-        {
-            if !socket_state.interest.readable {
-                event.readable = false;
-            }
-
-            if !socket_state.interest.writable {
-                event.writable = false;
-            }
-        }
+        event.readable &= socket_state.interest.readable;
+        event.writable &= socket_state.interest.writable;
 
         // If this event doesn't have anything that interests us, don't return or
         // update the oneshot state.
@@ -665,7 +679,7 @@ impl PacketUnwrapped {
         let mut socket = self
             .as_ref()
             .socket_state()
-            .expect("can't delete notification packet");
+            .expect("can't delete packet that doesn't belong to a socket");
         if !socket.waiting_on_delete {
             socket.waiting_on_delete = true;
 
@@ -701,8 +715,7 @@ impl PacketUnwrapped {
             PacketInnerProj::Socket { socket, .. } => socket,
         };
 
-        let guard = state.lock().unwrap_or_else(|e| e.into_inner());
-        Some(guard)
+        Some(lock!(state.lock()))
     }
 }
 
