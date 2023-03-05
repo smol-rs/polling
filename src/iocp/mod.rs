@@ -262,7 +262,8 @@ impl Poller {
             let mut new_events = 0;
 
             // Indicate that we are now polling.
-            debug_assert!(!self.polling.swap(true, Ordering::SeqCst));
+            let was_polling = self.polling.swap(true, Ordering::SeqCst);
+            debug_assert!(!was_polling);
 
             let guard = CallOnDrop(|| {
                 debug_assert!(self.polling.swap(false, Ordering::SeqCst));

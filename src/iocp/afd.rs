@@ -586,7 +586,7 @@ pub(super) fn base_socket(sock: RawSocket) -> io::Result<RawSocket> {
 /// The `ioctl` parameter must be a valid I/O control that returns a valid socket.
 unsafe fn try_socket_ioctl(sock: RawSocket, ioctl: u32) -> io::Result<RawSocket> {
     let mut out = MaybeUninit::<RawSocket>::uninit();
-    let mut bytes = MaybeUninit::<u32>::uninit();
+    let mut bytes = 0u32;
 
     let result = WSAIoctl(
         sock as _,
@@ -595,7 +595,7 @@ unsafe fn try_socket_ioctl(sock: RawSocket, ioctl: u32) -> io::Result<RawSocket>
         0,
         out.as_mut_ptr().cast(),
         size_of::<RawSocket>() as u32,
-        bytes.as_mut_ptr(),
+        &mut bytes,
         ptr::null_mut(),
         None,
     );

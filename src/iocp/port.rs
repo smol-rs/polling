@@ -42,6 +42,10 @@ pub(super) unsafe trait CompletionHandle: Deref + Sized {
     type Completion: Completion;
 
     /// Get a pointer to the completion block.
+    /// 
+    /// The pointer is pinned since the underlying object should not be moved
+    /// after creation. This prevents it from being invalidated while it's
+    /// used in an overlapped operation.
     fn get(&self) -> Pin<&Self::Completion>;
 
     /// Convert this block into a pointer that can be passed as `*mut OVERLAPPED`.
@@ -272,6 +276,12 @@ impl<T: CompletionHandle> OverlappedEntry<T> {
         packet
     }
 
+    /// Get the packet reference that this entry refers to.
+    /// 
+    /// # Safety
+    /// 
+    /// This function should only be called once, since it moves
+    /// out the `T` from the `OVERLAPPED_ENTRY`.
     unsafe fn packet(&self) -> T {
         let packet = T::from_ptr(self.entry.lpOverlapped);
         packet.get().unlock();
