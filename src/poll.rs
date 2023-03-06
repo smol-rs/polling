@@ -4,12 +4,16 @@ use std::collections::HashMap;
 use std::convert::TryInto;
 use std::fmt::{self, Debug, Formatter};
 use std::io;
+use std::os::unix::io::AsRawFd;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Condvar, Mutex};
 use std::time::{Duration, Instant};
 
 // std::os::unix doesn't exist on Fuchsia
 use libc::c_int as RawFd;
+
+use rustix::fd::{OwnedFd, BorrowedFd};
+use rustix::io::{poll, PollFd, PollFlags, pipe, FdFlags, fcntl_getfd, fcntl_setfd};
 
 use crate::{Event, PollMode};
 
@@ -21,13 +25,13 @@ pub struct Poller {
 
     /// The file descriptor of the read half of the notify pipe. This is also stored as the first
     /// file descriptor in `fds.poll_fds`.
-    notify_read: RawFd,
+    notify_read: OwnedFd,
     /// The file descriptor of the write half of the notify pipe.
     ///
     /// Data is written to this to wake up the current instance of `wait`, which can occur when the
     /// user notifies it (in which case `notified` would have been set) or when an operation needs
     /// to occur (in which case `waiting_operations` would have been incremented).
-    notify_write: RawFd,
+    notify_write: OwnedFd,
 
     /// The number of operations (`add`, `modify` or `delete`) that are currently waiting on the
     /// mutex to become free. When this is nonzero, `wait` must be suspended until it reaches zero
@@ -49,25 +53,10 @@ struct Fds {
     ///
     /// The first file descriptor is always present and is used to notify the poller. It is also
     /// stored in `notify_read`.
-    poll_fds: Vec<PollFd>,
+    poll_fds: Vec<PollFd<'static>>,
     /// The map of each file descriptor to data associated with it. This does not include the file
     /// descriptors `notify_read` or `notify_write`.
     fd_data: HashMap<RawFd, FdData>,
-}
-
-/// Transparent wrapper around `libc::pollfd`, used to support `Debug` derives without adding the
-/// `extra_traits` feature of `libc`.
-#[repr(transparent)]
-struct PollFd(libc::pollfd);
-
-impl Debug for PollFd {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        f.debug_struct("pollfd")
-            .field("fd", &self.0.fd)
-            .field("events", &self.0.events)
-            .field("revents", &self.0.revents)
-            .finish()
-    }
 }
 
 /// Data associated with a file descriptor in a poller.
@@ -85,34 +74,33 @@ impl Poller {
     /// Creates a new poller.
     pub fn new() -> io::Result<Poller> {
         // Create the notification pipe.
-        let mut notify_pipe = [0; 2];
-        syscall!(pipe(notify_pipe.as_mut_ptr()))?;
+        let (notify_read, notify_write) = pipe()?;
 
         // Put the reading side into non-blocking mode.
-        let notify_read_flags = syscall!(fcntl(notify_pipe[0], libc::F_GETFL))?;
-        syscall!(fcntl(
-            notify_pipe[0],
-            libc::F_SETFL,
-            notify_read_flags | libc::O_NONBLOCK
-        ))?;
+        let notify_read_flags = fcntl_getfd(notify_read)?;
+        fcntl_setfd(
+            &notify_read,
+            notify_read_flags | FdFlags::from_bits_truncate(libc::O_NONBLOCK as _)
+        )?;
 
         log::trace!(
             "new: notify_read={}, notify_write={}",
-            notify_pipe[0],
-            notify_pipe[1]
+            notify_read.as_raw_fd(),
+            notify_write.as_raw_fd()
         );
 
         Ok(Self {
             fds: Mutex::new(Fds {
-                poll_fds: vec![PollFd(libc::pollfd {
-                    fd: notify_pipe[0],
-                    events: libc::POLLRDNORM,
-                    revents: 0,
-                })],
+                poll_fds: vec![PollFd::new(
+                    unsafe {
+                        &BorrowedFd::borrow_raw(notify_read.as_raw_fd())
+                    },
+                    PollFlags::IN,
+                )],
                 fd_data: HashMap::new(),
             }),
-            notify_read: notify_pipe[0],
-            notify_write: notify_pipe[1],
+            notify_read,
+            notify_write,
             waiting_operations: AtomicUsize::new(0),
             operations_complete: Condvar::new(),
             notified: AtomicBool::new(false),
@@ -131,13 +119,13 @@ impl Poller {
 
     /// Adds a new file descriptor.
     pub fn add(&self, fd: RawFd, ev: Event, mode: PollMode) -> io::Result<()> {
-        if fd == self.notify_read || fd == self.notify_write {
+        if fd == self.notify_read.as_raw_fd() || fd == self.notify_write.as_raw_fd() {
             return Err(io::Error::from(io::ErrorKind::InvalidInput));
         }
 
         log::trace!(
             "add: notify_read={}, fd={}, ev={:?}",
-            self.notify_read,
+            self.notify_read.as_raw_fd(),
             fd,
             ev
         );

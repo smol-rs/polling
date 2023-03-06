@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use rustix::fd::OwnedFd;
 use rustix::io::epoll;
-use rustix::io::{eventfd, EventfdFlags, read, write};
+use rustix::io::{eventfd, read, write, EventfdFlags};
 use rustix::time::{
     timerfd_create, timerfd_settime, Itimerspec, TimerfdClockId, TimerfdFlags, TimerfdTimerFlags,
     Timespec,
@@ -101,7 +101,7 @@ impl Poller {
             &self.epoll_fd,
             unsafe { BorrowedFd::borrow_raw(fd) },
             ev.key as u64,
-            epoll_flags(&ev, mode)
+            epoll_flags(&ev, mode),
         )?;
 
         Ok(())
@@ -120,7 +120,7 @@ impl Poller {
             &self.epoll_fd,
             unsafe { BorrowedFd::borrow_raw(fd) },
             ev.key as u64,
-            epoll_flags(&ev, mode)
+            epoll_flags(&ev, mode),
         )?;
 
         Ok(())
@@ -130,10 +130,7 @@ impl Poller {
     pub fn delete(&self, fd: RawFd) -> io::Result<()> {
         log::trace!("remove: epoll_fd={}, fd={}", self.epoll_fd.as_raw_fd(), fd);
 
-        epoll::epoll_del(
-            &self.epoll_fd,
-            unsafe { BorrowedFd::borrow_raw(fd) },
-        )?;
+        epoll::epoll_del(&self.epoll_fd, unsafe { BorrowedFd::borrow_raw(fd) })?;
 
         Ok(())
     }
@@ -191,19 +188,16 @@ impl Poller {
         };
 
         // Wait for I/O events.
-        epoll::epoll_wait(
-            &self.epoll_fd,
-            &mut events.list,
-            timeout_ms
-        )?;
-        log::trace!("new events: epoll_fd={}, res={}", self.epoll_fd.as_raw_fd(), events.list.len());
+        epoll::epoll_wait(&self.epoll_fd, &mut events.list, timeout_ms)?;
+        log::trace!(
+            "new events: epoll_fd={}, res={}",
+            self.epoll_fd.as_raw_fd(),
+            events.list.len()
+        );
 
         // Clear the notification (if received) and re-register interest in it.
         let mut buf = [0u8; 8];
-        let _ = read(
-            &self.event_fd,
-            &mut buf
-        );
+        let _ = read(&self.event_fd, &mut buf);
         self.modify(
             self.event_fd.as_raw_fd(),
             Event {
@@ -225,10 +219,7 @@ impl Poller {
         );
 
         let buf: [u8; 8] = 1u64.to_ne_bytes();
-        let _ = write(
-            &self.event_fd,
-            &buf,
-        );
+        let _ = write(&self.event_fd, &buf);
         Ok(())
     }
 }
@@ -304,7 +295,7 @@ impl Events {
     /// Creates an empty list.
     pub fn new() -> Events {
         Events {
-            list: epoll::EventVec::with_capacity(1024)
+            list: epoll::EventVec::with_capacity(1024),
         }
     }
 

@@ -1,12 +1,13 @@
 //! Functionality that is only available for `kqueue`-based platforms.
 
-use crate::sys::{mode_to_flags, FilterFlags};
+use crate::sys::mode_to_flags;
 use crate::{PollMode, Poller};
 
-use std::convert::TryInto;
+use std::io;
 use std::process::Child;
 use std::time::Duration;
-use std::{io, mem};
+
+use rustix::io::kqueue::{Event as Kevent, EventFilter, EventFlags, ProcessEvents};
 
 use super::__private::PollerSealed;
 use __private::FilterSealed;
@@ -104,7 +105,7 @@ impl<F: Filter> PollerKqueueExt<F> for Poller {
 
     fn modify_filter(&self, filter: F, key: usize, mode: PollMode) -> io::Result<()> {
         // Convert the filter into a kevent.
-        let event = filter.filter(libc::EV_ADD | mode_to_flags(mode), key);
+        let event = filter.filter(EventFlags::ADD | mode_to_flags(mode), key);
 
         // Modify the filter.
         self.poller.submit_changes([event])
@@ -112,7 +113,7 @@ impl<F: Filter> PollerKqueueExt<F> for Poller {
 
     fn delete_filter(&self, filter: F) -> io::Result<()> {
         // Convert the filter into a kevent.
-        let event = filter.filter(libc::EV_DELETE, 0);
+        let event = filter.filter(EventFlags::DELETE, 0);
 
         // Delete the filter.
         self.poller.submit_changes([event])
@@ -124,7 +125,7 @@ pub trait Filter: FilterSealed {}
 
 unsafe impl<T: FilterSealed + ?Sized> FilterSealed for &T {
     #[inline(always)]
-    fn filter(&self, flags: FilterFlags, key: usize) -> libc::kevent {
+    fn filter(&self, flags: EventFlags, key: usize) -> Kevent {
         (**self).filter(flags, key)
     }
 }
@@ -144,14 +145,8 @@ pub type c_int = i32;
 
 unsafe impl FilterSealed for Signal {
     #[inline(always)]
-    fn filter(&self, flags: FilterFlags, key: usize) -> libc::kevent {
-        libc::kevent {
-            ident: self.0 as _,
-            filter: libc::EVFILT_SIGNAL,
-            flags: flags | libc::EV_RECEIPT,
-            udata: key as _,
-            ..unsafe { mem::zeroed() }
-        }
+    fn filter(&self, flags: EventFlags, key: usize) -> Kevent {
+        todo!()
     }
 }
 
@@ -190,21 +185,23 @@ impl<'a> Process<'a> {
 
 unsafe impl FilterSealed for Process<'_> {
     #[inline(always)]
-    fn filter(&self, flags: FilterFlags, key: usize) -> libc::kevent {
+    fn filter(&self, flags: EventFlags, key: usize) -> Kevent {
+        use rustix::process::Pid;
+
         let fflags = match self.ops {
-            ProcessOps::Exit => libc::NOTE_EXIT,
-            ProcessOps::Fork => libc::NOTE_FORK,
-            ProcessOps::Exec => libc::NOTE_EXEC,
+            ProcessOps::Exit => ProcessEvents::EXIT,
+            ProcessOps::Fork => ProcessEvents::FORK,
+            ProcessOps::Exec => ProcessEvents::EXEC,
         };
 
-        libc::kevent {
-            ident: self.child.id() as _,
-            filter: libc::EVFILT_PROC,
-            flags: flags | libc::EV_RECEIPT,
-            fflags,
-            udata: key as _,
-            ..unsafe { mem::zeroed() }
-        }
+        Kevent::new(
+            EventFilter::Proc {
+                pid: unsafe { Pid::from_raw(self.child.id() as _) }.unwrap(),
+                flags: fflags,
+            },
+            flags | EventFlags::RECEIPT,
+            key as _,
+        )
     }
 }
 
@@ -223,82 +220,25 @@ pub struct Timer {
 }
 
 unsafe impl FilterSealed for Timer {
-    fn filter(&self, flags: FilterFlags, key: usize) -> libc::kevent {
-        // Figure out the granularity of the timer.
-        let (fflags, data) = {
-            #[cfg(not(any(target_os = "dragonfly", target_os = "netbsd", target_os = "openbsd")))]
-            {
-                let subsec_nanos = self.timeout.subsec_nanos();
-
-                match (subsec_nanos % 1_000, subsec_nanos % 1_000_000, subsec_nanos) {
-                    (_, _, 0) => (
-                        libc::NOTE_SECONDS,
-                        self.timeout.as_secs().try_into().expect("too many seconds"),
-                    ),
-                    (_, 0, _) => (
-                        // Note: 0 by default means milliseconds.
-                        0,
-                        self.timeout
-                            .as_millis()
-                            .try_into()
-                            .expect("too many milliseconds"),
-                    ),
-                    (0, _, _) => (
-                        libc::NOTE_USECONDS,
-                        self.timeout
-                            .as_micros()
-                            .try_into()
-                            .expect("too many microseconds"),
-                    ),
-                    (_, _, _) => (
-                        libc::NOTE_NSECONDS,
-                        self.timeout
-                            .as_nanos()
-                            .try_into()
-                            .expect("too many nanoseconds"),
-                    ),
-                }
-            }
-
-            #[cfg(any(target_os = "dragonfly", target_os = "netbsd", target_os = "openbsd"))]
-            {
-                // OpenBSD/Dragonfly/NetBSD only supports milliseconds.
-                // NetBSD 10 supports NOTE_SECONDS et al, once Rust drops support for
-                // NetBSD 9 we can use the same code as above.
-                // See also: https://github.com/rust-lang/libc/pull/3080
-                (
-                    0,
-                    self.timeout
-                        .as_millis()
-                        .try_into()
-                        .expect("too many milliseconds"),
-                )
-            }
-        };
-
-        #[allow(clippy::needless_update)]
-        libc::kevent {
-            ident: self.id as _,
-            filter: libc::EVFILT_TIMER,
-            flags: flags | libc::EV_RECEIPT,
-            fflags,
-            data,
-            udata: key as _,
-            ..unsafe { mem::zeroed() }
-        }
+    fn filter(&self, flags: EventFlags, key: usize) -> Kevent {
+        Kevent::new(
+            EventFilter::Timer(Some(self.timeout)),
+            flags | EventFlags::RECEIPT,
+            key as _,
+        )
     }
 }
 
 impl Filter for Timer {}
 
 mod __private {
-    use crate::sys::FilterFlags;
+    use rustix::io::kqueue::{Event as Kevent, EventFlags};
 
     #[doc(hidden)]
     pub unsafe trait FilterSealed {
         /// Get the filter for the given event.
         ///
         /// This filter's flags must have `EV_RECEIPT`.
-        fn filter(&self, flags: FilterFlags, key: usize) -> libc::kevent;
+        fn filter(&self, flags: EventFlags, key: usize) -> Kevent;
     }
 }

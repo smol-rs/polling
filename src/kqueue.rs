@@ -1,10 +1,12 @@
 //! Bindings to kqueue (macOS, iOS, tvOS, watchOS, FreeBSD, NetBSD, OpenBSD, DragonFly BSD).
 
 use std::io;
-use std::mem;
 use std::os::unix::io::{AsRawFd, RawFd};
-use std::ptr;
 use std::time::Duration;
+
+use rustix::fd::OwnedFd;
+use rustix::io::kqueue::{self, Event as Kevent, EventFilter, EventFlags};
+use rustix::io::{fcntl_setfd, FdFlags};
 
 #[cfg(not(polling_no_io_safety))]
 use std::os::unix::io::{AsFd, BorrowedFd};
@@ -15,7 +17,7 @@ use crate::{Event, PollMode};
 #[derive(Debug)]
 pub struct Poller {
     /// File descriptor for the kqueue instance.
-    kqueue_fd: RawFd,
+    kqueue_fd: OwnedFd,
 
     /// Notification pipe for waking up the poller.
     ///
@@ -28,8 +30,8 @@ impl Poller {
     /// Creates a new poller.
     pub fn new() -> io::Result<Poller> {
         // Create a kqueue instance.
-        let kqueue_fd = syscall!(kqueue())?;
-        syscall!(fcntl(kqueue_fd, libc::F_SETFD, libc::FD_CLOEXEC))?;
+        let kqueue_fd = kqueue::kqueue()?;
+        fcntl_setfd(&kqueue_fd, FdFlags::CLOEXEC)?;
 
         let poller = Poller {
             kqueue_fd,
@@ -39,7 +41,7 @@ impl Poller {
         // Register the notification pipe.
         poller.notify.register(&poller)?;
 
-        log::trace!("new: kqueue_fd={}", kqueue_fd,);
+        log::trace!("new: kqueue_fd={}", poller.kqueue_fd.as_raw_fd());
         Ok(poller)
     }
 
@@ -62,38 +64,39 @@ impl Poller {
     /// Modifies an existing file descriptor.
     pub fn modify(&self, fd: RawFd, ev: Event, mode: PollMode) -> io::Result<()> {
         if !self.notify.has_fd(fd) {
-            log::trace!("add: kqueue_fd={}, fd={}, ev={:?}", self.kqueue_fd, fd, ev);
+            log::trace!(
+                "add: kqueue_fd={}, fd={}, ev={:?}",
+                self.kqueue_fd.as_raw_fd(),
+                fd,
+                ev
+            );
         }
 
         let mode_flags = mode_to_flags(mode);
 
         let read_flags = if ev.readable {
-            libc::EV_ADD | mode_flags
+            EventFlags::ADD | mode_flags
         } else {
-            libc::EV_DELETE
+            EventFlags::DELETE
         };
         let write_flags = if ev.writable {
-            libc::EV_ADD | mode_flags
+            EventFlags::ADD | mode_flags
         } else {
-            libc::EV_DELETE
+            EventFlags::DELETE
         };
 
         // A list of changes for kqueue.
         let changelist = [
-            libc::kevent {
-                ident: fd as _,
-                filter: libc::EVFILT_READ,
-                flags: read_flags | libc::EV_RECEIPT,
-                udata: ev.key as _,
-                ..unsafe { mem::zeroed() }
-            },
-            libc::kevent {
-                ident: fd as _,
-                filter: libc::EVFILT_WRITE,
-                flags: write_flags | libc::EV_RECEIPT,
-                udata: ev.key as _,
-                ..unsafe { mem::zeroed() }
-            },
+            Kevent::new(
+                kqueue::EventFilter::Read(fd),
+                kqueue::EventFlags::RECEIPT | read_flags,
+                ev.key as _,
+            ),
+            Kevent::new(
+                kqueue::EventFilter::Write(fd),
+                kqueue::EventFlags::RECEIPT | write_flags,
+                ev.key as _,
+            ),
         ];
 
         // Apply changes.
@@ -103,34 +106,27 @@ impl Poller {
     /// Submit one or more changes to the kernel queue and check to see if they succeeded.
     pub(crate) fn submit_changes<A>(&self, changelist: A) -> io::Result<()>
     where
-        A: Copy + AsRef<[libc::kevent]> + AsMut<[libc::kevent]>,
+        A: Copy + AsRef<[Kevent]> + AsMut<[Kevent]>,
     {
-        let mut eventlist = changelist;
+        let changelist = changelist.as_ref();
+        let mut eventlist = Vec::with_capacity(changelist.len());
 
         // Apply changes.
-        {
-            let changelist = changelist.as_ref();
-            let eventlist = eventlist.as_mut();
-
-            syscall!(kevent(
-                self.kqueue_fd,
-                changelist.as_ptr() as *const libc::kevent,
-                changelist.len() as _,
-                eventlist.as_mut_ptr() as *mut libc::kevent,
-                eventlist.len() as _,
-                ptr::null(),
-            ))?;
+        unsafe {
+            kqueue::kevent(&self.kqueue_fd, changelist, &mut eventlist, None)?;
         }
 
         // Check for errors.
-        for &ev in eventlist.as_ref() {
-            // Explanation for ignoring EPIPE: https://github.com/tokio-rs/mio/issues/582
-            if (ev.flags & libc::EV_ERROR) != 0
-                && ev.data != 0
-                && ev.data != libc::ENOENT as _
-                && ev.data != libc::EPIPE as _
+        for ev in eventlist {
+            let data: i32 = todo!();
+
+            // Explanation for ignoring EPIPE: https://github.com/tokio-rs/mio/issues/584
+            if (ev.flags().contains(EventFlags::ERROR))
+                && data != 0
+                && data != libc::ENOENT
+                && data != libc::EPIPE
             {
-                return Err(io::Error::from_raw_os_error(ev.data as _));
+                return Err(io::Error::from_raw_os_error(data as _));
             }
         }
 
@@ -145,30 +141,19 @@ impl Poller {
 
     /// Waits for I/O events with an optional timeout.
     pub fn wait(&self, events: &mut Events, timeout: Option<Duration>) -> io::Result<()> {
-        log::trace!("wait: kqueue_fd={}, timeout={:?}", self.kqueue_fd, timeout);
-
-        // Convert the `Duration` to `libc::timespec`.
-        let timeout = timeout.map(|t| libc::timespec {
-            tv_sec: t.as_secs() as libc::time_t,
-            tv_nsec: t.subsec_nanos() as libc::c_long,
-        });
+        log::trace!(
+            "wait: kqueue_fd={}, timeout={:?}",
+            self.kqueue_fd.as_raw_fd(),
+            timeout
+        );
 
         // Wait for I/O events.
-        let changelist = [];
-        let eventlist = &mut events.list;
-        let res = syscall!(kevent(
-            self.kqueue_fd,
-            changelist.as_ptr() as *const libc::kevent,
-            changelist.len() as _,
-            eventlist.as_mut_ptr() as *mut libc::kevent,
-            eventlist.len() as _,
-            match &timeout {
-                None => ptr::null(),
-                Some(t) => t,
-            }
-        ))?;
-        events.len = res as usize;
-        log::trace!("new events: kqueue_fd={}, res={}", self.kqueue_fd, res);
+        let res = unsafe { kqueue::kevent(&self.kqueue_fd, &[], &mut events.list, timeout)? };
+        log::trace!(
+            "new events: kqueue_fd={}, res={}",
+            self.kqueue_fd.as_raw_fd(),
+            res
+        );
 
         // Clear the notification (if received) and re-register interest in it.
         self.notify.reregister(self)?;
@@ -178,7 +163,7 @@ impl Poller {
 
     /// Sends a notification to wake up the current or next `wait()` call.
     pub fn notify(&self) -> io::Result<()> {
-        log::trace!("notify: kqueue_fd={}", self.kqueue_fd);
+        log::trace!("notify: kqueue_fd={}", self.kqueue_fd.as_raw_fd());
         self.notify.notify(self).ok();
         Ok(())
     }
@@ -186,7 +171,7 @@ impl Poller {
 
 impl AsRawFd for Poller {
     fn as_raw_fd(&self) -> RawFd {
-        self.kqueue_fd
+        self.kqueue_fd.as_raw_fd()
     }
 }
 
@@ -194,22 +179,20 @@ impl AsRawFd for Poller {
 impl AsFd for Poller {
     fn as_fd(&self) -> BorrowedFd<'_> {
         // SAFETY: lifetime is bound by "self"
-        unsafe { BorrowedFd::borrow_raw(self.kqueue_fd) }
+        self.kqueue_fd.as_fd()
     }
 }
 
 impl Drop for Poller {
     fn drop(&mut self) {
-        log::trace!("drop: kqueue_fd={}", self.kqueue_fd);
+        log::trace!("drop: kqueue_fd={}", self.kqueue_fd.as_raw_fd());
         let _ = self.notify.deregister(self);
-        let _ = syscall!(close(self.kqueue_fd));
     }
 }
 
 /// A list of reported I/O events.
 pub struct Events {
-    list: Box<[libc::kevent; 1024]>,
-    len: usize,
+    list: Vec<Kevent>,
 }
 
 unsafe impl Send for Events {}
@@ -217,54 +200,49 @@ unsafe impl Send for Events {}
 impl Events {
     /// Creates an empty list.
     pub fn new() -> Events {
-        let ev: libc::kevent = unsafe { mem::zeroed() };
-        let list = Box::new([ev; 1024]);
-        let len = 0;
-        Events { list, len }
+        Events {
+            list: Vec::with_capacity(1024),
+        }
     }
 
     /// Iterates over I/O events.
     pub fn iter(&self) -> impl Iterator<Item = Event> + '_ {
-        const READABLES: &[FilterName] = &[
-            libc::EVFILT_READ,
-            libc::EVFILT_VNODE,
-            libc::EVFILT_PROC,
-            libc::EVFILT_SIGNAL,
-            libc::EVFILT_TIMER,
-        ];
+        let is_readable = |ev: &Kevent| {
+            matches!(
+                ev.filter(),
+                EventFilter::Read(_)
+                    | EventFilter::Vnode { .. }
+                    | EventFilter::Proc { .. }
+                    | EventFilter::Timer(_)
+            )
+        };
+
+        let is_writable = |ev: &Kevent| {
+            matches!(ev.filter(), EventFilter::Write(_),)
+                || matches!(
+                    ev.filter(), EventFilter::Read(_) if ev.flags().contains(EventFlags::EOF)
+                )
+        };
 
         // On some platforms, closing the read end of a pipe wakes up writers, but the
         // event is reported as EVFILT_READ with the EV_EOF flag.
         //
         // https://github.com/golang/go/commit/23aad448b1e3f7c3b4ba2af90120bde91ac865b4
-        self.list[..self.len].iter().map(|ev| Event {
-            key: ev.udata as usize,
-            readable: READABLES.contains(&ev.filter),
-            writable: ev.filter == libc::EVFILT_WRITE
-                || (ev.filter == libc::EVFILT_READ && (ev.flags & libc::EV_EOF) != 0),
+        self.list.iter().map(move |ev| Event {
+            key: ev.udata() as usize,
+            readable: is_readable(ev),
+            writable: is_writable(ev),
         })
     }
 }
 
-pub(crate) fn mode_to_flags(mode: PollMode) -> FilterFlags {
+pub(crate) fn mode_to_flags(mode: PollMode) -> EventFlags {
     match mode {
-        PollMode::Oneshot => libc::EV_ONESHOT,
-        PollMode::Level => 0,
-        PollMode::Edge => libc::EV_CLEAR,
+        PollMode::Oneshot => EventFlags::ONESHOT,
+        PollMode::Level => EventFlags::empty(),
+        PollMode::Edge => EventFlags::CLEAR,
     }
 }
-
-#[cfg(target_os = "netbsd")]
-pub(crate) type FilterFlags = u32;
-
-#[cfg(not(target_os = "netbsd"))]
-pub(crate) type FilterFlags = libc::c_ushort;
-
-#[cfg(target_os = "netbsd")]
-pub(crate) type FilterName = u32;
-
-#[cfg(not(target_os = "netbsd"))]
-pub(crate) type FilterName = libc::c_short;
 
 #[cfg(any(
     target_os = "freebsd",
@@ -276,8 +254,12 @@ pub(crate) type FilterName = libc::c_short;
 ))]
 mod notify {
     use super::Poller;
+    use std::io;
     use std::os::unix::io::RawFd;
-    use std::{io, mem};
+
+    use rustix::io::kqueue::{
+        Event as Kevent, EventFilter, EventFlags, UserDefinedFlags, UserFlags,
+    };
 
     /// A notification pipe.
     ///
@@ -294,13 +276,15 @@ mod notify {
         /// Registers this notification pipe in the `Poller`.
         pub(super) fn register(&self, poller: &Poller) -> io::Result<()> {
             // Register an EVFILT_USER event.
-            poller.submit_changes([libc::kevent {
-                ident: 0,
-                filter: libc::EVFILT_USER,
-                flags: libc::EV_ADD | libc::EV_RECEIPT | libc::EV_CLEAR,
-                udata: crate::NOTIFY_KEY as _,
-                ..unsafe { mem::zeroed() }
-            }])
+            poller.submit_changes([Kevent::new(
+                EventFilter::User {
+                    ident: 0,
+                    flags: UserFlags::empty(),
+                    user_flags: UserDefinedFlags::new(0),
+                },
+                EventFlags::ADD | EventFlags::RECEIPT | EventFlags::CLEAR,
+                crate::NOTIFY_KEY as _,
+            )])
         }
 
         /// Reregister this notification pipe in the `Poller`.
@@ -312,28 +296,29 @@ mod notify {
         /// Notifies the `Poller`.
         pub(super) fn notify(&self, poller: &Poller) -> io::Result<()> {
             // Trigger the EVFILT_USER event.
-            poller.submit_changes([libc::kevent {
-                ident: 0,
-                filter: libc::EVFILT_USER,
-                flags: libc::EV_ADD | libc::EV_RECEIPT,
-                fflags: libc::NOTE_TRIGGER,
-                udata: crate::NOTIFY_KEY as _,
-                ..unsafe { mem::zeroed() }
-            }])?;
-
-            Ok(())
+            poller.submit_changes([Kevent::new(
+                EventFilter::User {
+                    ident: 0,
+                    flags: UserFlags::TRIGGER,
+                    user_flags: UserDefinedFlags::new(0),
+                },
+                EventFlags::ADD | EventFlags::RECEIPT,
+                crate::NOTIFY_KEY as _,
+            )])
         }
 
         /// Deregisters this notification pipe from the `Poller`.
         pub(super) fn deregister(&self, poller: &Poller) -> io::Result<()> {
             // Deregister the EVFILT_USER event.
-            poller.submit_changes([libc::kevent {
-                ident: 0,
-                filter: libc::EVFILT_USER,
-                flags: libc::EV_RECEIPT | libc::EV_DELETE,
-                udata: crate::NOTIFY_KEY as _,
-                ..unsafe { mem::zeroed() }
-            }])
+            poller.submit_changes([Kevent::new(
+                EventFilter::User {
+                    ident: 0,
+                    flags: UserFlags::empty(),
+                    user_flags: UserDefinedFlags::new(0),
+                },
+                EventFlags::DELETE | EventFlags::RECEIPT,
+                crate::NOTIFY_KEY as _,
+            )])
         }
 
         /// Whether this raw file descriptor is associated with this pipe.
