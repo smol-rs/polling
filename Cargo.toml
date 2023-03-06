@@ -7,10 +7,10 @@ version = "2.5.2"
 authors = ["Stjepan Glavina <stjepang@gmail.com>"]
 edition = "2018"
 rust-version = "1.47"
-description = "Portable interface to epoll, kqueue, event ports, and wepoll"
+description = "Portable interface to epoll, kqueue, event ports, and IOCP"
 license = "Apache-2.0 OR MIT"
 repository = "https://github.com/smol-rs/polling"
-keywords = ["mio", "epoll", "kqueue", "iocp", "wepoll"]
+keywords = ["mio", "epoll", "kqueue", "iocp"]
 categories = ["asynchronous", "network-programming", "os"]
 exclude = ["/.*"]
 
@@ -33,13 +33,19 @@ libc = "0.2.77"
 rustix = { version = "0.37.0-alpha.1", default-features = false, features = ["fs", "std", "time"] }
 
 [target.'cfg(windows)'.dependencies]
-wepoll-ffi = { version = "0.1.2", features = ["null-overlapped-wakeups-patch"] }
+bitflags = "1.3.2"
+concurrent-queue = "2.1.0"
+pin-project-lite = "0.2.9"
 
 [target.'cfg(windows)'.dependencies.windows-sys]
 version = "0.45"
 features = [
+    "Win32_Networking_WinSock",
     "Win32_System_IO",
-    "Win32_Foundation"
+    "Win32_System_LibraryLoader",
+    "Win32_System_WindowsProgramming",
+    "Win32_Storage_FileSystem",
+    "Win32_Foundation",
 ]
 
 [dev-dependencies]
