@@ -43,7 +43,7 @@ fn concurrent_modify() -> io::Result<()> {
 
     Parallel::new()
         .add(|| {
-            poller.wait(&mut events, None)?;
+            poller.wait(&mut events, Some(Duration::from_secs(10)))?;
             Ok(())
         })
         .add(|| {
