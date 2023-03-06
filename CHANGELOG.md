@@ -1,3 +1,14 @@
+# Version 2.6.0
+
+- Add level and edge triggered modes to the poller (#59)
+- Support tvOS and watchOS (#60)
+- Prevent large timeouts from causing panics on certain backends (#71)
+- For certain BSDs, use `EVFILT_USER` to wake up the poller instead of a pipe (#73)
+- For Solaris/illumos, use `port_send` to wake up the poller instead of a pipe (#74)
+- Update `windows_sys` from 0.42 to 0.45 (#80)
+- Expose other `kqueue` filter types (#83)
+- Replace the Windows backend with a hand-written version, rather than bringing in a C dependency (#88)
+
 # Version 2.5.2
 
 - Update use of `libc::timespec` to prepare for future libc version (#55)
