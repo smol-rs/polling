@@ -54,7 +54,7 @@ use std::os::windows::io::{AsHandle, BorrowedHandle};
 /// Macro to lock and ignore lock poisoning.
 macro_rules! lock {
     ($lock_result:expr) => {{
-        ($lock_result).unwrap_or_else(|e| e.into_inner())
+        $lock_result.unwrap_or_else(|e| e.into_inner())
     }};
 }
 
@@ -438,7 +438,7 @@ impl Events {
 
     /// Iterate over I/O events.
     pub(super) fn iter(&self) -> impl Iterator<Item = Event> + '_ {
-        self.packets.iter().cloned()
+        self.packets.iter().copied()
     }
 }
 
