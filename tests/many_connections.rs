@@ -1,5 +1,8 @@
 //! Tests to ensure more than 32 connections can be polled at once.
 
+// Doesn't work on OpenBSD.
+#![cfg(not(target_os = "openbsd"))]
+
 use std::io::{self, prelude::*};
 use std::net::{TcpListener, TcpStream};
 use std::time::Duration;
