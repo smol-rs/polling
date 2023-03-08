@@ -16,7 +16,7 @@ fn many_connections() {
     // Create a poller and add all the connections.
     let poller = polling::Poller::new().unwrap();
 
-    for (i,reader, _) in connections.iter() {
+    for (i, reader, _) in connections.iter() {
         poller.add(reader, polling::Event::readable(*i)).unwrap();
     }
 
@@ -30,7 +30,9 @@ fn many_connections() {
         writer.write_all(&[1]).unwrap();
 
         // Wait for the connection to become readable.
-        poller.wait(&mut events, Some(Duration::from_secs(10))).unwrap();
+        poller
+            .wait(&mut events, Some(Duration::from_secs(10)))
+            .unwrap();
 
         // Check that the connection is readable.
         assert_eq!(events.len(), 1, "events: {:?}", events);
