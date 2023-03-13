@@ -146,7 +146,7 @@ impl Poller {
         );
 
         // We don't support edge-triggered events.
-        if matches!(mode, PollMode::Edge) {
+        if matches!(mode, PollMode::Edge | PollMode::EdgeOneshot) {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 "edge-triggered events are not supported",
@@ -206,7 +206,7 @@ impl Poller {
         );
 
         // We don't support edge-triggered events.
-        if matches!(mode, PollMode::Edge) {
+        if matches!(mode, PollMode::Edge | PollMode::EdgeOneshot) {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 "edge-triggered events are not supported",

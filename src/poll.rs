@@ -416,7 +416,7 @@ fn cvt_mode_as_remove(mode: PollMode) -> io::Result<bool> {
     match mode {
         PollMode::Oneshot => Ok(true),
         PollMode::Level => Ok(false),
-        PollMode::Edge => Err(crate::unsupported_error(
+        _ => Err(crate::unsupported_error(
             "edge-triggered I/O events are not supported in poll()",
         )),
     }
