@@ -80,12 +80,22 @@ jobs:
     - name: Android
       if: startsWith(matrix.os, 'ubuntu')
       run: cross test --target arm-linux-androideabi
+    - name: NetBSD
+      if: startsWith(matrix.os, 'ubuntu')
+      run: cross build --target x86_64-unknown-netbsd
+    - name: FreeBSD
+      if: startsWith(matrix.os, 'ubuntu')
+      run: cross build --target x86_64-unknown-freebsd
     - name: iOS
       if: startsWith(matrix.os, 'macos')
-      run: cross build --target aarch64-apple-ios
+      run: |
+        rustup target add aarch64-apple-ios
+        cross build --target aarch64-apple-ios
     - name: Linux x32
       if: startsWith(matrix.os, 'ubuntu')
-      run: cross check --target x86_64-unknown-linux-gnux32
+      run: |
+        rustup target add x86_64-unknown-linux-gnux32
+        cross check --target x86_64-unknown-linux-gnux32
     - name: Fuchsia
       if: startsWith(matrix.os, 'ubuntu')
       run: |
