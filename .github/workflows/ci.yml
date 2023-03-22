@@ -77,6 +77,7 @@ jobs:
       run: rustup update stable
     - name: Install cross
       uses: taiki-e/install-action@cross
+    # We don't test BSDs, since we already test them in Cirrus/vmactions.
     - name: Android
       if: startsWith(matrix.os, 'ubuntu')
       run: cross test --target arm-linux-androideabi
@@ -93,8 +94,8 @@ jobs:
     - name: Fuchsia
       if: startsWith(matrix.os, 'ubuntu')
       run: |
-        rustup target add x86_64-fuchsia
-        cargo build --target x86_64-fuchsia
+        rustup target add x86_64-unknown-fuchsia
+        cargo build --target x86_64-unknown-fuchsia
     - name: illumos
       if: startsWith(matrix.os, 'ubuntu')
       run: |
