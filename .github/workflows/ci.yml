@@ -76,24 +76,26 @@ jobs:
     - name: Install Rust
       run: rustup update stable
     - name: Install cross
-      uses: taiki-e/install-action@v2
-      with:
-        # https://github.com/cross-rs/cross/issues/724
-        tool: cross@0.2.1
+      uses: taiki-e/install-action@cross
+    # We don't test BSDs, since we already test them in Cirrus/vmactions.
     - name: Android
       if: startsWith(matrix.os, 'ubuntu')
       run: cross test --target arm-linux-androideabi
     - name: iOS
       if: startsWith(matrix.os, 'macos')
-      run: cross build --target aarch64-apple-ios
+      run: |
+        rustup target add aarch64-apple-ios
+        cross build --target aarch64-apple-ios
     - name: Linux x32
       if: startsWith(matrix.os, 'ubuntu')
-      run: cross check --target x86_64-unknown-linux-gnux32
+      run: |
+        rustup target add x86_64-unknown-linux-gnux32
+        cross check --target x86_64-unknown-linux-gnux32
     - name: Fuchsia
       if: startsWith(matrix.os, 'ubuntu')
       run: |
-        rustup target add x86_64-fuchsia
-        cargo build --target x86_64-fuchsia
+        rustup target add x86_64-unknown-fuchsia
+        cargo build --target x86_64-unknown-fuchsia
     - name: illumos
       if: startsWith(matrix.os, 'ubuntu')
       run: |
