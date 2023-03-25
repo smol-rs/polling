@@ -251,6 +251,7 @@ pub(crate) fn mode_to_flags(mode: PollMode) -> FilterFlags {
         PollMode::Oneshot => libc::EV_ONESHOT,
         PollMode::Level => 0,
         PollMode::Edge => libc::EV_CLEAR,
+        PollMode::EdgeOneshot => libc::EV_ONESHOT | libc::EV_CLEAR,
     }
 }
 

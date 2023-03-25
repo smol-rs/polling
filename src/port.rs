@@ -53,7 +53,7 @@ impl Poller {
             flags |= libc::POLLOUT;
         }
 
-        if let PollMode::Edge | PollMode::Level = mode {
+        if mode != PollMode::Oneshot {
             return Err(crate::unsupported_error(
                 "this kind of event is not supported with event ports",
             ));

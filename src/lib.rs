@@ -168,6 +168,16 @@ pub enum PollMode {
     /// this mode in an unsupported operating system will raise an error. You can check if
     /// the operating system supports this mode by calling `Poller::supports_edge`.
     Edge,
+
+    /// Poll in both edge-triggered and oneshot mode.
+    ///
+    /// This mode is similar to the `Oneshot` mode, but it will only deliver one event per new
+    /// event.
+    ///
+    /// Not all operating system support this mode. Trying to register a file descriptor with
+    /// this mode in an unsupported operating system will raise an error. You can check if
+    /// the operating system supports this mode by calling `Poller::supports_edge`.
+    EdgeOneshot,
 }
 
 impl Event {

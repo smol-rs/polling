@@ -222,6 +222,7 @@ impl Poller {
                 PollMode::Oneshot => libc::EPOLLONESHOT,
                 PollMode::Level => 0,
                 PollMode::Edge => libc::EPOLLET,
+                PollMode::EdgeOneshot => libc::EPOLLONESHOT | libc::EPOLLET,
             };
             if ev.readable {
                 flags |= read_flags();
