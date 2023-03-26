@@ -106,6 +106,12 @@ jobs:
     runs-on: macos-12
     steps:
     - uses: actions/checkout@v3
+    - name: Clone async-io
+      run: git clone https://github.com/smol-rs/async-io.git
+    - name: Add patch section
+      run: echo '[patch.crates-io]' >> async-io/Cargo.toml
+    - name: Patch polling
+      run: echo 'polling = { path = ".." }' >> async-io/Cargo.toml
     - name: Test NetBSD
       id: test
       uses: vmactions/netbsd-vm@v0
@@ -117,12 +123,20 @@ jobs:
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable
         run: |
           . $HOME/.cargo/env
+          set -ex
           cargo test
+          cargo test --manifest-path=async-io/Cargo.toml
 
   openbsd:
     runs-on: macos-12
     steps:
     - uses: actions/checkout@v3
+    - name: Clone async-io
+      run: git clone https://github.com/smol-rs/async-io.git
+    - name: Add patch section
+      run: echo '[patch.crates-io]' >> async-io/Cargo.toml
+    - name: Patch polling
+      run: echo 'polling = { path = ".." }' >> async-io/Cargo.toml
     - name: Test OpenBSD
       id: test
       uses: vmactions/openbsd-vm@v0
@@ -133,12 +147,20 @@ jobs:
         prepare: |
           pkg_add git rust
         run: |
+          set -ex
           cargo test
+          cargo test --manifest-path=async-io/Cargo.toml
 
   dragonfly:
     runs-on: macos-12
     steps:
     - uses: actions/checkout@v3
+    - name: Clone async-io
+      run: git clone https://github.com/smol-rs/async-io.git
+    - name: Add patch section
+      run: echo '[patch.crates-io]' >> async-io/Cargo.toml
+    - name: Patch polling
+      run: echo 'polling = { path = ".." }' >> async-io/Cargo.toml
     - name: Test Dragonfly BSD
       id: test
       uses: vmactions/dragonflybsd-vm@v0
@@ -149,7 +171,9 @@ jobs:
         prepare: |
           pkg install -y git rust
         run: |
+          set -ex
           cargo test
+          cargo test --manifest-path=async-io/Cargo.toml
 
   wine:
     runs-on: ubuntu-22.04
@@ -211,6 +235,10 @@ jobs:
       - run: cargo fmt --all --check
 
   security_audit:
+    permissions:
+      checks: write
+      contents: read
+      issues: write
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3

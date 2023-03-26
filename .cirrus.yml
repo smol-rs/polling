@@ -23,5 +23,12 @@ freebsd_task:
     - pkg install -y git
     - curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable --target $TARGET
   test_script:
+    # https://github.com/cirruslabs/cirrus-ci-docs/issues/483
+    - sudo sysctl net.inet.tcp.blackhole=0
     - . $HOME/.cargo/env
     - cargo test --target $TARGET
+    # Test async-io
+    - git clone https://github.com/smol-rs/async-io.git
+    - echo '[patch.crates-io]' >> async-io/Cargo.toml
+    - echo 'polling = { path = ".." }' >> async-io/Cargo.toml
+    - cargo test --target $TARGET --manifest-path=async-io/Cargo.toml
