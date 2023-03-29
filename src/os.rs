@@ -15,7 +15,12 @@
 ))]
 pub mod kqueue;
 
+#[cfg(target_os = "windows")]
+pub mod iocp;
+
 mod __private {
     #[doc(hidden)]
     pub trait PollerSealed {}
+
+    impl PollerSealed for crate::Poller {}
 }
