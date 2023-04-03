@@ -14,7 +14,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Once;
 
 use windows_sys::Win32::Foundation::{
-    CloseHandle, HANDLE, HINSTANCE, NTSTATUS, STATUS_NOT_FOUND, STATUS_PENDING, STATUS_SUCCESS,
+    CloseHandle, HANDLE, HMODULE, NTSTATUS, STATUS_NOT_FOUND, STATUS_PENDING, STATUS_SUCCESS,
     UNICODE_STRING,
 };
 use windows_sys::Win32::Networking::WinSock::{
@@ -102,7 +102,7 @@ macro_rules! define_ntdll_import {
 
         #[allow(non_snake_case)]
         impl NtdllImports {
-            unsafe fn load(ntdll: HINSTANCE) -> io::Result<Self> {
+            unsafe fn load(ntdll: HMODULE) -> io::Result<Self> {
                 $(
                     let $name = {
                         const NAME: &str = concat!(stringify!($name), "\0");
