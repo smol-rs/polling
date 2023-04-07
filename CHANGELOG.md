@@ -1,3 +1,8 @@
+# Version 2.7.0
+
+- Add edge/oneshot combination mode. (#96)
+- Update windows-sys requirement from 0.45 to 0.48. (#103)
+
 # Version 2.6.0
 
 - Add level and edge triggered modes to the poller (#59)
