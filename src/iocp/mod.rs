@@ -458,11 +458,11 @@ impl CompletionPacket {
     }
 
     /// Get the event associated with this packet.
-    pub fn event(&self) -> Event {
+    pub fn event(&self) -> &Event {
         let data = self.0.as_ref().data().project_ref();
 
         match data {
-            PacketInnerProj::Custom { event } => *event,
+            PacketInnerProj::Custom { event } => event,
             _ => unreachable!(),
         }
     }
