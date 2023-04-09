@@ -352,7 +352,8 @@ impl Poller {
         };
 
         // Only drain the queue's capacity, since this could in theory run forever.
-        core::iter::from_fn(|| self.pending_updates.pop().ok())
+        self.pending_updates
+            .try_iter()
             .take(max)
             .try_for_each(|packet| packet.update())
     }
