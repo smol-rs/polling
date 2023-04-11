@@ -324,8 +324,8 @@ impl Poller {
     }
 
     /// Push an IOCP packet into the queue.
-    pub(super) fn post(&self, packet: &CompletionPacket) -> io::Result<()> {
-        self.port.post(0, 0, packet.clone().0)
+    pub(super) fn post(&self, packet: CompletionPacket) -> io::Result<()> {
+        self.port.post(0, 0, packet.0)
     }
 
     /// Run an update on a packet.

@@ -31,7 +31,7 @@ pub trait PollerIocpExt: PollerSealed {
     ///     move || {
     ///         let packet = CompletionPacket::new(Event::readable(0));
     ///         thread::sleep(Duration::from_millis(100));
-    ///         poller.post(&packet).unwrap();
+    ///         poller.post(packet).unwrap();
     ///     }
     /// });
     ///
@@ -42,11 +42,11 @@ pub trait PollerIocpExt: PollerSealed {
     /// assert_eq!(events.len(), 1);
     /// # Ok(()) }
     /// ```
-    fn post(&self, packet: &CompletionPacket) -> io::Result<()>;
+    fn post(&self, packet: CompletionPacket) -> io::Result<()>;
 }
 
 impl PollerIocpExt for Poller {
-    fn post(&self, packet: &CompletionPacket) -> io::Result<()> {
+    fn post(&self, packet: CompletionPacket) -> io::Result<()> {
         self.poller.post(packet)
     }
 }
