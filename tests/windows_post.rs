@@ -47,8 +47,7 @@ fn post_multithread() {
             .unwrap();
 
         assert_eq!(events.len(), 1);
-        assert_eq!(events[0], Event::writable(i));
-        events.clear();
+        assert_eq!(events.pop(), Some(Event::writable(i)));
     }
 
     poller
