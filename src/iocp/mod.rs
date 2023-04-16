@@ -323,6 +323,11 @@ impl Poller {
         self.port.post(0, 0, self.notifier.clone())
     }
 
+    /// Push an IOCP packet into the queue.
+    pub(super) fn post(&self, packet: CompletionPacket) -> io::Result<()> {
+        self.port.post(0, 0, packet.0)
+    }
+
     /// Run an update on a packet.
     fn update_packet(&self, mut packet: Packet) -> io::Result<()> {
         loop {
@@ -443,6 +448,27 @@ impl Events {
     }
 }
 
+/// A packet used to wake up the poller with an event.
+#[derive(Debug, Clone)]
+pub struct CompletionPacket(Packet);
+
+impl CompletionPacket {
+    /// Create a new completion packet with a custom event.
+    pub fn new(event: Event) -> Self {
+        Self(Arc::pin(IoStatusBlock::from(PacketInner::Custom { event })))
+    }
+
+    /// Get the event associated with this packet.
+    pub fn event(&self) -> &Event {
+        let data = self.0.as_ref().data().project_ref();
+
+        match data {
+            PacketInnerProj::Custom { event } => event,
+            _ => unreachable!(),
+        }
+    }
+}
+
 /// The type of our completion packet.
 type Packet = Pin<Arc<PacketUnwrapped>>;
 type PacketUnwrapped = IoStatusBlock<PacketInner>;
@@ -462,6 +488,11 @@ pin_project! {
             socket: Mutex<SocketState>
         },
 
+        /// A custom event sent by the user.
+        Custom {
+            event: Event,
+        },
+
         // A packet used to wake up the poller.
         Wakeup { #[pin] _pinned: PhantomPinned },
     }
@@ -471,6 +502,7 @@ impl fmt::Debug for PacketInner {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Wakeup { .. } => f.write_str("Wakeup { .. }"),
+            Self::Custom { event } => f.debug_struct("Custom").field("event", event).finish(),
             Self::Socket { socket, .. } => f
                 .debug_struct("Socket")
                 .field("packet", &"..")
@@ -484,7 +516,7 @@ impl HasAfdInfo for PacketInner {
     fn afd_info(self: Pin<&Self>) -> Pin<&UnsafeCell<AfdPollInfo>> {
         match self.project_ref() {
             PacketInnerProj::Socket { packet, .. } => packet,
-            PacketInnerProj::Wakeup { .. } => unreachable!(),
+            _ => unreachable!(),
         }
     }
 }
@@ -591,6 +623,10 @@ impl PacketUnwrapped {
 
         let (afd_info, socket) = match inner {
             PacketInnerProj::Socket { packet, socket } => (packet, socket),
+            PacketInnerProj::Custom { event } => {
+                // This is a custom event.
+                return Ok(FeedEventResult::Event(*event));
+            }
             PacketInnerProj::Wakeup { .. } => {
                 // The poller was notified.
                 return Ok(FeedEventResult::Notified);
@@ -712,8 +748,8 @@ impl PacketUnwrapped {
         let inner = self.data().project_ref();
 
         let state = match inner {
-            PacketInnerProj::Wakeup { .. } => return None,
             PacketInnerProj::Socket { socket, .. } => socket,
+            _ => return None,
         };
 
         Some(lock!(state.lock()))

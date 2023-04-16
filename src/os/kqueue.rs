@@ -93,8 +93,6 @@ pub trait PollerKqueueExt<F: Filter>: PollerSealed {
     fn delete_filter(&self, filter: F) -> io::Result<()>;
 }
 
-impl PollerSealed for Poller {}
-
 impl<F: Filter> PollerKqueueExt<F> for Poller {
     #[inline(always)]
     fn add_filter(&self, filter: F, key: usize, mode: PollMode) -> io::Result<()> {
