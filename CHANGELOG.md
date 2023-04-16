@@ -1,3 +1,7 @@
+# Version 2.8.0
+
+- Add functionality for posting events to the IOCP. (#101)
+
 # Version 2.7.0
 
 - Add edge/oneshot combination mode. (#96)
