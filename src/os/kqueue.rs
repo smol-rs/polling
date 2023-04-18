@@ -225,7 +225,10 @@ pub struct Timer {
 unsafe impl FilterSealed for Timer {
     fn filter(&self, flags: kqueue::EventFlags, key: usize) -> kqueue::Event {
         kqueue::Event::new(
-            kqueue::EventFilter::Timer(Some(self.timeout)),
+            kqueue::EventFilter::Timer {
+                ident: self.id as _,
+                timer: Some(self.timeout),
+            },
             flags | kqueue::EventFlags::RECEIPT,
             key as _,
         )

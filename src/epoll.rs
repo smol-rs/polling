@@ -98,7 +98,7 @@ impl Poller {
 
         epoll::epoll_add(
             &self.epoll_fd,
-            unsafe { BorrowedFd::borrow_raw(fd) },
+            unsafe { rustix::fd::BorrowedFd::borrow_raw(fd) },
             ev.key as u64,
             epoll_flags(&ev, mode),
         )?;
@@ -117,7 +117,7 @@ impl Poller {
 
         epoll::epoll_mod(
             &self.epoll_fd,
-            unsafe { BorrowedFd::borrow_raw(fd) },
+            unsafe { rustix::fd::BorrowedFd::borrow_raw(fd) },
             ev.key as u64,
             epoll_flags(&ev, mode),
         )?;
@@ -129,7 +129,9 @@ impl Poller {
     pub fn delete(&self, fd: RawFd) -> io::Result<()> {
         log::trace!("remove: epoll_fd={}, fd={}", self.epoll_fd.as_raw_fd(), fd);
 
-        epoll::epoll_del(&self.epoll_fd, unsafe { BorrowedFd::borrow_raw(fd) })?;
+        epoll::epoll_del(&self.epoll_fd, unsafe {
+            rustix::fd::BorrowedFd::borrow_raw(fd)
+        })?;
 
         Ok(())
     }

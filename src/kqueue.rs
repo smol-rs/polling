@@ -220,7 +220,7 @@ impl Events {
                     | kqueue::EventFilter::Vnode { .. }
                     | kqueue::EventFilter::Proc { .. }
                     | kqueue::EventFilter::Signal { .. }
-                    | kqueue::EventFilter::Timer(..)
+                    | kqueue::EventFilter::Timer { .. }
             ),
             writable: matches!(ev.filter(), kqueue::EventFilter::Write(..))
                 || (matches!(ev.filter(), kqueue::EventFilter::Read(..))
