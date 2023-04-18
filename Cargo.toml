@@ -30,6 +30,7 @@ autocfg = "1"
 
 [target.'cfg(any(unix, target_os = "fuchsia", target_os = "vxworks"))'.dependencies]
 libc = "0.2.77"
+rustix = { version = "0.37.11", features = ["process", "time", "fs", "std"], default-features = false }
 
 [target.'cfg(windows)'.dependencies]
 bitflags = "1.3.2"

@@ -65,6 +65,7 @@ use std::usize;
 use cfg_if::cfg_if;
 
 /// Calls a libc function and results in `io::Result`.
+#[allow(unused)]
 #[cfg(unix)]
 macro_rules! syscall {
     ($fn:ident $args:tt) => {{

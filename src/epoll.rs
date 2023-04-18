@@ -3,8 +3,14 @@
 use std::convert::TryInto;
 use std::io;
 use std::os::unix::io::{AsRawFd, RawFd};
-use std::ptr;
 use std::time::Duration;
+
+use rustix::fd::OwnedFd;
+use rustix::io::{epoll, eventfd, read, write, EventfdFlags};
+use rustix::time::{
+    timerfd_create, timerfd_settime, Itimerspec, TimerfdClockId, TimerfdFlags, TimerfdTimerFlags,
+    Timespec,
+};
 
 #[cfg(not(polling_no_io_safety))]
 use std::os::unix::io::{AsFd, BorrowedFd};
@@ -15,11 +21,11 @@ use crate::{Event, PollMode};
 #[derive(Debug)]
 pub struct Poller {
     /// File descriptor for the epoll instance.
-    epoll_fd: RawFd,
+    epoll_fd: OwnedFd,
     /// File descriptor for the eventfd that produces notifications.
-    event_fd: RawFd,
+    event_fd: OwnedFd,
     /// File descriptor for the timerfd that produces timeouts.
-    timer_fd: Option<RawFd>,
+    timer_fd: Option<OwnedFd>,
 }
 
 impl Poller {
@@ -28,36 +34,14 @@ impl Poller {
         // Create an epoll instance.
         //
         // Use `epoll_create1` with `EPOLL_CLOEXEC`.
-        let epoll_fd = syscall!(syscall(
-            libc::SYS_epoll_create1,
-            libc::EPOLL_CLOEXEC as libc::c_int
-        ))
-        .map(|fd| fd as libc::c_int)
-        .or_else(|e| {
-            match e.raw_os_error() {
-                Some(libc::ENOSYS) => {
-                    // If `epoll_create1` is not implemented, use `epoll_create`
-                    // and manually set `FD_CLOEXEC`.
-                    let fd = syscall!(epoll_create(1024))?;
-
-                    if let Ok(flags) = syscall!(fcntl(fd, libc::F_GETFD)) {
-                        let _ = syscall!(fcntl(fd, libc::F_SETFD, flags | libc::FD_CLOEXEC));
-                    }
-
-                    Ok(fd)
-                }
-                _ => Err(e),
-            }
-        })?;
+        let epoll_fd = epoll::epoll_create(epoll::CreateFlags::CLOEXEC)?;
 
         // Set up eventfd and timerfd.
-        let event_fd = syscall!(eventfd(0, libc::EFD_CLOEXEC | libc::EFD_NONBLOCK))?;
-        let timer_fd = syscall!(syscall(
-            libc::SYS_timerfd_create,
-            libc::CLOCK_MONOTONIC as libc::c_int,
-            (libc::TFD_CLOEXEC | libc::TFD_NONBLOCK) as libc::c_int,
-        ))
-        .map(|fd| fd as libc::c_int)
+        let event_fd = eventfd(0, EventfdFlags::CLOEXEC | EventfdFlags::NONBLOCK)?;
+        let timer_fd = timerfd_create(
+            TimerfdClockId::Monotonic,
+            TimerfdFlags::CLOEXEC | TimerfdFlags::NONBLOCK,
+        )
         .ok();
 
         let poller = Poller {
@@ -66,12 +50,16 @@ impl Poller {
             timer_fd,
         };
 
-        if let Some(timer_fd) = timer_fd {
-            poller.add(timer_fd, Event::none(crate::NOTIFY_KEY), PollMode::Oneshot)?;
+        if let Some(ref timer_fd) = poller.timer_fd {
+            poller.add(
+                timer_fd.as_raw_fd(),
+                Event::none(crate::NOTIFY_KEY),
+                PollMode::Oneshot,
+            )?;
         }
 
         poller.add(
-            event_fd,
+            poller.event_fd.as_raw_fd(),
             Event {
                 key: crate::NOTIFY_KEY,
                 readable: true,
@@ -82,9 +70,9 @@ impl Poller {
 
         log::trace!(
             "new: epoll_fd={}, event_fd={}, timer_fd={:?}",
-            epoll_fd,
-            event_fd,
-            timer_fd
+            poller.epoll_fd.as_raw_fd(),
+            poller.event_fd.as_raw_fd(),
+            poller.timer_fd
         );
         Ok(poller)
     }
@@ -101,29 +89,63 @@ impl Poller {
 
     /// Adds a new file descriptor.
     pub fn add(&self, fd: RawFd, ev: Event, mode: PollMode) -> io::Result<()> {
-        log::trace!("add: epoll_fd={}, fd={}, ev={:?}", self.epoll_fd, fd, ev);
-        self.ctl(libc::EPOLL_CTL_ADD, fd, Some((ev, mode)))
+        log::trace!(
+            "add: epoll_fd={}, fd={}, ev={:?}",
+            self.epoll_fd.as_raw_fd(),
+            fd,
+            ev
+        );
+
+        epoll::epoll_add(
+            &self.epoll_fd,
+            unsafe { BorrowedFd::borrow_raw(fd) },
+            ev.key as u64,
+            epoll_flags(&ev, mode),
+        )?;
+
+        Ok(())
     }
 
     /// Modifies an existing file descriptor.
     pub fn modify(&self, fd: RawFd, ev: Event, mode: PollMode) -> io::Result<()> {
-        log::trace!("modify: epoll_fd={}, fd={}, ev={:?}", self.epoll_fd, fd, ev);
-        self.ctl(libc::EPOLL_CTL_MOD, fd, Some((ev, mode)))
+        log::trace!(
+            "modify: epoll_fd={}, fd={}, ev={:?}",
+            self.epoll_fd.as_raw_fd(),
+            fd,
+            ev
+        );
+
+        epoll::epoll_mod(
+            &self.epoll_fd,
+            unsafe { BorrowedFd::borrow_raw(fd) },
+            ev.key as u64,
+            epoll_flags(&ev, mode),
+        )?;
+
+        Ok(())
     }
 
     /// Deletes a file descriptor.
     pub fn delete(&self, fd: RawFd) -> io::Result<()> {
-        log::trace!("remove: epoll_fd={}, fd={}", self.epoll_fd, fd);
-        self.ctl(libc::EPOLL_CTL_DEL, fd, None)
+        log::trace!("remove: epoll_fd={}, fd={}", self.epoll_fd.as_raw_fd(), fd);
+
+        epoll::epoll_del(&self.epoll_fd, unsafe { BorrowedFd::borrow_raw(fd) })?;
+
+        Ok(())
     }
 
     /// Waits for I/O events with an optional timeout.
+    #[allow(clippy::needless_update)]
     pub fn wait(&self, events: &mut Events, timeout: Option<Duration>) -> io::Result<()> {
-        log::trace!("wait: epoll_fd={}, timeout={:?}", self.epoll_fd, timeout);
+        log::trace!(
+            "wait: epoll_fd={}, timeout={:?}",
+            self.epoll_fd.as_raw_fd(),
+            timeout
+        );
 
-        if let Some(timer_fd) = self.timer_fd {
+        if let Some(ref timer_fd) = self.timer_fd {
             // Configure the timeout using timerfd.
-            let new_val = libc::itimerspec {
+            let new_val = Itimerspec {
                 it_interval: TS_ZERO,
                 it_value: match timeout {
                     None => TS_ZERO,
@@ -134,18 +156,14 @@ impl Poller {
                         ts
                     }
                 },
+                ..unsafe { std::mem::zeroed() }
             };
 
-            syscall!(timerfd_settime(
-                timer_fd as libc::c_int,
-                0 as libc::c_int,
-                &new_val as *const libc::itimerspec,
-                ptr::null_mut() as *mut libc::itimerspec
-            ))?;
+            timerfd_settime(timer_fd, TimerfdTimerFlags::empty(), &new_val)?;
 
             // Set interest in timerfd.
             self.modify(
-                timer_fd,
+                timer_fd.as_raw_fd(),
                 Event {
                     key: crate::NOTIFY_KEY,
                     readable: true,
@@ -156,7 +174,7 @@ impl Poller {
         }
 
         // Timeout in milliseconds for epoll.
-        let timeout_ms = match (self.timer_fd, timeout) {
+        let timeout_ms = match (&self.timer_fd, timeout) {
             (_, Some(t)) if t == Duration::from_secs(0) => 0,
             (None, Some(t)) => {
                 // Round up to a whole millisecond.
@@ -170,24 +188,18 @@ impl Poller {
         };
 
         // Wait for I/O events.
-        let res = syscall!(epoll_wait(
-            self.epoll_fd,
-            events.list.as_mut_ptr() as *mut libc::epoll_event,
-            events.list.len() as libc::c_int,
-            timeout_ms as libc::c_int,
-        ))?;
-        events.len = res as usize;
-        log::trace!("new events: epoll_fd={}, res={}", self.epoll_fd, res);
+        epoll::epoll_wait(&self.epoll_fd, &mut events.list, timeout_ms)?;
+        log::trace!(
+            "new events: epoll_fd={}, res={}",
+            self.epoll_fd.as_raw_fd(),
+            events.list.len()
+        );
 
         // Clear the notification (if received) and re-register interest in it.
         let mut buf = [0u8; 8];
-        let _ = syscall!(read(
-            self.event_fd,
-            buf.as_mut_ptr() as *mut libc::c_void,
-            buf.len()
-        ));
+        let _ = read(&self.event_fd, &mut buf);
         self.modify(
-            self.event_fd,
+            self.event_fd.as_raw_fd(),
             Event {
                 key: crate::NOTIFY_KEY,
                 readable: true,
@@ -202,62 +214,26 @@ impl Poller {
     pub fn notify(&self) -> io::Result<()> {
         log::trace!(
             "notify: epoll_fd={}, event_fd={}",
-            self.epoll_fd,
-            self.event_fd
+            self.epoll_fd.as_raw_fd(),
+            self.event_fd.as_raw_fd()
         );
 
         let buf: [u8; 8] = 1u64.to_ne_bytes();
-        let _ = syscall!(write(
-            self.event_fd,
-            buf.as_ptr() as *const libc::c_void,
-            buf.len()
-        ));
-        Ok(())
-    }
-
-    /// Passes arguments to `epoll_ctl`.
-    fn ctl(&self, op: libc::c_int, fd: RawFd, ev: Option<(Event, PollMode)>) -> io::Result<()> {
-        let mut ev = ev.map(|(ev, mode)| {
-            let mut flags = match mode {
-                PollMode::Oneshot => libc::EPOLLONESHOT,
-                PollMode::Level => 0,
-                PollMode::Edge => libc::EPOLLET,
-                PollMode::EdgeOneshot => libc::EPOLLONESHOT | libc::EPOLLET,
-            };
-            if ev.readable {
-                flags |= read_flags();
-            }
-            if ev.writable {
-                flags |= write_flags();
-            }
-            libc::epoll_event {
-                events: flags as _,
-                u64: ev.key as u64,
-            }
-        });
-        syscall!(epoll_ctl(
-            self.epoll_fd,
-            op,
-            fd,
-            ev.as_mut()
-                .map(|ev| ev as *mut libc::epoll_event)
-                .unwrap_or(ptr::null_mut()),
-        ))?;
+        let _ = write(&self.event_fd, &buf);
         Ok(())
     }
 }
 
 impl AsRawFd for Poller {
     fn as_raw_fd(&self) -> RawFd {
-        self.epoll_fd
+        self.epoll_fd.as_raw_fd()
     }
 }
 
 #[cfg(not(polling_no_io_safety))]
 impl AsFd for Poller {
     fn as_fd(&self) -> BorrowedFd<'_> {
-        // SAFETY: lifetime is bound by "self"
-        unsafe { BorrowedFd::borrow_raw(self.as_raw_fd()) }
+        self.epoll_fd.as_fd()
     }
 }
 
@@ -265,39 +241,53 @@ impl Drop for Poller {
     fn drop(&mut self) {
         log::trace!(
             "drop: epoll_fd={}, event_fd={}, timer_fd={:?}",
-            self.epoll_fd,
-            self.event_fd,
+            self.epoll_fd.as_raw_fd(),
+            self.event_fd.as_raw_fd(),
             self.timer_fd
         );
 
-        if let Some(timer_fd) = self.timer_fd {
-            let _ = self.delete(timer_fd);
-            let _ = syscall!(close(timer_fd));
+        if let Some(timer_fd) = self.timer_fd.take() {
+            let _ = self.delete(timer_fd.as_raw_fd());
         }
-        let _ = self.delete(self.event_fd);
-        let _ = syscall!(close(self.event_fd));
-        let _ = syscall!(close(self.epoll_fd));
+        let _ = self.delete(self.event_fd.as_raw_fd());
     }
 }
 
 /// `timespec` value that equals zero.
-const TS_ZERO: libc::timespec =
-    unsafe { std::mem::transmute([0u8; std::mem::size_of::<libc::timespec>()]) };
+const TS_ZERO: Timespec = unsafe { std::mem::transmute([0u8; std::mem::size_of::<Timespec>()]) };
+
+/// Get the EPOLL flags for the interest.
+fn epoll_flags(interest: &Event, mode: PollMode) -> epoll::EventFlags {
+    let mut flags = match mode {
+        PollMode::Oneshot => epoll::EventFlags::ONESHOT,
+        PollMode::Level => epoll::EventFlags::empty(),
+        PollMode::Edge => epoll::EventFlags::ET,
+        PollMode::EdgeOneshot => epoll::EventFlags::ET | epoll::EventFlags::ONESHOT,
+    };
+    if interest.readable {
+        flags |= read_flags();
+    }
+    if interest.writable {
+        flags |= write_flags();
+    }
+    flags
+}
 
 /// Epoll flags for all possible readability events.
-fn read_flags() -> libc::c_int {
-    libc::EPOLLIN | libc::EPOLLRDHUP | libc::EPOLLHUP | libc::EPOLLERR | libc::EPOLLPRI
+fn read_flags() -> epoll::EventFlags {
+    use epoll::EventFlags as Epoll;
+    Epoll::IN | Epoll::HUP | Epoll::ERR | Epoll::PRI
 }
 
 /// Epoll flags for all possible writability events.
-fn write_flags() -> libc::c_int {
-    libc::EPOLLOUT | libc::EPOLLHUP | libc::EPOLLERR
+fn write_flags() -> epoll::EventFlags {
+    use epoll::EventFlags as Epoll;
+    Epoll::OUT | Epoll::HUP | Epoll::ERR
 }
 
 /// A list of reported I/O events.
 pub struct Events {
-    list: Box<[libc::epoll_event; 1024]>,
-    len: usize,
+    list: epoll::EventVec,
 }
 
 unsafe impl Send for Events {}
@@ -305,18 +295,17 @@ unsafe impl Send for Events {}
 impl Events {
     /// Creates an empty list.
     pub fn new() -> Events {
-        let ev = libc::epoll_event { events: 0, u64: 0 };
-        let list = Box::new([ev; 1024]);
-        let len = 0;
-        Events { list, len }
+        Events {
+            list: epoll::EventVec::with_capacity(1024),
+        }
     }
 
     /// Iterates over I/O events.
     pub fn iter(&self) -> impl Iterator<Item = Event> + '_ {
-        self.list[..self.len].iter().map(|ev| Event {
-            key: ev.u64 as usize,
-            readable: (ev.events as libc::c_int & read_flags()) != 0,
-            writable: (ev.events as libc::c_int & write_flags()) != 0,
+        self.list.iter().map(|(flags, data)| Event {
+            key: data as usize,
+            readable: flags.intersects(read_flags()),
+            writable: flags.intersects(write_flags()),
         })
     }
 }
