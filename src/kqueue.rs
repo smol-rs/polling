@@ -8,9 +8,7 @@ use std::time::Duration;
 use std::os::unix::io::{AsFd, BorrowedFd};
 
 use rustix::fd::OwnedFd;
-use rustix::io::fcntl_setfd;
-use rustix::io::kqueue;
-use rustix::io::FdFlags;
+use rustix::io::{fcntl_setfd, kqueue, Errno, FdFlags};
 
 use crate::{Event, PollMode};
 
@@ -128,8 +126,8 @@ impl Poller {
             // Explanation for ignoring EPIPE: https://github.com/tokio-rs/mio/issues/582
             if (ev.flags().contains(kqueue::EventFlags::ERROR))
                 && data != 0
-                && data != libc::ENOENT as _
-                && data != libc::EPIPE as _
+                && data != Errno::NOENT.raw_os_error() as _
+                && data != Errno::PIPE.raw_os_error() as _
             {
                 return Err(io::Error::from_raw_os_error(data as _));
             }

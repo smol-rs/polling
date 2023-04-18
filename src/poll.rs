@@ -15,7 +15,7 @@ use rustix::io::{
 };
 
 // std::os::unix doesn't exist on Fuchsia
-use libc::c_int as RawFd;
+type RawFd = std::os::raw::c_int;
 
 use crate::{Event, PollMode};
 
