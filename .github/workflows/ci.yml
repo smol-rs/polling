@@ -203,7 +203,7 @@ jobs:
         os: [ubuntu-latest, windows-latest]
         # When updating this, the reminder to update the minimum supported
         # Rust version in Cargo.toml.
-        rust: ['1.47']
+        rust: ['1.48']
     steps:
       - uses: actions/checkout@v3
       - name: Install Rust
