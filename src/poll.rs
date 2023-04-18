@@ -2,11 +2,17 @@
 
 use std::collections::HashMap;
 use std::convert::TryInto;
-use std::fmt::{self, Debug, Formatter};
 use std::io;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Condvar, Mutex};
 use std::time::{Duration, Instant};
+
+use rustix::fd::{AsFd, AsRawFd, BorrowedFd, OwnedFd};
+use rustix::fs::{fcntl_getfl, fcntl_setfl, OFlags};
+use rustix::io::{
+    fcntl_getfd, fcntl_setfd, pipe, pipe_with, poll, read, write, FdFlags, PipeFlags, PollFd,
+    PollFlags,
+};
 
 // std::os::unix doesn't exist on Fuchsia
 use libc::c_int as RawFd;
@@ -21,13 +27,13 @@ pub struct Poller {
 
     /// The file descriptor of the read half of the notify pipe. This is also stored as the first
     /// file descriptor in `fds.poll_fds`.
-    notify_read: RawFd,
+    notify_read: OwnedFd,
     /// The file descriptor of the write half of the notify pipe.
     ///
     /// Data is written to this to wake up the current instance of `wait`, which can occur when the
     /// user notifies it (in which case `notified` would have been set) or when an operation needs
     /// to occur (in which case `waiting_operations` would have been incremented).
-    notify_write: RawFd,
+    notify_write: OwnedFd,
 
     /// The number of operations (`add`, `modify` or `delete`) that are currently waiting on the
     /// mutex to become free. When this is nonzero, `wait` must be suspended until it reaches zero
@@ -49,25 +55,10 @@ struct Fds {
     ///
     /// The first file descriptor is always present and is used to notify the poller. It is also
     /// stored in `notify_read`.
-    poll_fds: Vec<PollFd>,
+    poll_fds: Vec<PollFd<'static>>,
     /// The map of each file descriptor to data associated with it. This does not include the file
     /// descriptors `notify_read` or `notify_write`.
     fd_data: HashMap<RawFd, FdData>,
-}
-
-/// Transparent wrapper around `libc::pollfd`, used to support `Debug` derives without adding the
-/// `extra_traits` feature of `libc`.
-#[repr(transparent)]
-struct PollFd(libc::pollfd);
-
-impl Debug for PollFd {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        f.debug_struct("pollfd")
-            .field("fd", &self.0.fd)
-            .field("events", &self.0.events)
-            .field("revents", &self.0.revents)
-            .finish()
-    }
 }
 
 /// Data associated with a file descriptor in a poller.
@@ -85,34 +76,36 @@ impl Poller {
     /// Creates a new poller.
     pub fn new() -> io::Result<Poller> {
         // Create the notification pipe.
-        let mut notify_pipe = [0; 2];
-        syscall!(pipe(notify_pipe.as_mut_ptr()))?;
+        let (notify_read, notify_write) = pipe_with(PipeFlags::CLOEXEC).or_else(|_| {
+            let (notify_read, notify_write) = pipe()?;
+            fcntl_setfd(&notify_read, fcntl_getfd(&notify_read)? | FdFlags::CLOEXEC)?;
+            fcntl_setfd(
+                &notify_write,
+                fcntl_getfd(&notify_write)? | FdFlags::CLOEXEC,
+            )?;
+            io::Result::Ok((notify_read, notify_write))
+        })?;
 
         // Put the reading side into non-blocking mode.
-        let notify_read_flags = syscall!(fcntl(notify_pipe[0], libc::F_GETFL))?;
-        syscall!(fcntl(
-            notify_pipe[0],
-            libc::F_SETFL,
-            notify_read_flags | libc::O_NONBLOCK
-        ))?;
+        fcntl_setfl(&notify_read, fcntl_getfl(&notify_read)? | OFlags::NONBLOCK)?;
 
         log::trace!(
-            "new: notify_read={}, notify_write={}",
-            notify_pipe[0],
-            notify_pipe[1]
+            "new: notify_read={:?}, notify_write={:?}",
+            notify_read,
+            notify_write,
         );
 
         Ok(Self {
             fds: Mutex::new(Fds {
-                poll_fds: vec![PollFd(libc::pollfd {
-                    fd: notify_pipe[0],
-                    events: libc::POLLRDNORM,
-                    revents: 0,
-                })],
+                poll_fds: vec![PollFd::from_borrowed_fd(
+                    // SAFETY: `read` will remain valid until we drop `self`.
+                    unsafe { BorrowedFd::borrow_raw(notify_read.as_raw_fd()) },
+                    PollFlags::RDNORM,
+                )],
                 fd_data: HashMap::new(),
             }),
-            notify_read: notify_pipe[0],
-            notify_write: notify_pipe[1],
+            notify_read,
+            notify_write,
             waiting_operations: AtomicUsize::new(0),
             operations_complete: Condvar::new(),
             notified: AtomicBool::new(false),
@@ -131,12 +124,12 @@ impl Poller {
 
     /// Adds a new file descriptor.
     pub fn add(&self, fd: RawFd, ev: Event, mode: PollMode) -> io::Result<()> {
-        if fd == self.notify_read || fd == self.notify_write {
+        if fd == self.notify_read.as_raw_fd() || fd == self.notify_write.as_raw_fd() {
             return Err(io::Error::from(io::ErrorKind::InvalidInput));
         }
 
         log::trace!(
-            "add: notify_read={}, fd={}, ev={:?}",
+            "add: notify_read={:?}, fd={}, ev={:?}",
             self.notify_read,
             fd,
             ev
@@ -157,11 +150,11 @@ impl Poller {
                 },
             );
 
-            fds.poll_fds.push(PollFd(libc::pollfd {
-                fd,
-                events: poll_events(ev),
-                revents: 0,
-            }));
+            fds.poll_fds.push(PollFd::from_borrowed_fd(
+                // SAFETY: Until we have I/O safety, assume that `fd` is valid forever.
+                unsafe { BorrowedFd::borrow_raw(fd) },
+                poll_events(ev),
+            ));
 
             Ok(())
         })
@@ -170,7 +163,7 @@ impl Poller {
     /// Modifies an existing file descriptor.
     pub fn modify(&self, fd: RawFd, ev: Event, mode: PollMode) -> io::Result<()> {
         log::trace!(
-            "modify: notify_read={}, fd={}, ev={:?}",
+            "modify: notify_read={:?}, fd={}, ev={:?}",
             self.notify_read,
             fd,
             ev
@@ -180,7 +173,8 @@ impl Poller {
             let data = fds.fd_data.get_mut(&fd).ok_or(io::ErrorKind::NotFound)?;
             data.key = ev.key;
             let poll_fds_index = data.poll_fds_index;
-            fds.poll_fds[poll_fds_index].0.events = poll_events(ev);
+            fds.poll_fds[poll_fds_index] =
+                PollFd::from_borrowed_fd(unsafe { BorrowedFd::borrow_raw(fd) }, poll_events(ev));
             data.remove = cvt_mode_as_remove(mode)?;
 
             Ok(())
@@ -189,14 +183,14 @@ impl Poller {
 
     /// Deletes a file descriptor.
     pub fn delete(&self, fd: RawFd) -> io::Result<()> {
-        log::trace!("delete: notify_read={}, fd={}", self.notify_read, fd);
+        log::trace!("delete: notify_read={:?}, fd={}", self.notify_read, fd);
 
         self.modify_fds(|fds| {
             let data = fds.fd_data.remove(&fd).ok_or(io::ErrorKind::NotFound)?;
             fds.poll_fds.swap_remove(data.poll_fds_index);
             if let Some(swapped_pollfd) = fds.poll_fds.get(data.poll_fds_index) {
                 fds.fd_data
-                    .get_mut(&swapped_pollfd.0.fd)
+                    .get_mut(&swapped_pollfd.as_fd().as_raw_fd())
                     .unwrap()
                     .poll_fds_index = data.poll_fds_index;
             }
@@ -208,7 +202,7 @@ impl Poller {
     /// Waits for I/O events with an optional timeout.
     pub fn wait(&self, events: &mut Events, timeout: Option<Duration>) -> io::Result<()> {
         log::trace!(
-            "wait: notify_read={}, timeout={:?}",
+            "wait: notify_read={:?}, timeout={:?}",
             self.notify_read,
             timeout
         );
@@ -233,21 +227,33 @@ impl Poller {
                 fds = self.operations_complete.wait(fds).unwrap();
             }
 
+            // Convert the timeout to milliseconds.
+            let timeout_ms = deadline
+                .map(|deadline| {
+                    let timeout = deadline.saturating_duration_since(Instant::now());
+
+                    // Round up to a whole millisecond.
+                    let mut ms = timeout.as_millis().try_into().unwrap_or(std::u64::MAX);
+                    if Duration::from_millis(ms) < timeout {
+                        ms = ms.saturating_add(1);
+                    }
+                    ms.try_into().unwrap_or(std::i32::MAX)
+                })
+                .unwrap_or(-1);
+
             // Perform the poll.
-            let num_events = poll(&mut fds.poll_fds, deadline)?;
-            let notified = fds.poll_fds[0].0.revents != 0;
+            let num_events = poll(&mut fds.poll_fds, timeout_ms)?;
+            let notified = !fds.poll_fds[0].revents().is_empty();
             let num_fd_events = if notified { num_events - 1 } else { num_events };
             log::trace!(
-                "new events: notify_read={}, num={}",
+                "new events: notify_read={:?}, num={}",
                 self.notify_read,
                 num_events
             );
 
             // Read all notifications.
             if notified {
-                while syscall!(read(self.notify_read, &mut [0; 64] as *mut _ as *mut _, 64)).is_ok()
-                {
-                }
+                while read(&self.notify_read, &mut [0; 64]).is_ok() {}
             }
 
             // If the only event that occurred during polling was notification and it wasn't to
@@ -263,17 +269,20 @@ impl Poller {
 
                 events.inner.reserve(num_fd_events);
                 for fd_data in fds.fd_data.values_mut() {
-                    let PollFd(poll_fd) = &mut fds.poll_fds[fd_data.poll_fds_index];
-                    if poll_fd.revents != 0 {
+                    let poll_fd = &mut fds.poll_fds[fd_data.poll_fds_index];
+                    if !poll_fd.revents().is_empty() {
                         // Store event
                         events.inner.push(Event {
                             key: fd_data.key,
-                            readable: poll_fd.revents & READ_REVENTS != 0,
-                            writable: poll_fd.revents & WRITE_REVENTS != 0,
+                            readable: poll_fd.revents().intersects(read_events()),
+                            writable: poll_fd.revents().intersects(write_events()),
                         });
                         // Remove interest if necessary
                         if fd_data.remove {
-                            poll_fd.events = 0;
+                            *poll_fd = PollFd::from_borrowed_fd(
+                                unsafe { BorrowedFd::borrow_raw(poll_fd.as_fd().as_raw_fd()) },
+                                PollFlags::empty(),
+                            );
                         }
 
                         if events.inner.len() == num_fd_events {
@@ -291,7 +300,7 @@ impl Poller {
 
     /// Sends a notification to wake up the current or next `wait()` call.
     pub fn notify(&self) -> io::Result<()> {
-        log::trace!("notify: notify_read={}", self.notify_read);
+        log::trace!("notify: notify_read={:?}", self.notify_read);
 
         if !self.notified.swap(true, Ordering::SeqCst) {
             self.notify_inner()?;
@@ -326,44 +335,45 @@ impl Poller {
 
     /// Wake the current thread that is calling `wait`.
     fn notify_inner(&self) -> io::Result<()> {
-        syscall!(write(self.notify_write, &0_u8 as *const _ as *const _, 1))?;
+        write(&self.notify_write, &[0; 1])?;
         Ok(())
     }
 
     /// Remove a notification created by `notify_inner`.
     fn pop_notification(&self) -> io::Result<()> {
-        syscall!(read(self.notify_read, &mut [0; 1] as *mut _ as *mut _, 1))?;
+        read(&self.notify_read, &mut [0; 1])?;
         Ok(())
     }
 }
 
 impl Drop for Poller {
     fn drop(&mut self) {
-        log::trace!("drop: notify_read={}", self.notify_read);
-        let _ = syscall!(close(self.notify_read));
-        let _ = syscall!(close(self.notify_write));
+        log::trace!("drop: notify_read={:?}", self.notify_read);
     }
 }
 
 /// Get the input poll events for the given event.
-fn poll_events(ev: Event) -> libc::c_short {
+fn poll_events(ev: Event) -> PollFlags {
     (if ev.readable {
-        libc::POLLIN | libc::POLLPRI
+        PollFlags::IN | PollFlags::PRI
     } else {
-        0
+        PollFlags::empty()
     }) | (if ev.writable {
-        libc::POLLOUT | libc::POLLWRBAND
+        PollFlags::OUT | PollFlags::WRBAND
     } else {
-        0
+        PollFlags::empty()
     })
 }
 
 /// Returned poll events for reading.
-const READ_REVENTS: libc::c_short = libc::POLLIN | libc::POLLPRI | libc::POLLHUP | libc::POLLERR;
+fn read_events() -> PollFlags {
+    PollFlags::IN | PollFlags::PRI | PollFlags::HUP | PollFlags::ERR
+}
 
 /// Returned poll events for writing.
-const WRITE_REVENTS: libc::c_short =
-    libc::POLLOUT | libc::POLLWRBAND | libc::POLLHUP | libc::POLLERR;
+fn write_events() -> PollFlags {
+    PollFlags::OUT | PollFlags::WRBAND | PollFlags::HUP | PollFlags::ERR
+}
 
 /// A list of reported I/O events.
 pub struct Events {
@@ -379,36 +389,6 @@ impl Events {
     /// Iterates over I/O events.
     pub fn iter(&self) -> impl Iterator<Item = Event> + '_ {
         self.inner.iter().copied()
-    }
-}
-
-/// Helper function to call poll.
-fn poll(fds: &mut [PollFd], deadline: Option<Instant>) -> io::Result<usize> {
-    loop {
-        // Convert the timeout to milliseconds.
-        let timeout_ms = deadline
-            .map(|deadline| {
-                let timeout = deadline.saturating_duration_since(Instant::now());
-
-                // Round up to a whole millisecond.
-                let mut ms = timeout.as_millis().try_into().unwrap_or(std::u64::MAX);
-                if Duration::from_millis(ms) < timeout {
-                    ms = ms.saturating_add(1);
-                }
-                ms.try_into().unwrap_or(std::i32::MAX)
-            })
-            .unwrap_or(-1);
-
-        match syscall!(poll(
-            fds.as_mut_ptr() as *mut libc::pollfd,
-            fds.len() as libc::nfds_t,
-            timeout_ms,
-        )) {
-            Ok(num_events) => break Ok(num_events as usize),
-            // poll returns EAGAIN if we can retry it.
-            Err(e) if e.raw_os_error() == Some(libc::EAGAIN) => continue,
-            Err(e) => return Err(e),
-        }
     }
 }
 
