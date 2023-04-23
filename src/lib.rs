@@ -64,19 +64,6 @@ use std::usize;
 
 use cfg_if::cfg_if;
 
-/// Calls a libc function and results in `io::Result`.
-#[cfg(unix)]
-macro_rules! syscall {
-    ($fn:ident $args:tt) => {{
-        let res = unsafe { libc::$fn $args };
-        if res == -1 {
-            Err(std::io::Error::last_os_error())
-        } else {
-            Ok(res)
-        }
-    }};
-}
-
 cfg_if! {
     // Note: This cfg is intended to make it easy for polling developers to test
     // the backend that uses poll, and is not a public API.
