@@ -4,6 +4,7 @@ env:
   CARGO_INCREMENTAL: '0'
   CARGO_NET_GIT_FETCH_WITH_CLI: 'true'
   CARGO_NET_RETRY: '10'
+  CARGO_REGISTRIES_CRATES_IO_PROTOCOL: 'sparse'
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: '1'
   RUSTDOCFLAGS: -D warnings
@@ -32,3 +33,44 @@ freebsd_task:
     - echo '[patch.crates-io]' >> async-io/Cargo.toml
     - echo 'polling = { path = ".." }' >> async-io/Cargo.toml
     - cargo test --target $TARGET --manifest-path=async-io/Cargo.toml
+
+netbsd_task:
+  name: test ($TARGET)
+  compute_engine_instance:
+    image_project: pg-ci-images
+    # https://github.com/anarazel/pg-vm-images/blob/main/packer/netbsd.pkrvars.hcl
+    image: family/pg-ci-netbsd-vanilla-9-3
+    platform: netbsd
+  env:
+    TARGET: x86_64-unknown-netbsd
+  setup_script:
+    - pkgin -y install git
+    - curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable
+  test_script:
+    - . $HOME/.cargo/env
+    - cargo test
+    # Test async-io
+    - git clone https://github.com/smol-rs/async-io.git
+    - echo '[patch.crates-io]' >> async-io/Cargo.toml
+    - echo 'polling = { path = ".." }' >> async-io/Cargo.toml
+    - cargo test --manifest-path=async-io/Cargo.toml
+
+openbsd_task:
+  name: test ($TARGET)
+  compute_engine_instance:
+    image_project: pg-ci-images
+    # https://github.com/anarazel/pg-vm-images/blob/main/packer/openbsd.pkrvars.hcl
+    image: family/pg-ci-openbsd-vanilla-7-2
+    platform: openbsd
+  env:
+    TARGET: x86_64-unknown-openbsd
+  setup_script:
+    # OpenBSD is tier 3 target, so install rust from package manager instead of rustup
+    - pkg_add git rust
+  test_script:
+    - cargo test
+    # Test async-io
+    - git clone https://github.com/smol-rs/async-io.git
+    - echo '[patch.crates-io]' >> async-io/Cargo.toml
+    - echo 'polling = { path = ".." }' >> async-io/Cargo.toml
+    - cargo test --manifest-path=async-io/Cargo.toml
