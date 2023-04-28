@@ -7,37 +7,54 @@ use polling::{Event, PollMode, Poller};
 use std::io;
 
 #[cfg(windows)]
-type RawSource = std::os::windows::io::RawSocket;
+/// cbindgen::ignore
+pub type raw_source_t = std::os::windows::io::RawSocket;
 #[cfg(unix)]
-type RawSource = std::os::unix::io::RawFd;
+/// cbindgen::ignore
+pub type raw_source_t = std::os::unix::io::RawFd;
 
 type polling_t = c_void;
 type polling_events_t = c_void;
 
 #[repr(C)]
-pub struct PollingEvent {
+pub struct polling_event_t {
     key: usize,
     readable: c_int,
     writable: c_int,
 }
 
 #[repr(C)]
-pub struct PollingTimeout {
+pub struct polling_timeout_t {
     seconds: u64,
     nanoseconds: u32,
 }
 
-type polling_mode_t = c_int;
-const POLLING_MODE_ONESHOT: c_int = 0;
-const POLLING_MODE_LEVEL: c_int = 1;
-const POLLING_MODE_EDGE: c_int = 2;
+#[repr(C)]
+pub enum polling_mode_t {
+    POLLING_MODE_ONESHOT = 0,
+    POLLING_MODE_LEVEL = 1,
+    POLLING_MODE_EDGE = 2,
+}
 
-type polling_status_t = c_int;
-const POLLING_STATUS_OK: c_int = 0;
-const POLLING_STATUS_INVALID: c_int = 1;
-const POLLING_STATUS_UNSUPPORTED: c_int = 2;
-const POLLING_STATUS_IO: c_int = 3;
-const POLLING_STATUS_OUT_OF_RANGE: c_int = 4;
+impl polling_mode_t {
+    fn from_int(value: c_int) -> Option<Self> {
+        match value {
+            0 => Some(polling_mode_t::POLLING_MODE_ONESHOT),
+            1 => Some(polling_mode_t::POLLING_MODE_LEVEL),
+            2 => Some(polling_mode_t::POLLING_MODE_EDGE),
+            _ => None,
+        }
+    }
+}
+
+#[repr(C)]
+pub enum polling_status_t {
+    POLLING_STATUS_OK = 0,
+    POLLING_STATUS_INVALID = 1,
+    POLLING_STATUS_UNSUPPORTED = 2,
+    POLLING_STATUS_IO = 3,
+    POLLING_STATUS_OUT_OF_RANGE = 4,
+}
 
 /* polling_t API */
 
@@ -51,7 +68,7 @@ pub unsafe extern "C" fn polling_new(out: *mut *mut polling_t) -> polling_status
 
         let poller = Box::new(poller);
         *out = Box::into_raw(poller) as *mut polling_t;
-        POLLING_STATUS_OK
+        polling_status_t::POLLING_STATUS_OK
     })
 }
 
@@ -66,13 +83,13 @@ pub unsafe extern "C" fn polling_free(poller: *mut polling_t) {
 #[no_mangle]
 pub unsafe extern "C" fn polling_add(
     poller: *const polling_t,
-    source: RawSource,
-    event: *const PollingEvent,
-    mode: polling_mode_t,
+    source: raw_source_t,
+    event: *const polling_event_t,
+    mode: c_int,
 ) -> polling_status_t {
     abort_on_panic(|| {
         let poller = &*(poller as *const Poller);
-        let event = &*(event as *const PollingEvent);
+        let event = &*(event as *const polling_event_t);
 
         // Convert the event.
         let event = Event {
@@ -82,15 +99,15 @@ pub unsafe extern "C" fn polling_add(
         };
 
         // Convert the mode.
-        let mode = match mode {
-            POLLING_MODE_ONESHOT => PollMode::Oneshot,
-            POLLING_MODE_LEVEL => PollMode::Level,
-            POLLING_MODE_EDGE => PollMode::Edge,
-            _ => return POLLING_STATUS_INVALID,
+        let mode = match polling_mode_t::from_int(mode) {
+            Some(polling_mode_t::POLLING_MODE_ONESHOT) => PollMode::Oneshot,
+            Some(polling_mode_t::POLLING_MODE_LEVEL) => PollMode::Level,
+            Some(polling_mode_t::POLLING_MODE_EDGE) => PollMode::Edge,
+            None => return polling_status_t::POLLING_STATUS_INVALID,
         };
 
         match poller.add_with_mode(source, event, mode) {
-            Ok(()) => POLLING_STATUS_OK,
+            Ok(()) => polling_status_t::POLLING_STATUS_OK,
             Err(e) => convert_error(e),
         }
     })
@@ -99,13 +116,13 @@ pub unsafe extern "C" fn polling_add(
 #[no_mangle]
 pub unsafe extern "C" fn polling_modify(
     poller: *const polling_t,
-    source: RawSource,
-    event: *const PollingEvent,
-    mode: polling_mode_t,
+    source: raw_source_t,
+    event: *const polling_event_t,
+    mode: c_int,
 ) -> polling_status_t {
     abort_on_panic(|| {
         let poller = &*(poller as *const Poller);
-        let event = &*(event as *const PollingEvent);
+        let event = &*(event as *const polling_event_t);
 
         // Convert the event.
         let event = Event {
@@ -115,15 +132,15 @@ pub unsafe extern "C" fn polling_modify(
         };
 
         // Convert the mode.
-        let mode = match mode {
-            POLLING_MODE_ONESHOT => PollMode::Oneshot,
-            POLLING_MODE_LEVEL => PollMode::Level,
-            POLLING_MODE_EDGE => PollMode::Edge,
-            _ => return POLLING_STATUS_INVALID,
+        let mode = match polling_mode_t::from_int(mode) {
+            Some(polling_mode_t::POLLING_MODE_ONESHOT) => PollMode::Oneshot,
+            Some(polling_mode_t::POLLING_MODE_LEVEL) => PollMode::Level,
+            Some(polling_mode_t::POLLING_MODE_EDGE) => PollMode::Edge,
+            None => return polling_status_t::POLLING_STATUS_INVALID,
         };
 
         match poller.modify_with_mode(source, event, mode) {
-            Ok(()) => POLLING_STATUS_OK,
+            Ok(()) => polling_status_t::POLLING_STATUS_OK,
             Err(e) => convert_error(e),
         }
     })
@@ -132,12 +149,12 @@ pub unsafe extern "C" fn polling_modify(
 #[no_mangle]
 pub unsafe extern "C" fn polling_delete(
     poller: *const polling_t,
-    source: RawSource,
+    source: raw_source_t,
 ) -> polling_status_t {
     abort_on_panic(|| {
         let poller = &*(poller as *const Poller);
         match poller.delete(source) {
-            Ok(()) => POLLING_STATUS_OK,
+            Ok(()) => polling_status_t::POLLING_STATUS_OK,
             Err(e) => convert_error(e),
         }
     })
@@ -147,7 +164,7 @@ pub unsafe extern "C" fn polling_delete(
 pub unsafe extern "C" fn polling_wait(
     poller: *const polling_t,
     events: *mut polling_events_t,
-    timeout: *const PollingTimeout,
+    timeout: *const polling_timeout_t,
     num_events: *mut size_t,
 ) -> polling_status_t {
     abort_on_panic(|| {
@@ -158,7 +175,7 @@ pub unsafe extern "C" fn polling_wait(
         let timeout = if timeout.is_null() {
             None
         } else {
-            let timeout = &*(timeout as *const PollingTimeout);
+            let timeout = &*(timeout as *const polling_timeout_t);
             Some(std::time::Duration::new(
                 timeout.seconds,
                 timeout.nanoseconds,
@@ -169,7 +186,7 @@ pub unsafe extern "C" fn polling_wait(
         match poller.wait(events, timeout) {
             Ok(count) => {
                 *num_events = count;
-                POLLING_STATUS_OK
+                polling_status_t::POLLING_STATUS_OK
             }
             Err(e) => convert_error(e),
         }
@@ -182,7 +199,7 @@ pub unsafe extern "C" fn polling_notify(poller: *const polling_t) -> polling_sta
         let poller = &*(poller as *const Poller);
 
         match poller.notify() {
-            Ok(()) => POLLING_STATUS_OK,
+            Ok(()) => polling_status_t::POLLING_STATUS_OK,
             Err(e) => convert_error(e),
         }
     })
@@ -195,7 +212,7 @@ pub unsafe extern "C" fn polling_events_new(out: *mut *mut polling_events_t) -> 
     abort_on_panic(|| {
         let events = Box::<Vec<Event>>::default();
         *out = Box::into_raw(events) as *mut polling_events_t;
-        POLLING_STATUS_OK
+        polling_status_t::POLLING_STATUS_OK
     })
 }
 
@@ -207,7 +224,7 @@ pub unsafe extern "C" fn polling_events_with_capacity(
     abort_on_panic(|| {
         let events = Box::new(Vec::<Event>::with_capacity(capacity));
         *out = Box::into_raw(events) as *mut polling_events_t;
-        POLLING_STATUS_OK
+        polling_status_t::POLLING_STATUS_OK
     })
 }
 
@@ -227,7 +244,7 @@ pub unsafe extern "C" fn polling_events_len(
     abort_on_panic(|| {
         let events = &*(events as *const Vec<Event>);
         *out = events.len();
-        POLLING_STATUS_OK
+        polling_status_t::POLLING_STATUS_OK
     })
 }
 
@@ -235,25 +252,25 @@ pub unsafe extern "C" fn polling_events_len(
 pub unsafe extern "C" fn polling_events_get(
     events: *const polling_events_t,
     index: size_t,
-    out: *mut PollingEvent,
+    out: *mut polling_event_t,
 ) -> polling_status_t {
     abort_on_panic(|| {
         let events = &*(events as *const Vec<Event>);
-        let event = &mut *(out as *mut PollingEvent);
+        let event = &mut *(out as *mut polling_event_t);
 
         if index >= events.len() {
-            return POLLING_STATUS_INVALID;
+            return polling_status_t::POLLING_STATUS_INVALID;
         }
 
         let our_event = match events.get(index) {
             Some(event) => event,
-            None => return POLLING_STATUS_OUT_OF_RANGE,
+            None => return polling_status_t::POLLING_STATUS_OUT_OF_RANGE,
         };
 
         event.key = our_event.key;
         event.readable = our_event.readable as c_int;
         event.writable = our_event.writable as c_int;
-        POLLING_STATUS_OK
+        polling_status_t::POLLING_STATUS_OK
     })
 }
 
@@ -268,7 +285,7 @@ pub unsafe extern "C" fn polling_events_clear(events: *mut polling_events_t) {
 #[no_mangle]
 pub unsafe extern "C" fn polling_events_copy(
     events: *const polling_events_t,
-    buffer: *mut PollingEvent,
+    buffer: *mut polling_event_t,
     buffer_len: size_t,
 ) -> size_t {
     abort_on_panic(|| {
@@ -306,8 +323,8 @@ fn abort_on_panic<R>(f: impl FnOnce() -> R) -> R {
 
 fn convert_error(e: io::Error) -> polling_status_t {
     match e.kind() {
-        io::ErrorKind::InvalidInput => POLLING_STATUS_INVALID,
-        io::ErrorKind::Unsupported => POLLING_STATUS_UNSUPPORTED,
-        _ => POLLING_STATUS_IO,
+        io::ErrorKind::InvalidInput => polling_status_t::POLLING_STATUS_INVALID,
+        io::ErrorKind::Unsupported => polling_status_t::POLLING_STATUS_UNSUPPORTED,
+        _ => polling_status_t::POLLING_STATUS_IO,
     }
 }

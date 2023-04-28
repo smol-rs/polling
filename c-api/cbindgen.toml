@@ -1,0 +1,21 @@
+language = "C"
+include_guard = "SMOL_POLLING_H"
+after_includes = """
+#if defined(_WIN32) || defined(_WIN64)
+#include <windows.h>
+typedef SOCKET raw_source_t;
+#else
+typedef int raw_source_t;
+#endif
+
+#ifndef SMOL_POLLING_PUBLIC
+#define SMOL_POLLING_PUBLIC
+#endif
+"""
+
+[defines]
+windows = "_WIN32"
+unix = "__unix__"
+
+[fn]
+prefix = "SMOL_POLLING_PUBLIC"
