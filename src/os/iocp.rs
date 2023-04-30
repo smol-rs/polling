@@ -6,7 +6,7 @@ use super::__private::PollerSealed;
 use crate::{Event, PollMode, Poller};
 
 use std::io;
-use std::os::windows::io::AsRawHandle;
+use std::os::windows::io::{AsRawHandle, RawHandle};
 
 /// Extension trait for the [`Poller`] type that provides functionality specific to IOCP-based
 /// platforms.
@@ -93,7 +93,7 @@ pub trait PollerIocpExt: PollerSealed {
     /// ```
     fn add_waitable(
         &self,
-        handle: impl AsRawHandle,
+        handle: impl Waitable,
         interest: Event,
         mode: PollMode,
     ) -> io::Result<()>;
@@ -137,7 +137,7 @@ pub trait PollerIocpExt: PollerSealed {
     /// ```
     fn modify_waitable(
         &self,
-        handle: impl AsRawHandle,
+        handle: impl Waitable,
         interest: Event,
         mode: PollMode,
     ) -> io::Result<()>;
@@ -179,7 +179,7 @@ pub trait PollerIocpExt: PollerSealed {
     /// // Remove the waitable handle.
     /// poller.remove_waitable(child).unwrap();
     /// ```
-    fn remove_waitable(&self, handle: impl AsRawHandle) -> io::Result<()>;
+    fn remove_waitable(&self, handle: impl Waitable) -> io::Result<()>;
 }
 
 impl PollerIocpExt for Poller {
@@ -187,19 +187,14 @@ impl PollerIocpExt for Poller {
         self.poller.post(packet)
     }
 
-    fn add_waitable(
-        &self,
-        handle: impl AsRawHandle,
-        event: Event,
-        mode: PollMode,
-    ) -> io::Result<()> {
+    fn add_waitable(&self, handle: impl Waitable, event: Event, mode: PollMode) -> io::Result<()> {
         self.poller
             .add_waitable(handle.as_raw_handle(), event, mode)
     }
 
     fn modify_waitable(
         &self,
-        handle: impl AsRawHandle,
+        handle: impl Waitable,
         interest: Event,
         mode: PollMode,
     ) -> io::Result<()> {
@@ -207,7 +202,25 @@ impl PollerIocpExt for Poller {
             .modify_waitable(handle.as_raw_handle(), interest, mode)
     }
 
-    fn remove_waitable(&self, handle: impl AsRawHandle) -> io::Result<()> {
+    fn remove_waitable(&self, handle: impl Waitable) -> io::Result<()> {
         self.poller.remove_waitable(handle.as_raw_handle())
+    }
+}
+
+/// A type that represents a waitable handle.
+pub trait Waitable {
+    /// Returns the raw handle of this waitable.
+    fn as_raw_handle(&self) -> RawHandle;
+}
+
+impl Waitable for RawHandle {
+    fn as_raw_handle(&self) -> RawHandle {
+        *self
+    }
+}
+
+impl<T: AsRawHandle + ?Sized> Waitable for &T {
+    fn as_raw_handle(&self) -> RawHandle {
+        AsRawHandle::as_raw_handle(*self)
     }
 }
