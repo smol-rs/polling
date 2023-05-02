@@ -43,7 +43,7 @@ impl EventHandle {
 
     /// Reset the event object.
     fn reset(&self) -> io::Result<()> {
-        if unsafe { ResetEvent(self.0 as _) } == 0 {
+        if unsafe { ResetEvent(self.0 as _) } != 0 {
             Ok(())
         } else {
             Err(io::Error::last_os_error())
@@ -52,7 +52,7 @@ impl EventHandle {
 
     /// Set the event object.
     fn set(&self) -> io::Result<()> {
-        if unsafe { SetEvent(self.0 as _) } == 0 {
+        if unsafe { SetEvent(self.0 as _) } != 0 {
             Ok(())
         } else {
             Err(io::Error::last_os_error())

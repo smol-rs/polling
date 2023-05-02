@@ -82,14 +82,14 @@ pub trait PollerIocpExt: PollerSealed {
     /// let poller = Poller::new().unwrap();
     ///
     /// // Add the child process to the poller.
-    /// poller.add_waitable(child, Event::both(0), PollMode::Oneshot).unwrap();
+    /// poller.add_waitable(&child, Event::all(0), PollMode::Oneshot).unwrap();
     ///
     /// // Wait for the child process to exit.
     /// let mut events = vec![];
     /// poller.wait(&mut events, None).unwrap();
     ///
     /// assert_eq!(events.len(), 1);
-    /// assert_eq!(events[0], Event::both(0));
+    /// assert_eq!(events[0], Event::all(0));
     /// ```
     fn add_waitable(
         &self,
@@ -123,17 +123,17 @@ pub trait PollerIocpExt: PollerSealed {
     /// let poller = Poller::new().unwrap();
     ///
     /// // Add the child process to the poller.
-    /// poller.add_waitable(child, Event::both(0), PollMode::Oneshot).unwrap();
+    /// poller.add_waitable(&child, Event::all(0), PollMode::Oneshot).unwrap();
     ///
     /// // Wait for the child process to exit.
     /// let mut events = vec![];
     /// poller.wait(&mut events, None).unwrap();
     ///
     /// assert_eq!(events.len(), 1);
-    /// assert_eq!(events[0], Event::both(0));
+    /// assert_eq!(events[0], Event::all(0));
     ///
     /// // Modify the waitable handle.
-    /// poller.modify_waitable(child, Event::readable(0), PollMode::Oneshot).unwrap();
+    /// poller.modify_waitable(&child, Event::readable(0), PollMode::Oneshot).unwrap();
     /// ```
     fn modify_waitable(
         &self,
@@ -167,17 +167,17 @@ pub trait PollerIocpExt: PollerSealed {
     /// let poller = Poller::new().unwrap();
     ///
     /// // Add the child process to the poller.
-    /// poller.add_waitable(child, Event::both(0), PollMode::Oneshot).unwrap();
+    /// poller.add_waitable(&child, Event::all(0), PollMode::Oneshot).unwrap();
     ///
     /// // Wait for the child process to exit.
     /// let mut events = vec![];
     /// poller.wait(&mut events, None).unwrap();
     ///
     /// assert_eq!(events.len(), 1);
-    /// assert_eq!(events[0], Event::both(0));
+    /// assert_eq!(events[0], Event::all(0));
     ///
     /// // Remove the waitable handle.
-    /// poller.remove_waitable(child).unwrap();
+    /// poller.remove_waitable(&child).unwrap();
     /// ```
     fn remove_waitable(&self, handle: impl Waitable) -> io::Result<()>;
 }
