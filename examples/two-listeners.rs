@@ -13,6 +13,10 @@ fn main() -> io::Result<()> {
     poller.add(&l1, Event::readable(1))?;
     poller.add(&l2, Event::readable(2))?;
 
+    println!("You can connect to the server using `nc`:");
+    println!(" $ nc 127.0.0.1 8001");
+    println!(" $ nc 127.0.0.1 8002");
+
     let mut events = Vec::new();
     loop {
         events.clear();
