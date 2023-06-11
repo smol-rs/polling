@@ -1,11 +1,8 @@
 //! Bindings to event port (illumos, Solaris).
 
 use std::io;
-use std::os::unix::io::{AsRawFd, RawFd};
+use std::os::unix::io::{AsFd, AsRawFd, BorrowedFd, RawFd};
 use std::time::Duration;
-
-#[cfg(not(polling_no_io_safety))]
-use std::os::unix::io::{AsFd, BorrowedFd};
 
 use rustix::fd::OwnedFd;
 use rustix::io::{fcntl_getfd, fcntl_setfd, port, FdFlags, PollFlags};
@@ -116,7 +113,6 @@ impl AsRawFd for Poller {
     }
 }
 
-#[cfg(not(polling_no_io_safety))]
 impl AsFd for Poller {
     fn as_fd(&self) -> BorrowedFd<'_> {
         self.port_fd.as_fd()

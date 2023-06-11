@@ -66,7 +66,7 @@ impl AfdPollInfo {
 }
 
 bitflags::bitflags! {
-    #[derive(Default)]
+    #[derive(Default, Copy, Clone)]
     #[repr(transparent)]
     pub(super) struct AfdPollMask: u32 {
         const RECEIVE = 0x001;
