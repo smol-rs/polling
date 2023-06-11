@@ -101,26 +101,27 @@ jobs:
       run: |
         rustup target add x86_64-unknown-illumos
         cargo build --target x86_64-unknown-illumos
-
-  wine:
-    runs-on: ubuntu-22.04
-    steps:
-      - uses: actions/checkout@v3
-      - name: Install Rust
-        run: rustup update stable
-      - uses: taiki-e/setup-cross-toolchain-action@v1
-        with:
-          target: x86_64-pc-windows-gnu
-          runner: wine@7.13
-      - run: cargo test --target x86_64-pc-windows-gnu
-      - name: Clone async-io
-        run: git clone https://github.com/smol-rs/async-io.git
-      - name: Add patch section
-        run: echo '[patch.crates-io]' >> async-io/Cargo.toml
-      - name: Patch polling
-        run: echo 'polling = { path = ".." }' >> async-io/Cargo.toml
-      - name: Test async-io
-        run: cargo test --manifest-path=async-io/Cargo.toml
+  
+  # https://github.com/taiki-e/setup-cross-toolchain-action/issues/9
+  # wine:
+  #   runs-on: ubuntu-22.04
+  #   steps:
+  #     - uses: actions/checkout@v3
+  #     - name: Install Rust
+  #       run: rustup update stable
+  #     - uses: taiki-e/setup-cross-toolchain-action@v1
+  #       with:
+  #         target: x86_64-pc-windows-gnu
+  #         runner: wine@7.13
+  #     - run: cargo test --target x86_64-pc-windows-gnu
+  #     - name: Clone async-io
+  #       run: git clone https://github.com/smol-rs/async-io.git
+  #     - name: Add patch section
+  #       run: echo '[patch.crates-io]' >> async-io/Cargo.toml
+  #     - name: Patch polling
+  #       run: echo 'polling = { path = ".." }' >> async-io/Cargo.toml
+  #     - name: Test async-io
+  #       run: cargo test --manifest-path=async-io/Cargo.toml
 
   msrv:
     runs-on: ${{ matrix.os }}
