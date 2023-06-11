@@ -1,11 +1,8 @@
 //! Bindings to kqueue (macOS, iOS, tvOS, watchOS, FreeBSD, NetBSD, OpenBSD, DragonFly BSD).
 
 use std::io;
-use std::os::unix::io::{AsRawFd, RawFd};
+use std::os::unix::io::{AsFd, AsRawFd, BorrowedFd, RawFd};
 use std::time::Duration;
-
-#[cfg(not(polling_no_io_safety))]
-use std::os::unix::io::{AsFd, BorrowedFd};
 
 use rustix::fd::OwnedFd;
 use rustix::io::{fcntl_setfd, kqueue, Errno, FdFlags};
@@ -177,7 +174,6 @@ impl AsRawFd for Poller {
     }
 }
 
-#[cfg(not(polling_no_io_safety))]
 impl AsFd for Poller {
     fn as_fd(&self) -> BorrowedFd<'_> {
         self.kqueue_fd.as_fd()

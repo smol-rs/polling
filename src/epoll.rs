@@ -2,7 +2,7 @@
 
 use std::convert::TryInto;
 use std::io;
-use std::os::unix::io::{AsRawFd, RawFd};
+use std::os::unix::io::{AsFd, AsRawFd, BorrowedFd, RawFd};
 use std::time::Duration;
 
 use rustix::fd::OwnedFd;
@@ -11,9 +11,6 @@ use rustix::time::{
     timerfd_create, timerfd_settime, Itimerspec, TimerfdClockId, TimerfdFlags, TimerfdTimerFlags,
     Timespec,
 };
-
-#[cfg(not(polling_no_io_safety))]
-use std::os::unix::io::{AsFd, BorrowedFd};
 
 use crate::{Event, PollMode};
 
@@ -232,7 +229,6 @@ impl AsRawFd for Poller {
     }
 }
 
-#[cfg(not(polling_no_io_safety))]
 impl AsFd for Poller {
     fn as_fd(&self) -> BorrowedFd<'_> {
         self.epoll_fd.as_fd()

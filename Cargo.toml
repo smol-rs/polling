@@ -6,7 +6,7 @@ name = "polling"
 version = "2.8.0"
 authors = ["Stjepan Glavina <stjepang@gmail.com>"]
 edition = "2018"
-rust-version = "1.48"
+rust-version = "1.63"
 description = "Portable interface to epoll, kqueue, event ports, and IOCP"
 license = "Apache-2.0 OR MIT"
 repository = "https://github.com/smol-rs/polling"
@@ -24,9 +24,6 @@ std = []
 [dependencies]
 cfg-if = "1"
 log = "0.4.11"
-
-[build-dependencies]
-autocfg = "1"
 
 [target.'cfg(any(unix, target_os = "fuchsia", target_os = "vxworks"))'.dependencies]
 libc = "0.2.77"

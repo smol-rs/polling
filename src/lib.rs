@@ -573,10 +573,7 @@ impl Poller {
 )]
 mod raw_fd_impl {
     use crate::Poller;
-    use std::os::unix::io::{AsRawFd, RawFd};
-
-    #[cfg(not(polling_no_io_safety))]
-    use std::os::unix::io::{AsFd, BorrowedFd};
+    use std::os::unix::io::{AsFd, AsRawFd, BorrowedFd, RawFd};
 
     impl AsRawFd for Poller {
         fn as_raw_fd(&self) -> RawFd {
@@ -584,7 +581,6 @@ mod raw_fd_impl {
         }
     }
 
-    #[cfg(not(polling_no_io_safety))]
     impl AsFd for Poller {
         fn as_fd(&self) -> BorrowedFd<'_> {
             self.poller.as_fd()
@@ -596,10 +592,7 @@ mod raw_fd_impl {
 #[cfg_attr(docsrs, doc(cfg(windows)))]
 mod raw_handle_impl {
     use crate::Poller;
-    use std::os::windows::io::{AsRawHandle, RawHandle};
-
-    #[cfg(not(polling_no_io_safety))]
-    use std::os::windows::io::{AsHandle, BorrowedHandle};
+    use std::os::windows::io::{AsHandle, AsRawHandle, BorrowedHandle, RawHandle};
 
     impl AsRawHandle for Poller {
         fn as_raw_handle(&self) -> RawHandle {
@@ -607,7 +600,6 @@ mod raw_handle_impl {
         }
     }
 
-    #[cfg(not(polling_no_io_safety))]
     impl AsHandle for Poller {
         fn as_handle(&self) -> BorrowedHandle<'_> {
             self.poller.as_handle()
@@ -667,11 +659,5 @@ cfg_if! {
 
 #[allow(unused)]
 fn unsupported_error(err: impl Into<String>) -> io::Error {
-    io::Error::new(
-        #[cfg(not(polling_no_unsupported_error_kind))]
-        io::ErrorKind::Unsupported,
-        #[cfg(polling_no_unsupported_error_kind)]
-        io::ErrorKind::Other,
-        err.into(),
-    )
+    io::Error::new(io::ErrorKind::Unsupported, err.into())
 }

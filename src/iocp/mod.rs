@@ -42,14 +42,11 @@ use std::collections::hash_map::{Entry, HashMap};
 use std::fmt;
 use std::io;
 use std::marker::PhantomPinned;
-use std::os::windows::io::{AsRawHandle, RawHandle, RawSocket};
+use std::os::windows::io::{AsHandle, AsRawHandle, BorrowedHandle, RawHandle, RawSocket};
 use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, RwLock, Weak};
 use std::time::{Duration, Instant};
-
-#[cfg(not(polling_no_io_safety))]
-use std::os::windows::io::{AsHandle, BorrowedHandle};
 
 /// Macro to lock and ignore lock poisoning.
 macro_rules! lock {
@@ -419,7 +416,6 @@ impl AsRawHandle for Poller {
     }
 }
 
-#[cfg(not(polling_no_io_safety))]
 impl AsHandle for Poller {
     fn as_handle(&self) -> BorrowedHandle<'_> {
         unsafe { BorrowedHandle::borrow_raw(self.as_raw_handle()) }
