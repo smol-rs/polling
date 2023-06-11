@@ -65,11 +65,11 @@ impl Poller {
             PollMode::Oneshot,
         )?;
 
-        log::trace!(
-            "new: epoll_fd={}, event_fd={}, timer_fd={:?}",
-            poller.epoll_fd.as_raw_fd(),
-            poller.event_fd.as_raw_fd(),
-            poller.timer_fd
+        tracing::trace!(
+            epoll_fd= ?poller.epoll_fd,
+            event_fd= ?poller.event_fd,
+            timer_fd= ?poller.timer_fd,
+            "new",
         );
         Ok(poller)
     }
@@ -86,12 +86,13 @@ impl Poller {
 
     /// Adds a new file descriptor.
     pub fn add(&self, fd: RawFd, ev: Event, mode: PollMode) -> io::Result<()> {
-        log::trace!(
-            "add: epoll_fd={}, fd={}, ev={:?}",
-            self.epoll_fd.as_raw_fd(),
-            fd,
-            ev
+        let span = tracing::trace_span!(
+            "add",
+            epoll_fd = ?self.epoll_fd,
+            fd= ?fd,
+            ev = ?ev,
         );
+        let _enter = span.enter();
 
         epoll::epoll_add(
             &self.epoll_fd,
@@ -105,12 +106,13 @@ impl Poller {
 
     /// Modifies an existing file descriptor.
     pub fn modify(&self, fd: RawFd, ev: Event, mode: PollMode) -> io::Result<()> {
-        log::trace!(
-            "modify: epoll_fd={}, fd={}, ev={:?}",
-            self.epoll_fd.as_raw_fd(),
-            fd,
-            ev
+        let span = tracing::trace_span!(
+            "modify",
+            epoll_fd = ?self.epoll_fd,
+            fd= ?fd,
+            ev = ?ev,
         );
+        let _enter = span.enter();
 
         epoll::epoll_mod(
             &self.epoll_fd,
@@ -124,7 +126,12 @@ impl Poller {
 
     /// Deletes a file descriptor.
     pub fn delete(&self, fd: RawFd) -> io::Result<()> {
-        log::trace!("remove: epoll_fd={}, fd={}", self.epoll_fd.as_raw_fd(), fd);
+        let span = tracing::trace_span!(
+            "delete",
+            epoll_fd = ?self.epoll_fd,
+            fd= ?fd,
+        );
+        let _enter = span.enter();
 
         epoll::epoll_del(&self.epoll_fd, unsafe {
             rustix::fd::BorrowedFd::borrow_raw(fd)
@@ -136,11 +143,12 @@ impl Poller {
     /// Waits for I/O events with an optional timeout.
     #[allow(clippy::needless_update)]
     pub fn wait(&self, events: &mut Events, timeout: Option<Duration>) -> io::Result<()> {
-        log::trace!(
-            "wait: epoll_fd={}, timeout={:?}",
-            self.epoll_fd.as_raw_fd(),
-            timeout
+        let span = tracing::trace_span!(
+            "wait",
+            epoll_fd = ?self.epoll_fd,
+            timeout = ?timeout,
         );
+        let _enter = span.enter();
 
         if let Some(ref timer_fd) = self.timer_fd {
             // Configure the timeout using timerfd.
@@ -188,10 +196,10 @@ impl Poller {
 
         // Wait for I/O events.
         epoll::epoll_wait(&self.epoll_fd, &mut events.list, timeout_ms)?;
-        log::trace!(
-            "new events: epoll_fd={}, res={}",
-            self.epoll_fd.as_raw_fd(),
-            events.list.len()
+        tracing::trace!(
+            epoll_fd = ?self.epoll_fd,
+            res = ?events.list.len(),
+            "new events",
         );
 
         // Clear the notification (if received) and re-register interest in it.
@@ -211,11 +219,12 @@ impl Poller {
 
     /// Sends a notification to wake up the current or next `wait()` call.
     pub fn notify(&self) -> io::Result<()> {
-        log::trace!(
-            "notify: epoll_fd={}, event_fd={}",
-            self.epoll_fd.as_raw_fd(),
-            self.event_fd.as_raw_fd()
+        let span = tracing::trace_span!(
+            "notify",
+            epoll_fd = ?self.epoll_fd,
+            event_fd = ?self.event_fd,
         );
+        let _enter = span.enter();
 
         let buf: [u8; 8] = 1u64.to_ne_bytes();
         let _ = write(&self.event_fd, &buf);
@@ -237,12 +246,13 @@ impl AsFd for Poller {
 
 impl Drop for Poller {
     fn drop(&mut self) {
-        log::trace!(
-            "drop: epoll_fd={}, event_fd={}, timer_fd={:?}",
-            self.epoll_fd.as_raw_fd(),
-            self.event_fd.as_raw_fd(),
-            self.timer_fd
+        let span = tracing::trace_span!(
+            "drop",
+            epoll_fd = ?self.epoll_fd,
+            event_fd = ?self.event_fd,
+            timer_fd = ?self.timer_fd
         );
+        let _enter = span.enter();
 
         if let Some(timer_fd) = self.timer_fd.take() {
             let _ = self.delete(timer_fd.as_raw_fd());
