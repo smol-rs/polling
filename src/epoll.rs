@@ -66,8 +66,8 @@ impl Poller {
         )?;
 
         tracing::trace!(
-            epoll_fd= ?poller.epoll_fd,
-            event_fd= ?poller.event_fd,
+            epoll_fd= ?poller.epoll_fd.as_raw_fd(),
+            event_fd= ?poller.event_fd.as_raw_fd(),
             timer_fd= ?poller.timer_fd,
             "new",
         );
@@ -88,7 +88,7 @@ impl Poller {
     pub fn add(&self, fd: RawFd, ev: Event, mode: PollMode) -> io::Result<()> {
         let span = tracing::trace_span!(
             "add",
-            epoll_fd = ?self.epoll_fd,
+            epoll_fd = ?self.epoll_fd.as_raw_fd(),
             fd= ?fd,
             ev = ?ev,
         );
@@ -108,7 +108,7 @@ impl Poller {
     pub fn modify(&self, fd: RawFd, ev: Event, mode: PollMode) -> io::Result<()> {
         let span = tracing::trace_span!(
             "modify",
-            epoll_fd = ?self.epoll_fd,
+            epoll_fd = ?self.epoll_fd.as_raw_fd(),
             fd= ?fd,
             ev = ?ev,
         );
@@ -128,7 +128,7 @@ impl Poller {
     pub fn delete(&self, fd: RawFd) -> io::Result<()> {
         let span = tracing::trace_span!(
             "delete",
-            epoll_fd = ?self.epoll_fd,
+            epoll_fd = ?self.epoll_fd.as_raw_fd(),
             fd= ?fd,
         );
         let _enter = span.enter();
@@ -145,7 +145,7 @@ impl Poller {
     pub fn wait(&self, events: &mut Events, timeout: Option<Duration>) -> io::Result<()> {
         let span = tracing::trace_span!(
             "wait",
-            epoll_fd = ?self.epoll_fd,
+            epoll_fd = ?self.epoll_fd.as_raw_fd(),
             timeout = ?timeout,
         );
         let _enter = span.enter();
@@ -197,7 +197,7 @@ impl Poller {
         // Wait for I/O events.
         epoll::epoll_wait(&self.epoll_fd, &mut events.list, timeout_ms)?;
         tracing::trace!(
-            epoll_fd = ?self.epoll_fd,
+            epoll_fd = ?self.epoll_fd.as_raw_fd(),
             res = ?events.list.len(),
             "new events",
         );
@@ -221,8 +221,8 @@ impl Poller {
     pub fn notify(&self) -> io::Result<()> {
         let span = tracing::trace_span!(
             "notify",
-            epoll_fd = ?self.epoll_fd,
-            event_fd = ?self.event_fd,
+            epoll_fd = ?self.epoll_fd.as_raw_fd(),
+            event_fd = ?self.event_fd.as_raw_fd(),
         );
         let _enter = span.enter();
 
@@ -248,8 +248,8 @@ impl Drop for Poller {
     fn drop(&mut self) {
         let span = tracing::trace_span!(
             "drop",
-            epoll_fd = ?self.epoll_fd,
-            event_fd = ?self.event_fd,
+            epoll_fd = ?self.epoll_fd.as_raw_fd(),
+            event_fd = ?self.event_fd.as_raw_fd(),
             timer_fd = ?self.timer_fd
         );
         let _enter = span.enter();

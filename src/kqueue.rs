@@ -38,7 +38,7 @@ impl Poller {
         poller.notify.register(&poller)?;
 
         tracing::trace!(
-            kqueue_fd = ?poller.kqueue_fd,
+            kqueue_fd = ?poller.kqueue_fd.as_raw_fd(),
             "new"
         );
         Ok(poller)
@@ -65,7 +65,7 @@ impl Poller {
         let span = if !self.notify.has_fd(fd) {
             let span = tracing::trace_span!(
                 "add",
-                kqueue_fd = ?self.kqueue_fd,
+                kqueue_fd = ?self.kqueue_fd.as_raw_fd(),
                 fd= ?fd,
                 ev = ?ev,
             );
@@ -150,7 +150,7 @@ impl Poller {
     pub fn wait(&self, events: &mut Events, timeout: Option<Duration>) -> io::Result<()> {
         let span = tracing::trace_span!(
             "wait",
-            kqueue_fd = ?self.kqueue_fd,
+            kqueue_fd = ?self.kqueue_fd.as_raw_fd(),
             timeout = ?timeout,
         );
         let _enter = span.enter();
@@ -161,7 +161,7 @@ impl Poller {
         let res = unsafe { kqueue::kevent(&self.kqueue_fd, &changelist, eventlist, timeout)? };
 
         tracing::trace!(
-            kqueue_fd = ?self.kqueue_fd,
+            kqueue_fd = ?self.kqueue_fd.as_raw_fd(),
             res = ?res,
             "new events",
         );
@@ -176,7 +176,7 @@ impl Poller {
     pub fn notify(&self) -> io::Result<()> {
         let span = tracing::trace_span!(
             "notify",
-            kqueue_fd = ?self.kqueue_fd,
+            kqueue_fd = ?self.kqueue_fd.as_raw_fd(),
         );
         let _enter = span.enter();
 
@@ -201,7 +201,7 @@ impl Drop for Poller {
     fn drop(&mut self) {
         let span = tracing::trace_span!(
             "drop",
-            kqueue_fd = ?self.kqueue_fd,
+            kqueue_fd = ?self.kqueue_fd.as_raw_fd(),
         );
         let _enter = span.enter();
 

@@ -24,7 +24,7 @@ impl Poller {
         fcntl_setfd(&port_fd, flags | FdFlags::CLOEXEC)?;
 
         tracing::trace!(
-            port_fd=?port_fd,
+            port_fd=?port_fd.as_raw_fd(),
             "new",
         );
 
@@ -51,7 +51,7 @@ impl Poller {
     pub fn modify(&self, fd: RawFd, ev: Event, mode: PollMode) -> io::Result<()> {
         let span = tracing::trace_span!(
             "modify",
-            port_fd = ?self.port_fd,
+            port_fd = ?self.port_fd.as_raw_fd(),
             fd= ?fd,
             ev = ?ev,
         );
@@ -82,7 +82,7 @@ impl Poller {
     pub fn delete(&self, fd: RawFd) -> io::Result<()> {
         let span = tracing::trace_span!(
             "delete",
-            port_fd = ?self.port_fd,
+            port_fd = ?self.port_fd.as_raw_fd(),
             fd= ?fd,
         );
         let _enter = span.enter();
@@ -102,7 +102,7 @@ impl Poller {
     pub fn wait(&self, events: &mut Events, timeout: Option<Duration>) -> io::Result<()> {
         let span = tracing::trace_span!(
             "wait",
-            port_fd = ?self.port_fd,
+            port_fd = ?self.port_fd.as_raw_fd(),
             timeout = ?timeout,
         );
         let _enter = span.enter();
@@ -134,7 +134,7 @@ impl Poller {
 
         let span = tracing::trace_span!(
             "notify",
-            port_fd = ?self.port_fd,
+            port_fd = ?self.port_fd.as_raw_fd(),
         );
         let _enter = span.enter();
 
