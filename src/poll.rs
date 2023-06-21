@@ -184,7 +184,7 @@ impl Poller {
         let span = tracing::trace_span!(
             "delete",
             notify_read = ?self.notify_read,
-            fd= ?fd,
+            ?fd,
         );
         let _enter = span.enter();
 

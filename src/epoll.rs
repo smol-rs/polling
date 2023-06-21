@@ -146,7 +146,7 @@ impl Poller {
         let span = tracing::trace_span!(
             "wait",
             epoll_fd = ?self.epoll_fd.as_raw_fd(),
-            timeout = ?timeout,
+            ?timeout,
         );
         let _enter = span.enter();
 
