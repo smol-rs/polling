@@ -89,11 +89,7 @@ impl Poller {
         // Put the reading side into non-blocking mode.
         fcntl_setfl(&notify_read, fcntl_getfl(&notify_read)? | OFlags::NONBLOCK)?;
 
-        log::trace!(
-            "new: notify_read={:?}, notify_write={:?}",
-            notify_read,
-            notify_write,
-        );
+        tracing::trace!(?notify_read, ?notify_write, "new");
 
         Ok(Self {
             fds: Mutex::new(Fds {
@@ -128,12 +124,13 @@ impl Poller {
             return Err(io::Error::from(io::ErrorKind::InvalidInput));
         }
 
-        log::trace!(
-            "add: notify_read={:?}, fd={}, ev={:?}",
-            self.notify_read,
-            fd,
-            ev
+        let span = tracing::trace_span!(
+            "add",
+            notify_read = ?self.notify_read,
+            ?fd,
+            ?ev,
         );
+        let _enter = span.enter();
 
         self.modify_fds(|fds| {
             if fds.fd_data.contains_key(&fd) {
@@ -162,12 +159,13 @@ impl Poller {
 
     /// Modifies an existing file descriptor.
     pub fn modify(&self, fd: RawFd, ev: Event, mode: PollMode) -> io::Result<()> {
-        log::trace!(
-            "modify: notify_read={:?}, fd={}, ev={:?}",
-            self.notify_read,
-            fd,
-            ev
+        let span = tracing::trace_span!(
+            "modify",
+            notify_read = ?self.notify_read,
+            ?fd,
+            ?ev,
         );
+        let _enter = span.enter();
 
         self.modify_fds(|fds| {
             let data = fds.fd_data.get_mut(&fd).ok_or(io::ErrorKind::NotFound)?;
@@ -183,7 +181,12 @@ impl Poller {
 
     /// Deletes a file descriptor.
     pub fn delete(&self, fd: RawFd) -> io::Result<()> {
-        log::trace!("delete: notify_read={:?}, fd={}", self.notify_read, fd);
+        let span = tracing::trace_span!(
+            "delete",
+            notify_read = ?self.notify_read,
+            ?fd,
+        );
+        let _enter = span.enter();
 
         self.modify_fds(|fds| {
             let data = fds.fd_data.remove(&fd).ok_or(io::ErrorKind::NotFound)?;
@@ -201,11 +204,12 @@ impl Poller {
 
     /// Waits for I/O events with an optional timeout.
     pub fn wait(&self, events: &mut Events, timeout: Option<Duration>) -> io::Result<()> {
-        log::trace!(
-            "wait: notify_read={:?}, timeout={:?}",
-            self.notify_read,
-            timeout
+        let span = tracing::trace_span!(
+            "wait",
+            notify_read = ?self.notify_read,
+            ?timeout,
         );
+        let _enter = span.enter();
 
         let deadline = timeout.and_then(|t| Instant::now().checked_add(t));
 
@@ -245,11 +249,7 @@ impl Poller {
             let num_events = poll(&mut fds.poll_fds, timeout_ms)?;
             let notified = !fds.poll_fds[0].revents().is_empty();
             let num_fd_events = if notified { num_events - 1 } else { num_events };
-            log::trace!(
-                "new events: notify_read={:?}, num={}",
-                self.notify_read,
-                num_events
-            );
+            tracing::trace!(?num_events, ?notified, ?num_fd_events, "new events",);
 
             // Read all notifications.
             if notified {
@@ -300,7 +300,11 @@ impl Poller {
 
     /// Sends a notification to wake up the current or next `wait()` call.
     pub fn notify(&self) -> io::Result<()> {
-        log::trace!("notify: notify_read={:?}", self.notify_read);
+        let span = tracing::trace_span!(
+            "notify",
+            notify_read = ?self.notify_read,
+        );
+        let _enter = span.enter();
 
         if !self.notified.swap(true, Ordering::SeqCst) {
             self.notify_inner()?;
@@ -343,12 +347,6 @@ impl Poller {
     fn pop_notification(&self) -> io::Result<()> {
         read(&self.notify_read, &mut [0; 1])?;
         Ok(())
-    }
-}
-
-impl Drop for Poller {
-    fn drop(&mut self) {
-        log::trace!("drop: notify_read={:?}", self.notify_read);
     }
 }
 

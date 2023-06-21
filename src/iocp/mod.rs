@@ -105,7 +105,7 @@ impl Poller {
 
         let port = IoCompletionPort::new(0)?;
 
-        log::trace!("new: handle={:?}", &port);
+        tracing::trace!(handle = ?port, "new");
 
         Ok(Poller {
             port,
@@ -135,12 +135,13 @@ impl Poller {
 
     /// Add a new source to the poller.
     pub(super) fn add(&self, socket: RawSocket, interest: Event, mode: PollMode) -> io::Result<()> {
-        log::trace!(
-            "add: handle={:?}, sock={}, ev={:?}",
-            self.port,
-            socket,
-            interest
+        let span = tracing::trace_span!(
+            "add",
+            handle = ?self.port,
+            sock = ?socket,
+            ev = ?interest,
         );
+        let _enter = span.enter();
 
         // We don't support edge-triggered events.
         if matches!(mode, PollMode::Edge | PollMode::EdgeOneshot) {
@@ -195,12 +196,13 @@ impl Poller {
         interest: Event,
         mode: PollMode,
     ) -> io::Result<()> {
-        log::trace!(
-            "modify: handle={:?}, sock={}, ev={:?}",
-            self.port,
-            socket,
-            interest
+        let span = tracing::trace_span!(
+            "modify",
+            handle = ?self.port,
+            sock = ?socket,
+            ev = ?interest,
         );
+        let _enter = span.enter();
 
         // We don't support edge-triggered events.
         if matches!(mode, PollMode::Edge | PollMode::EdgeOneshot) {
@@ -230,7 +232,12 @@ impl Poller {
 
     /// Delete a source from the poller.
     pub(super) fn delete(&self, socket: RawSocket) -> io::Result<()> {
-        log::trace!("remove: handle={:?}, sock={}", self.port, socket);
+        let span = tracing::trace_span!(
+            "remove",
+            handle = ?self.port,
+            sock = ?socket,
+        );
+        let _enter = span.enter();
 
         // Get a reference to the source.
         let source = {
@@ -252,7 +259,12 @@ impl Poller {
 
     /// Wait for events.
     pub(super) fn wait(&self, events: &mut Events, timeout: Option<Duration>) -> io::Result<()> {
-        log::trace!("wait: handle={:?}, timeout={:?}", self.port, timeout);
+        let span = tracing::trace_span!(
+            "wait",
+            handle = ?self.port,
+            ?timeout,
+        );
+        let _enter = span.enter();
 
         let deadline = timeout.and_then(|timeout| Instant::now().checked_add(timeout));
         let mut packets = lock!(self.packets.lock());
@@ -279,7 +291,10 @@ impl Poller {
 
             // Wait for I/O events.
             let len = self.port.wait(&mut packets, timeout)?;
-            log::trace!("new events: handle={:?}, len={}", self.port, len);
+            tracing::trace!(
+                handle = ?self.port,
+                res = ?len,
+                "new events");
 
             // We are no longer polling.
             drop(guard);
@@ -308,7 +323,7 @@ impl Poller {
                 break;
             }
 
-            log::trace!("wait: no events found, re-entering polling loop");
+            tracing::trace!("wait: no events found, re-entering polling loop");
         }
 
         Ok(())

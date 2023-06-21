@@ -37,7 +37,10 @@ impl Poller {
         // Register the notification pipe.
         poller.notify.register(&poller)?;
 
-        log::trace!("new: kqueue_fd={:?}", poller.kqueue_fd);
+        tracing::trace!(
+            kqueue_fd = ?poller.kqueue_fd.as_raw_fd(),
+            "new"
+        );
         Ok(poller)
     }
 
@@ -59,14 +62,18 @@ impl Poller {
 
     /// Modifies an existing file descriptor.
     pub fn modify(&self, fd: RawFd, ev: Event, mode: PollMode) -> io::Result<()> {
-        if !self.notify.has_fd(fd) {
-            log::trace!(
-                "add: kqueue_fd={:?}, fd={}, ev={:?}",
-                self.kqueue_fd,
-                fd,
-                ev
+        let span = if !self.notify.has_fd(fd) {
+            let span = tracing::trace_span!(
+                "add",
+                kqueue_fd = ?self.kqueue_fd.as_raw_fd(),
+                ?fd,
+                ?ev,
             );
-        }
+            Some(span)
+        } else {
+            None
+        };
+        let _enter = span.as_ref().map(|s| s.enter());
 
         let mode_flags = mode_to_flags(mode);
 
@@ -141,18 +148,23 @@ impl Poller {
 
     /// Waits for I/O events with an optional timeout.
     pub fn wait(&self, events: &mut Events, timeout: Option<Duration>) -> io::Result<()> {
-        log::trace!(
-            "wait: kqueue_fd={:?}, timeout={:?}",
-            self.kqueue_fd,
-            timeout
+        let span = tracing::trace_span!(
+            "wait",
+            kqueue_fd = ?self.kqueue_fd.as_raw_fd(),
+            ?timeout,
         );
+        let _enter = span.enter();
 
         // Wait for I/O events.
         let changelist = [];
         let eventlist = &mut events.list;
         let res = unsafe { kqueue::kevent(&self.kqueue_fd, &changelist, eventlist, timeout)? };
 
-        log::trace!("new events: kqueue_fd={:?}, res={}", self.kqueue_fd, res);
+        tracing::trace!(
+            kqueue_fd = ?self.kqueue_fd.as_raw_fd(),
+            ?res,
+            "new events",
+        );
 
         // Clear the notification (if received) and re-register interest in it.
         self.notify.reregister(self)?;
@@ -162,7 +174,12 @@ impl Poller {
 
     /// Sends a notification to wake up the current or next `wait()` call.
     pub fn notify(&self) -> io::Result<()> {
-        log::trace!("notify: kqueue_fd={:?}", self.kqueue_fd);
+        let span = tracing::trace_span!(
+            "notify",
+            kqueue_fd = ?self.kqueue_fd.as_raw_fd(),
+        );
+        let _enter = span.enter();
+
         self.notify.notify(self).ok();
         Ok(())
     }
@@ -182,7 +199,12 @@ impl AsFd for Poller {
 
 impl Drop for Poller {
     fn drop(&mut self) {
-        log::trace!("drop: kqueue_fd={:?}", self.kqueue_fd);
+        let span = tracing::trace_span!(
+            "drop",
+            kqueue_fd = ?self.kqueue_fd.as_raw_fd(),
+        );
+        let _enter = span.enter();
+
         let _ = self.notify.deregister(self);
     }
 }

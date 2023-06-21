@@ -6,7 +6,7 @@ use std::cell::UnsafeCell;
 use std::fmt;
 use std::io;
 use std::marker::{PhantomData, PhantomPinned};
-use std::mem::{size_of, transmute, MaybeUninit};
+use std::mem::{self, size_of, transmute, MaybeUninit};
 use std::os::windows::prelude::{AsRawHandle, RawHandle, RawSocket};
 use std::pin::Pin;
 use std::ptr;
@@ -111,7 +111,7 @@ macro_rules! define_ntdll_import {
                         let addr = match addr {
                             Some(addr) => addr,
                             None => {
-                                log::error!("Failed to load ntdll function {}", NAME);
+                                tracing::error!("Failed to load ntdll function {}", NAME);
                                 return Err(io::Error::last_os_error());
                             },
                         };
@@ -212,7 +212,7 @@ impl NtdllImports {
                 let ntdll = GetModuleHandleW(NTDLL_NAME.as_ptr() as *const _);
 
                 if ntdll == 0 {
-                    log::error!("Failed to load ntdll.dll");
+                    tracing::error!("Failed to load ntdll.dll");
                     return Err(io::Error::last_os_error());
                 }
 
@@ -302,8 +302,8 @@ where
 
         // Set up device attributes.
         let mut device_name = UNICODE_STRING {
-            Length: (AFD_NAME.len() * size_of::<u16>()) as u16,
-            MaximumLength: (AFD_NAME.len() * size_of::<u16>()) as u16,
+            Length: mem::size_of_val(AFD_NAME) as u16,
+            MaximumLength: mem::size_of_val(AFD_NAME) as u16,
             Buffer: AFD_NAME.as_ptr() as *mut _,
         };
         let mut device_attributes = OBJECT_ATTRIBUTES {
