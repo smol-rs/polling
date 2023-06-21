@@ -24,7 +24,7 @@ impl Poller {
         fcntl_setfd(&port_fd, flags | FdFlags::CLOEXEC)?;
 
         tracing::trace!(
-            port_fd=?port_fd.as_raw_fd(),
+            port_fd = ?port_fd.as_raw_fd(),
             "new",
         );
 
@@ -52,8 +52,8 @@ impl Poller {
         let span = tracing::trace_span!(
             "modify",
             port_fd = ?self.port_fd.as_raw_fd(),
-            fd= ?fd,
-            ev = ?ev,
+            ?fd,
+            ?ev,
         );
         let _enter = span.enter();
 
@@ -83,7 +83,7 @@ impl Poller {
         let span = tracing::trace_span!(
             "delete",
             port_fd = ?self.port_fd.as_raw_fd(),
-            fd= ?fd,
+            ?fd,
         );
         let _enter = span.enter();
 
@@ -103,15 +103,15 @@ impl Poller {
         let span = tracing::trace_span!(
             "wait",
             port_fd = ?self.port_fd.as_raw_fd(),
-            timeout = ?timeout,
+            ?timeout,
         );
         let _enter = span.enter();
 
         // Wait for I/O events.
         let res = port::port_getn(&self.port_fd, &mut events.list, 1, timeout);
         tracing::trace!(
-            port_fd= ?self.port_fd,
-            res= ?events.list.len(),
+            port_fd = ?self.port_fd,
+            res = ?events.list.len(),
             "new events"
         );
 

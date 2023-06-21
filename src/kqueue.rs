@@ -66,8 +66,8 @@ impl Poller {
             let span = tracing::trace_span!(
                 "add",
                 kqueue_fd = ?self.kqueue_fd.as_raw_fd(),
-                fd= ?fd,
-                ev = ?ev,
+                ?fd,
+                ?ev,
             );
             Some(span)
         } else {
@@ -151,7 +151,7 @@ impl Poller {
         let span = tracing::trace_span!(
             "wait",
             kqueue_fd = ?self.kqueue_fd.as_raw_fd(),
-            timeout = ?timeout,
+            ?timeout,
         );
         let _enter = span.enter();
 
@@ -162,7 +162,7 @@ impl Poller {
 
         tracing::trace!(
             kqueue_fd = ?self.kqueue_fd.as_raw_fd(),
-            res = ?res,
+            ?res,
             "new events",
         );
 

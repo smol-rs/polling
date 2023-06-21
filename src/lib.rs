@@ -483,7 +483,7 @@ impl Poller {
     /// # std::io::Result::Ok(())
     /// ```
     pub fn wait(&self, events: &mut Vec<Event>, timeout: Option<Duration>) -> io::Result<usize> {
-        let span = tracing::trace_span!("Poller::wait", timeout=?timeout);
+        let span = tracing::trace_span!("Poller::wait", ?timeout);
         let _enter = span.enter();
 
         if let Ok(mut lock) = self.events.try_lock() {

@@ -105,7 +105,7 @@ impl Poller {
 
         let port = IoCompletionPort::new(0)?;
 
-        tracing::trace!(handle=?port, "new");
+        tracing::trace!(handle = ?port, "new");
 
         Ok(Poller {
             port,
@@ -262,7 +262,7 @@ impl Poller {
         let span = tracing::trace_span!(
             "wait",
             handle = ?self.port,
-            timeout = ?timeout,
+            ?timeout,
         );
         let _enter = span.enter();
 
@@ -292,8 +292,8 @@ impl Poller {
             // Wait for I/O events.
             let len = self.port.wait(&mut packets, timeout)?;
             tracing::trace!(
-                handle=?self.port,
-                res=?len,
+                handle = ?self.port,
+                res = ?len,
                 "new events");
 
             // We are no longer polling.

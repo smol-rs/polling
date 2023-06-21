@@ -66,9 +66,9 @@ impl Poller {
         )?;
 
         tracing::trace!(
-            epoll_fd= ?poller.epoll_fd.as_raw_fd(),
-            event_fd= ?poller.event_fd.as_raw_fd(),
-            timer_fd= ?poller.timer_fd,
+            epoll_fd = ?poller.epoll_fd.as_raw_fd(),
+            event_fd = ?poller.event_fd.as_raw_fd(),
+            timer_fd = ?poller.timer_fd,
             "new",
         );
         Ok(poller)
@@ -89,8 +89,8 @@ impl Poller {
         let span = tracing::trace_span!(
             "add",
             epoll_fd = ?self.epoll_fd.as_raw_fd(),
-            fd= ?fd,
-            ev = ?ev,
+            ?fd,
+            ?ev,
         );
         let _enter = span.enter();
 
@@ -109,8 +109,8 @@ impl Poller {
         let span = tracing::trace_span!(
             "modify",
             epoll_fd = ?self.epoll_fd.as_raw_fd(),
-            fd= ?fd,
-            ev = ?ev,
+            ?fd,
+            ?ev,
         );
         let _enter = span.enter();
 
@@ -129,7 +129,7 @@ impl Poller {
         let span = tracing::trace_span!(
             "delete",
             epoll_fd = ?self.epoll_fd.as_raw_fd(),
-            fd= ?fd,
+            ?fd,
         );
         let _enter = span.enter();
 

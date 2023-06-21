@@ -89,11 +89,7 @@ impl Poller {
         // Put the reading side into non-blocking mode.
         fcntl_setfl(&notify_read, fcntl_getfl(&notify_read)? | OFlags::NONBLOCK)?;
 
-        tracing::trace!(
-            notify_read=?notify_read,
-            notify_write=?notify_write,
-            "new"
-        );
+        tracing::trace!(?notify_read, ?notify_write, "new");
 
         Ok(Self {
             fds: Mutex::new(Fds {
@@ -131,8 +127,8 @@ impl Poller {
         let span = tracing::trace_span!(
             "add",
             notify_read = ?self.notify_read,
-            fd= ?fd,
-            ev = ?ev,
+            ?fd,
+            ?ev,
         );
         let _enter = span.enter();
 
@@ -166,8 +162,8 @@ impl Poller {
         let span = tracing::trace_span!(
             "modify",
             notify_read = ?self.notify_read,
-            fd= ?fd,
-            ev = ?ev,
+            ?fd,
+            ?ev,
         );
         let _enter = span.enter();
 
@@ -211,7 +207,7 @@ impl Poller {
         let span = tracing::trace_span!(
             "wait",
             notify_read = ?self.notify_read,
-            timeout = ?timeout,
+            ?timeout,
         );
         let _enter = span.enter();
 
@@ -253,12 +249,7 @@ impl Poller {
             let num_events = poll(&mut fds.poll_fds, timeout_ms)?;
             let notified = !fds.poll_fds[0].revents().is_empty();
             let num_fd_events = if notified { num_events - 1 } else { num_events };
-            tracing::trace!(
-                num_events = ?num_events,
-                notified = ?notified,
-                num_fd_events = ?num_fd_events,
-                "new events",
-            );
+            tracing::trace!(?num_events, ?notified, ?num_fd_events, "new events",);
 
             // Read all notifications.
             if notified {
