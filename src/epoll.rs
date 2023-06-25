@@ -47,23 +47,25 @@ impl Poller {
             timer_fd,
         };
 
-        if let Some(ref timer_fd) = poller.timer_fd {
+        unsafe {
+            if let Some(ref timer_fd) = poller.timer_fd {
+                poller.add(
+                    timer_fd.as_raw_fd(),
+                    Event::none(crate::NOTIFY_KEY),
+                    PollMode::Oneshot,
+                )?;
+            }
+
             poller.add(
-                timer_fd.as_raw_fd(),
-                Event::none(crate::NOTIFY_KEY),
+                poller.event_fd.as_raw_fd(),
+                Event {
+                    key: crate::NOTIFY_KEY,
+                    readable: true,
+                    writable: false,
+                },
                 PollMode::Oneshot,
             )?;
         }
-
-        poller.add(
-            poller.event_fd.as_raw_fd(),
-            Event {
-                key: crate::NOTIFY_KEY,
-                readable: true,
-                writable: false,
-            },
-            PollMode::Oneshot,
-        )?;
 
         tracing::trace!(
             epoll_fd = ?poller.epoll_fd.as_raw_fd(),
@@ -85,7 +87,12 @@ impl Poller {
     }
 
     /// Adds a new file descriptor.
-    pub fn add(&self, fd: RawFd, ev: Event, mode: PollMode) -> io::Result<()> {
+    ///
+    /// # Safety
+    ///
+    /// The `fd` must be a valid file descriptor. The usual condition of remaining registered in
+    /// the `Poller` doesn't apply to `epoll`.
+    pub unsafe fn add(&self, fd: RawFd, ev: Event, mode: PollMode) -> io::Result<()> {
         let span = tracing::trace_span!(
             "add",
             epoll_fd = ?self.epoll_fd.as_raw_fd(),
@@ -105,7 +112,7 @@ impl Poller {
     }
 
     /// Modifies an existing file descriptor.
-    pub fn modify(&self, fd: RawFd, ev: Event, mode: PollMode) -> io::Result<()> {
+    pub fn modify(&self, fd: BorrowedFd<'_>, ev: Event, mode: PollMode) -> io::Result<()> {
         let span = tracing::trace_span!(
             "modify",
             epoll_fd = ?self.epoll_fd.as_raw_fd(),
@@ -114,18 +121,13 @@ impl Poller {
         );
         let _enter = span.enter();
 
-        epoll::epoll_mod(
-            &self.epoll_fd,
-            unsafe { rustix::fd::BorrowedFd::borrow_raw(fd) },
-            ev.key as u64,
-            epoll_flags(&ev, mode),
-        )?;
+        epoll::epoll_mod(&self.epoll_fd, fd, ev.key as u64, epoll_flags(&ev, mode))?;
 
         Ok(())
     }
 
     /// Deletes a file descriptor.
-    pub fn delete(&self, fd: RawFd) -> io::Result<()> {
+    pub fn delete(&self, fd: BorrowedFd<'_>) -> io::Result<()> {
         let span = tracing::trace_span!(
             "delete",
             epoll_fd = ?self.epoll_fd.as_raw_fd(),
@@ -133,9 +135,7 @@ impl Poller {
         );
         let _enter = span.enter();
 
-        epoll::epoll_del(&self.epoll_fd, unsafe {
-            rustix::fd::BorrowedFd::borrow_raw(fd)
-        })?;
+        epoll::epoll_del(&self.epoll_fd, fd)?;
 
         Ok(())
     }
@@ -170,7 +170,7 @@ impl Poller {
 
             // Set interest in timerfd.
             self.modify(
-                timer_fd.as_raw_fd(),
+                timer_fd.as_fd(),
                 Event {
                     key: crate::NOTIFY_KEY,
                     readable: true,
@@ -206,7 +206,7 @@ impl Poller {
         let mut buf = [0u8; 8];
         let _ = read(&self.event_fd, &mut buf);
         self.modify(
-            self.event_fd.as_raw_fd(),
+            self.event_fd.as_fd(),
             Event {
                 key: crate::NOTIFY_KEY,
                 readable: true,
@@ -255,9 +255,9 @@ impl Drop for Poller {
         let _enter = span.enter();
 
         if let Some(timer_fd) = self.timer_fd.take() {
-            let _ = self.delete(timer_fd.as_raw_fd());
+            let _ = self.delete(timer_fd.as_fd());
         }
-        let _ = self.delete(self.event_fd.as_raw_fd());
+        let _ = self.delete(self.event_fd.as_fd());
     }
 }
 

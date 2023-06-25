@@ -10,8 +10,10 @@ fn main() -> io::Result<()> {
     l2.set_nonblocking(true)?;
 
     let poller = Poller::new()?;
-    poller.add(&l1, Event::readable(1))?;
-    poller.add(&l2, Event::readable(2))?;
+    unsafe {
+        poller.add(&l1, Event::readable(1))?;
+        poller.add(&l2, Event::readable(2))?;
+    }
 
     println!("You can connect to the server using `nc`:");
     println!(" $ nc 127.0.0.1 8001");

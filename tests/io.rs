@@ -7,7 +7,9 @@ use std::time::Duration;
 fn basic_io() {
     let poller = Poller::new().unwrap();
     let (read, mut write) = tcp_pair().unwrap();
-    poller.add(&read, Event::readable(1)).unwrap();
+    unsafe {
+        poller.add(&read, Event::readable(1)).unwrap();
+    }
 
     // Nothing should be available at first.
     let mut events = vec![];
@@ -28,6 +30,8 @@ fn basic_io() {
         1
     );
     assert_eq!(&*events, &[Event::readable(1)]);
+
+    poller.delete(&read).unwrap();
 }
 
 fn tcp_pair() -> io::Result<(TcpStream, TcpStream)> {

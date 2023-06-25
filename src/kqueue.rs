@@ -55,13 +55,17 @@ impl Poller {
     }
 
     /// Adds a new file descriptor.
-    pub fn add(&self, fd: RawFd, ev: Event, mode: PollMode) -> io::Result<()> {
+    ///
+    /// # Safety
+    ///
+    /// The file descriptor must be valid and it must last until it is deleted.
+    pub unsafe fn add(&self, fd: RawFd, ev: Event, mode: PollMode) -> io::Result<()> {
         // File descriptors don't need to be added explicitly, so just modify the interest.
-        self.modify(fd, ev, mode)
+        self.modify(BorrowedFd::borrow_raw(fd), ev, mode)
     }
 
     /// Modifies an existing file descriptor.
-    pub fn modify(&self, fd: RawFd, ev: Event, mode: PollMode) -> io::Result<()> {
+    pub fn modify(&self, fd: BorrowedFd<'_>, ev: Event, mode: PollMode) -> io::Result<()> {
         let span = if !self.notify.has_fd(fd) {
             let span = tracing::trace_span!(
                 "add",
@@ -91,12 +95,12 @@ impl Poller {
         // A list of changes for kqueue.
         let changelist = [
             kqueue::Event::new(
-                kqueue::EventFilter::Read(fd),
+                kqueue::EventFilter::Read(fd.as_raw_fd()),
                 read_flags | kqueue::EventFlags::RECEIPT,
                 ev.key as _,
             ),
             kqueue::Event::new(
-                kqueue::EventFilter::Write(fd),
+                kqueue::EventFilter::Write(fd.as_raw_fd()),
                 write_flags | kqueue::EventFlags::RECEIPT,
                 ev.key as _,
             ),
@@ -141,7 +145,7 @@ impl Poller {
     }
 
     /// Deletes a file descriptor.
-    pub fn delete(&self, fd: RawFd) -> io::Result<()> {
+    pub fn delete(&self, fd: BorrowedFd<'_>) -> io::Result<()> {
         // Simply delete interest in the file descriptor.
         self.modify(fd, Event::none(0), PollMode::Oneshot)
     }
@@ -270,7 +274,7 @@ mod notify {
     use super::Poller;
     use rustix::io::kqueue;
     use std::io;
-    use std::os::unix::io::RawFd;
+    use std::os::unix::io::BorrowedFd;
 
     /// A notification pipe.
     ///
@@ -335,7 +339,7 @@ mod notify {
         }
 
         /// Whether this raw file descriptor is associated with this pipe.
-        pub(super) fn has_fd(&self, _fd: RawFd) -> bool {
+        pub(super) fn has_fd(&self, _fd: BorrowedFd<'_>) -> bool {
             false
         }
     }
@@ -354,7 +358,7 @@ mod notify {
     use crate::{Event, PollMode, NOTIFY_KEY};
     use std::io::{self, prelude::*};
     use std::os::unix::{
-        io::{AsRawFd, RawFd},
+        io::{AsFd, AsRawFd, BorrowedFd},
         net::UnixStream,
     };
 
@@ -386,11 +390,13 @@ mod notify {
         /// Registers this notification pipe in the `Poller`.
         pub(super) fn register(&self, poller: &Poller) -> io::Result<()> {
             // Register the read end of this pipe.
-            poller.add(
-                self.read_stream.as_raw_fd(),
-                Event::readable(NOTIFY_KEY),
-                PollMode::Oneshot,
-            )
+            unsafe {
+                poller.add(
+                    self.read_stream.as_raw_fd(),
+                    Event::readable(NOTIFY_KEY),
+                    PollMode::Oneshot,
+                )
+            }
         }
 
         /// Reregister this notification pipe in the `Poller`.
@@ -400,7 +406,7 @@ mod notify {
 
             // Reregister the read end of this pipe.
             poller.modify(
-                self.read_stream.as_raw_fd(),
+                self.read_stream.as_fd(),
                 Event::readable(NOTIFY_KEY),
                 PollMode::Oneshot,
             )
@@ -418,11 +424,11 @@ mod notify {
         /// Deregisters this notification pipe from the `Poller`.
         pub(super) fn deregister(&self, poller: &Poller) -> io::Result<()> {
             // Deregister the read end of the pipe.
-            poller.delete(self.read_stream.as_raw_fd())
+            poller.delete(self.read_stream.as_fd())
         }
 
         /// Whether this raw file descriptor is associated with this pipe.
-        pub(super) fn has_fd(&self, fd: RawFd) -> bool {
+        pub(super) fn has_fd(&self, fd: BorrowedFd<'_>) -> bool {
             self.read_stream.as_raw_fd() == fd
         }
     }
