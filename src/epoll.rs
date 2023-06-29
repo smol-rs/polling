@@ -5,8 +5,9 @@ use std::io;
 use std::os::unix::io::{AsFd, AsRawFd, BorrowedFd, RawFd};
 use std::time::Duration;
 
+use rustix::event::{epoll, eventfd, EventfdFlags};
 use rustix::fd::OwnedFd;
-use rustix::io::{epoll, eventfd, read, write, EventfdFlags};
+use rustix::io::{read, write};
 use rustix::time::{
     timerfd_create, timerfd_settime, Itimerspec, TimerfdClockId, TimerfdFlags, TimerfdTimerFlags,
     Timespec,
@@ -31,7 +32,7 @@ impl Poller {
         // Create an epoll instance.
         //
         // Use `epoll_create1` with `EPOLL_CLOEXEC`.
-        let epoll_fd = epoll::epoll_create(epoll::CreateFlags::CLOEXEC)?;
+        let epoll_fd = epoll::create(epoll::CreateFlags::CLOEXEC)?;
 
         // Set up eventfd and timerfd.
         let event_fd = eventfd(0, EventfdFlags::CLOEXEC | EventfdFlags::NONBLOCK)?;
@@ -101,10 +102,10 @@ impl Poller {
         );
         let _enter = span.enter();
 
-        epoll::epoll_add(
+        epoll::add(
             &self.epoll_fd,
             unsafe { rustix::fd::BorrowedFd::borrow_raw(fd) },
-            ev.key as u64,
+            epoll::EventData::new_u64(ev.key as u64),
             epoll_flags(&ev, mode),
         )?;
 
@@ -121,7 +122,12 @@ impl Poller {
         );
         let _enter = span.enter();
 
-        epoll::epoll_mod(&self.epoll_fd, fd, ev.key as u64, epoll_flags(&ev, mode))?;
+        epoll::modify(
+            &self.epoll_fd,
+            fd,
+            epoll::EventData::new_u64(ev.key as u64),
+            epoll_flags(&ev, mode),
+        )?;
 
         Ok(())
     }
@@ -135,7 +141,7 @@ impl Poller {
         );
         let _enter = span.enter();
 
-        epoll::epoll_del(&self.epoll_fd, fd)?;
+        epoll::delete(&self.epoll_fd, fd)?;
 
         Ok(())
     }
@@ -195,7 +201,7 @@ impl Poller {
         };
 
         // Wait for I/O events.
-        epoll::epoll_wait(&self.epoll_fd, &mut events.list, timeout_ms)?;
+        epoll::wait(&self.epoll_fd, &mut events.list, timeout_ms)?;
         tracing::trace!(
             epoll_fd = ?self.epoll_fd.as_raw_fd(),
             res = ?events.list.len(),
@@ -310,10 +316,13 @@ impl Events {
 
     /// Iterates over I/O events.
     pub fn iter(&self) -> impl Iterator<Item = Event> + '_ {
-        self.list.iter().map(|(flags, data)| Event {
-            key: data as usize,
-            readable: flags.intersects(read_flags()),
-            writable: flags.intersects(write_flags()),
+        self.list.iter().map(|ev| {
+            let flags = ev.flags;
+            Event {
+                key: ev.data.u64() as usize,
+                readable: flags.intersects(read_flags()),
+                writable: flags.intersects(write_flags()),
+            }
         })
     }
 }

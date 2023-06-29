@@ -56,7 +56,7 @@
 #![cfg(feature = "std")]
 #![cfg_attr(not(feature = "std"), no_std)]
 #![warn(missing_docs, missing_debug_implementations, rust_2018_idioms)]
-#![allow(clippy::useless_conversion, clippy::unnecessary_cast)]
+#![allow(clippy::useless_conversion, clippy::unnecessary_cast, unused_unsafe)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
 use std::fmt;
@@ -302,7 +302,6 @@ impl Poller {
     /// poller.delete(&source)?;
     /// # std::io::Result::Ok(())
     /// ```
-    #[allow(unsafe_op_in_unsafe_fn)]
     pub unsafe fn add(&self, source: impl AsRawSource, interest: Event) -> io::Result<()> {
         self.add_with_mode(source, interest, PollMode::Oneshot)
     }

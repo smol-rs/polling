@@ -1,11 +1,11 @@
 //! Bindings to kqueue (macOS, iOS, tvOS, watchOS, FreeBSD, NetBSD, OpenBSD, DragonFly BSD).
 
 use std::io;
-use std::os::unix::io::{AsFd, AsRawFd, BorrowedFd, RawFd};
+use std::os::unix::io::{AsFd, AsRawFd, BorrowedFd, OwnedFd, RawFd};
 use std::time::Duration;
 
-use rustix::fd::OwnedFd;
-use rustix::io::{fcntl_setfd, kqueue, Errno, FdFlags};
+use rustix::event::kqueue;
+use rustix::io::{fcntl_setfd, Errno, FdFlags};
 
 use crate::{Event, PollMode};
 
@@ -272,7 +272,7 @@ pub(crate) fn mode_to_flags(mode: PollMode) -> kqueue::EventFlags {
 ))]
 mod notify {
     use super::Poller;
-    use rustix::io::kqueue;
+    use rustix::event::kqueue;
     use std::io;
     use std::os::unix::io::BorrowedFd;
 
@@ -429,7 +429,7 @@ mod notify {
 
         /// Whether this raw file descriptor is associated with this pipe.
         pub(super) fn has_fd(&self, fd: BorrowedFd<'_>) -> bool {
-            self.read_stream.as_raw_fd() == fd
+            self.read_stream.as_raw_fd() == fd.as_raw_fd()
         }
     }
 }

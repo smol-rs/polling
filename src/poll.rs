@@ -7,12 +7,11 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Condvar, Mutex};
 use std::time::{Duration, Instant};
 
+use rustix::event::{poll, PollFd, PollFlags};
 use rustix::fd::{AsFd, AsRawFd, BorrowedFd, OwnedFd};
 use rustix::fs::{fcntl_getfl, fcntl_setfl, OFlags};
-use rustix::io::{
-    fcntl_getfd, fcntl_setfd, pipe, pipe_with, poll, read, write, FdFlags, PipeFlags, PollFd,
-    PollFlags,
-};
+use rustix::io::{fcntl_getfd, fcntl_setfd, read, write, FdFlags};
+use rustix::pipe::{pipe, pipe_with, PipeFlags};
 
 // std::os::unix doesn't exist on Fuchsia
 type RawFd = std::os::raw::c_int;

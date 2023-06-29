@@ -4,8 +4,9 @@ use std::io;
 use std::os::unix::io::{AsFd, AsRawFd, BorrowedFd, RawFd};
 use std::time::Duration;
 
+use rustix::event::{port, PollFlags};
 use rustix::fd::OwnedFd;
-use rustix::io::{fcntl_getfd, fcntl_setfd, port, FdFlags, PollFlags};
+use rustix::io::{fcntl_getfd, fcntl_setfd, FdFlags};
 
 use crate::{Event, PollMode};
 
