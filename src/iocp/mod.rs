@@ -679,7 +679,7 @@ impl PacketUnwrapped {
                         let events = afd_data.events();
 
                         // If we closed the socket, remove it from being polled.
-                        if events.contains(AfdPollMask::LOCAL_CLOSE) {
+                        if events.intersects(AfdPollMask::LOCAL_CLOSE) {
                             let source = lock!(poller.sources.write())
                                 .remove(&socket_state.socket)
                                 .unwrap();
