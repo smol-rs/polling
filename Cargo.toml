@@ -27,7 +27,7 @@ tracing = { version = "0.1.37", default-features = false }
 
 [target.'cfg(any(unix, target_os = "fuchsia", target_os = "vxworks"))'.dependencies]
 libc = "0.2.77"
-rustix = { version = "0.37.11", features = ["process", "time", "fs", "std"], default-features = false }
+rustix = { version = "0.38.2", features = ["process", "time", "fs", "std"], default-features = false }
 
 [target.'cfg(windows)'.dependencies]
 concurrent-queue = "2.2.0"
