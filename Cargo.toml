@@ -47,4 +47,4 @@ features = [
 
 [dev-dependencies]
 easy-parallel = "3.1.0"
-fastrand = "1.9.0"
+fastrand = "2.0.0"
