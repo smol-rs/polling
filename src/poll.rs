@@ -74,7 +74,7 @@ impl Poller {
                 poll_fds: vec![PollFd::from_borrowed_fd(
                     // SAFETY: `notify.fd()` will remain valid until we drop `self`.
                     unsafe { BorrowedFd::borrow_raw(notify.fd().as_raw_fd()) },
-                    PollFlags::RDNORM,
+                    notify.poll_flags(),
                 )],
                 fd_data: HashMap::new(),
             }),
@@ -388,6 +388,7 @@ fn cvt_mode_as_remove(mode: PollMode) -> io::Result<bool> {
 mod notify {
     use std::io;
 
+    use rustix::event::PollFlags;
     use rustix::fd::{AsFd, AsRawFd, BorrowedFd, OwnedFd, RawFd};
     use rustix::fs::{fcntl_getfl, fcntl_setfl, OFlags};
     use rustix::io::{fcntl_getfd, fcntl_setfd, read, write, FdFlags};
@@ -433,6 +434,11 @@ mod notify {
             self.read_pipe.as_fd()
         }
 
+        /// Provides the poll flags to be used when registering the read half of the botify pipe with the `Poller`.
+        pub(super) fn poll_flags(&self) -> PollFlags {
+            PollFlags::RDNORM
+        }
+
         /// Notifies the `Poller` instance via the write half of the notify pipe.
         pub(super) fn notify(&self) -> Result<(), io::Error> {
             write(&self.write_pipe, &[0; 1])?;
@@ -466,6 +472,7 @@ mod notify {
     use std::io;
     use std::mem;
 
+    use rustix::event::PollFlags;
     use rustix::event::{eventfd, EventfdFlags};
 
     use rustix::fd::{AsFd, AsRawFd, BorrowedFd, OwnedFd, RawFd};
@@ -497,7 +504,13 @@ mod notify {
             // (1) is not a problem for us, as we want the eventfd() file descriptor to be in a non-blocking mode anyway
             // (2) is also not a problem, as long as we don't try to read the counter value in an endless loop when we detect being notified
 
-            let event_fd = eventfd(0, EventfdFlags::empty())?;
+            #[cfg(not(target_os = "espidf"))]
+            let flags = EventfdFlags::NONBLOCK;
+
+            #[cfg(target_os = "espidf")]
+            let flags = EventfdFlags::empty();
+
+            let event_fd = eventfd(0, flags)?;
 
             Ok(Self { event_fd })
         }
@@ -505,6 +518,11 @@ mod notify {
         /// Provides the eventfd file handle that needs to be registered by the `Poller`.
         pub(super) fn fd(&self) -> BorrowedFd<'_> {
             self.event_fd.as_fd()
+        }
+
+        /// Provides the eventfd file handle poll flags to be used when registering it with the `Poller`.
+        pub(super) fn poll_flags(&self) -> PollFlags {
+            PollFlags::IN
         }
 
         /// Notifies the `Poller` instance via the eventfd file descriptor.
