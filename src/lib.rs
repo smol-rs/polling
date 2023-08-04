@@ -28,7 +28,9 @@
 //!
 //! // Create a poller and register interest in readability on the socket.
 //! let poller = Poller::new()?;
-//! poller.add(&socket, Event::readable(key))?;
+//! unsafe {
+//!     poller.add(&socket, Event::readable(key))?;
+//! }
 //!
 //! // The event loop.
 //! let mut events = Vec::new();
@@ -46,13 +48,15 @@
 //!         }
 //!     }
 //! }
+//!
+//! poller.delete(&socket)?;
 //! # std::io::Result::Ok(())
 //! ```
 
 #![cfg(feature = "std")]
 #![cfg_attr(not(feature = "std"), no_std)]
 #![warn(missing_docs, missing_debug_implementations, rust_2018_idioms)]
-#![allow(clippy::useless_conversion, clippy::unnecessary_cast)]
+#![allow(clippy::useless_conversion, clippy::unnecessary_cast, unused_unsafe)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![doc(
     html_favicon_url = "https://raw.githubusercontent.com/smol-rs/smol/master/assets/images/logo_fullsize_transparent.png"
@@ -273,8 +277,11 @@ impl Poller {
     /// [`modify()`][`Poller::modify()`] again after an event is delivered if we're interested in
     /// the next event of the same kind.
     ///
-    /// Don't forget to [`delete()`][`Poller::delete()`] the file descriptor or socket when it is
-    /// no longer used!
+    /// # Safety
+    ///
+    /// The source must be [`delete()`]d from this `Poller` before it is dropped.
+    ///
+    /// [`delete()`]: Poller::delete
     ///
     /// # Errors
     ///
@@ -295,10 +302,13 @@ impl Poller {
     /// let key = 7;
     ///
     /// let poller = Poller::new()?;
-    /// poller.add(&source, Event::all(key))?;
+    /// unsafe {
+    ///     poller.add(&source, Event::all(key))?;
+    /// }
+    /// poller.delete(&source)?;
     /// # std::io::Result::Ok(())
     /// ```
-    pub fn add(&self, source: impl Source, interest: Event) -> io::Result<()> {
+    pub unsafe fn add(&self, source: impl AsRawSource, interest: Event) -> io::Result<()> {
         self.add_with_mode(source, interest, PollMode::Oneshot)
     }
 
@@ -307,13 +317,19 @@ impl Poller {
     /// This is identical to the `add()` function, but allows specifying the
     /// polling mode to use for this socket.
     ///
+    /// # Safety
+    ///
+    /// The source must be [`delete()`]d from this `Poller` before it is dropped.
+    ///
+    /// [`delete()`]: Poller::delete
+    ///
     /// # Errors
     ///
     /// If the operating system does not support the specified mode, this function
     /// will return an error.
-    pub fn add_with_mode(
+    pub unsafe fn add_with_mode(
         &self,
-        source: impl Source,
+        source: impl AsRawSource,
         interest: Event,
         mode: PollMode,
     ) -> io::Result<()> {
@@ -354,7 +370,7 @@ impl Poller {
     /// # let source = std::net::TcpListener::bind("127.0.0.1:0")?;
     /// # let key = 7;
     /// # let poller = Poller::new()?;
-    /// # poller.add(&source, Event::none(key))?;
+    /// # unsafe { poller.add(&source, Event::none(key))?; }
     /// poller.modify(&source, Event::all(key))?;
     /// # std::io::Result::Ok(())
     /// ```
@@ -366,8 +382,9 @@ impl Poller {
     /// # let source = std::net::TcpListener::bind("127.0.0.1:0")?;
     /// # let key = 7;
     /// # let poller = Poller::new()?;
-    /// # poller.add(&source, Event::none(key))?;
+    /// # unsafe { poller.add(&source, Event::none(key))?; }
     /// poller.modify(&source, Event::readable(key))?;
+    /// # poller.delete(&source)?;
     /// # std::io::Result::Ok(())
     /// ```
     ///
@@ -378,8 +395,9 @@ impl Poller {
     /// # let poller = Poller::new()?;
     /// # let key = 7;
     /// # let source = std::net::TcpListener::bind("127.0.0.1:0")?;
-    /// # poller.add(&source, Event::none(key))?;
+    /// # unsafe { poller.add(&source, Event::none(key))? };
     /// poller.modify(&source, Event::writable(key))?;
+    /// # poller.delete(&source)?;
     /// # std::io::Result::Ok(())
     /// ```
     ///
@@ -390,11 +408,12 @@ impl Poller {
     /// # let source = std::net::TcpListener::bind("127.0.0.1:0")?;
     /// # let key = 7;
     /// # let poller = Poller::new()?;
-    /// # poller.add(&source, Event::none(key))?;
+    /// # unsafe { poller.add(&source, Event::none(key))?; }
     /// poller.modify(&source, Event::none(key))?;
+    /// # poller.delete(&source)?;
     /// # std::io::Result::Ok(())
     /// ```
-    pub fn modify(&self, source: impl Source, interest: Event) -> io::Result<()> {
+    pub fn modify(&self, source: impl AsSource, interest: Event) -> io::Result<()> {
         self.modify_with_mode(source, interest, PollMode::Oneshot)
     }
 
@@ -415,7 +434,7 @@ impl Poller {
     /// an error.
     pub fn modify_with_mode(
         &self,
-        source: impl Source,
+        source: impl AsSource,
         interest: Event,
         mode: PollMode,
     ) -> io::Result<()> {
@@ -425,7 +444,7 @@ impl Poller {
                 "the key is not allowed to be `usize::MAX`",
             ));
         }
-        self.poller.modify(source.raw(), interest, mode)
+        self.poller.modify(source.source(), interest, mode)
     }
 
     /// Removes a file descriptor or socket from the poller.
@@ -444,12 +463,12 @@ impl Poller {
     /// let key = 7;
     ///
     /// let poller = Poller::new()?;
-    /// poller.add(&socket, Event::all(key))?;
+    /// unsafe { poller.add(&socket, Event::all(key))?; }
     /// poller.delete(&socket)?;
     /// # std::io::Result::Ok(())
     /// ```
-    pub fn delete(&self, source: impl Source) -> io::Result<()> {
-        self.poller.delete(source.raw())
+    pub fn delete(&self, source: impl AsSource) -> io::Result<()> {
+        self.poller.delete(source.source())
     }
 
     /// Waits for at least one I/O event and returns the number of new events.
@@ -482,10 +501,13 @@ impl Poller {
     /// let key = 7;
     ///
     /// let poller = Poller::new()?;
-    /// poller.add(&socket, Event::all(key))?;
+    /// unsafe {
+    ///     poller.add(&socket, Event::all(key))?;
+    /// }
     ///
     /// let mut events = Vec::new();
     /// let n = poller.wait(&mut events, Some(Duration::from_secs(1)))?;
+    /// poller.delete(&socket)?;
     /// # std::io::Result::Ok(())
     /// ```
     pub fn wait(&self, events: &mut Vec<Event>, timeout: Option<Duration>) -> io::Result<usize> {
@@ -624,45 +646,65 @@ impl fmt::Debug for Poller {
 
 cfg_if! {
     if #[cfg(unix)] {
-        use std::os::unix::io::{AsRawFd, RawFd};
+        use std::os::unix::io::{AsRawFd, RawFd, AsFd, BorrowedFd};
 
-        /// A [`RawFd`] or a reference to a type implementing [`AsRawFd`].
-        pub trait Source {
-            /// Returns the [`RawFd`] for this I/O object.
+        /// A resource with a raw file descriptor.
+        pub trait AsRawSource {
+            /// Returns the raw file descriptor.
             fn raw(&self) -> RawFd;
         }
 
-        impl Source for RawFd {
-            fn raw(&self) -> RawFd {
-                *self
-            }
-        }
-
-        impl<T: AsRawFd> Source for &T {
+        impl<T: AsRawFd> AsRawSource for &T {
             fn raw(&self) -> RawFd {
                 self.as_raw_fd()
             }
         }
-    } else if #[cfg(windows)] {
-        use std::os::windows::io::{AsRawSocket, RawSocket};
 
-        /// A [`RawSocket`] or a reference to a type implementing [`AsRawSocket`].
-        pub trait Source {
-            /// Returns the [`RawSocket`] for this I/O object.
+        impl AsRawSource for RawFd {
+            fn raw(&self) -> RawFd {
+                *self
+            }
+        }
+
+        /// A resource with a borrowed file descriptor.
+        pub trait AsSource: AsFd {
+            /// Returns the borrowed file descriptor.
+            fn source(&self) -> BorrowedFd<'_> {
+                self.as_fd()
+            }
+        }
+
+        impl<T: AsFd> AsSource for T {}
+    } else if #[cfg(windows)] {
+        use std::os::windows::io::{AsRawSocket, RawSocket, AsSocket, BorrowedSocket};
+
+        /// A resource with a raw socket.
+        pub trait AsRawSource {
+            /// Returns the raw socket.
             fn raw(&self) -> RawSocket;
         }
 
-        impl Source for RawSocket {
+        impl<T: AsRawSocket> AsRawSource for &T {
+            fn raw(&self) -> RawSocket {
+                self.as_raw_socket()
+            }
+        }
+
+        impl AsRawSource for RawSocket {
             fn raw(&self) -> RawSocket {
                 *self
             }
         }
 
-        impl<T: AsRawSocket> Source for &T {
-            fn raw(&self) -> RawSocket {
-                self.as_raw_socket()
+        /// A resource with a borrowed socket.
+        pub trait AsSource: AsSocket {
+            /// Returns the borrowed socket.
+            fn source(&self) -> BorrowedSocket<'_> {
+                self.as_socket()
             }
         }
+
+        impl<T: AsSocket> AsSource for T {}
     }
 }
 

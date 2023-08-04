@@ -5,8 +5,9 @@ use std::io;
 use std::os::unix::io::{AsFd, AsRawFd, BorrowedFd, RawFd};
 use std::time::Duration;
 
+use rustix::event::{epoll, eventfd, EventfdFlags};
 use rustix::fd::OwnedFd;
-use rustix::io::{epoll, eventfd, read, write, EventfdFlags};
+use rustix::io::{read, write};
 use rustix::time::{
     timerfd_create, timerfd_settime, Itimerspec, TimerfdClockId, TimerfdFlags, TimerfdTimerFlags,
     Timespec,
@@ -31,7 +32,7 @@ impl Poller {
         // Create an epoll instance.
         //
         // Use `epoll_create1` with `EPOLL_CLOEXEC`.
-        let epoll_fd = epoll::epoll_create(epoll::CreateFlags::CLOEXEC)?;
+        let epoll_fd = epoll::create(epoll::CreateFlags::CLOEXEC)?;
 
         // Set up eventfd and timerfd.
         let event_fd = eventfd(0, EventfdFlags::CLOEXEC | EventfdFlags::NONBLOCK)?;
@@ -47,23 +48,25 @@ impl Poller {
             timer_fd,
         };
 
-        if let Some(ref timer_fd) = poller.timer_fd {
+        unsafe {
+            if let Some(ref timer_fd) = poller.timer_fd {
+                poller.add(
+                    timer_fd.as_raw_fd(),
+                    Event::none(crate::NOTIFY_KEY),
+                    PollMode::Oneshot,
+                )?;
+            }
+
             poller.add(
-                timer_fd.as_raw_fd(),
-                Event::none(crate::NOTIFY_KEY),
+                poller.event_fd.as_raw_fd(),
+                Event {
+                    key: crate::NOTIFY_KEY,
+                    readable: true,
+                    writable: false,
+                },
                 PollMode::Oneshot,
             )?;
         }
-
-        poller.add(
-            poller.event_fd.as_raw_fd(),
-            Event {
-                key: crate::NOTIFY_KEY,
-                readable: true,
-                writable: false,
-            },
-            PollMode::Oneshot,
-        )?;
 
         tracing::trace!(
             epoll_fd = ?poller.epoll_fd.as_raw_fd(),
@@ -85,7 +88,12 @@ impl Poller {
     }
 
     /// Adds a new file descriptor.
-    pub fn add(&self, fd: RawFd, ev: Event, mode: PollMode) -> io::Result<()> {
+    ///
+    /// # Safety
+    ///
+    /// The `fd` must be a valid file descriptor. The usual condition of remaining registered in
+    /// the `Poller` doesn't apply to `epoll`.
+    pub unsafe fn add(&self, fd: RawFd, ev: Event, mode: PollMode) -> io::Result<()> {
         let span = tracing::trace_span!(
             "add",
             epoll_fd = ?self.epoll_fd.as_raw_fd(),
@@ -94,10 +102,10 @@ impl Poller {
         );
         let _enter = span.enter();
 
-        epoll::epoll_add(
+        epoll::add(
             &self.epoll_fd,
             unsafe { rustix::fd::BorrowedFd::borrow_raw(fd) },
-            ev.key as u64,
+            epoll::EventData::new_u64(ev.key as u64),
             epoll_flags(&ev, mode),
         )?;
 
@@ -105,7 +113,7 @@ impl Poller {
     }
 
     /// Modifies an existing file descriptor.
-    pub fn modify(&self, fd: RawFd, ev: Event, mode: PollMode) -> io::Result<()> {
+    pub fn modify(&self, fd: BorrowedFd<'_>, ev: Event, mode: PollMode) -> io::Result<()> {
         let span = tracing::trace_span!(
             "modify",
             epoll_fd = ?self.epoll_fd.as_raw_fd(),
@@ -114,10 +122,10 @@ impl Poller {
         );
         let _enter = span.enter();
 
-        epoll::epoll_mod(
+        epoll::modify(
             &self.epoll_fd,
-            unsafe { rustix::fd::BorrowedFd::borrow_raw(fd) },
-            ev.key as u64,
+            fd,
+            epoll::EventData::new_u64(ev.key as u64),
             epoll_flags(&ev, mode),
         )?;
 
@@ -125,7 +133,7 @@ impl Poller {
     }
 
     /// Deletes a file descriptor.
-    pub fn delete(&self, fd: RawFd) -> io::Result<()> {
+    pub fn delete(&self, fd: BorrowedFd<'_>) -> io::Result<()> {
         let span = tracing::trace_span!(
             "delete",
             epoll_fd = ?self.epoll_fd.as_raw_fd(),
@@ -133,9 +141,7 @@ impl Poller {
         );
         let _enter = span.enter();
 
-        epoll::epoll_del(&self.epoll_fd, unsafe {
-            rustix::fd::BorrowedFd::borrow_raw(fd)
-        })?;
+        epoll::delete(&self.epoll_fd, fd)?;
 
         Ok(())
     }
@@ -170,7 +176,7 @@ impl Poller {
 
             // Set interest in timerfd.
             self.modify(
-                timer_fd.as_raw_fd(),
+                timer_fd.as_fd(),
                 Event {
                     key: crate::NOTIFY_KEY,
                     readable: true,
@@ -195,7 +201,7 @@ impl Poller {
         };
 
         // Wait for I/O events.
-        epoll::epoll_wait(&self.epoll_fd, &mut events.list, timeout_ms)?;
+        epoll::wait(&self.epoll_fd, &mut events.list, timeout_ms)?;
         tracing::trace!(
             epoll_fd = ?self.epoll_fd.as_raw_fd(),
             res = ?events.list.len(),
@@ -206,7 +212,7 @@ impl Poller {
         let mut buf = [0u8; 8];
         let _ = read(&self.event_fd, &mut buf);
         self.modify(
-            self.event_fd.as_raw_fd(),
+            self.event_fd.as_fd(),
             Event {
                 key: crate::NOTIFY_KEY,
                 readable: true,
@@ -255,9 +261,9 @@ impl Drop for Poller {
         let _enter = span.enter();
 
         if let Some(timer_fd) = self.timer_fd.take() {
-            let _ = self.delete(timer_fd.as_raw_fd());
+            let _ = self.delete(timer_fd.as_fd());
         }
-        let _ = self.delete(self.event_fd.as_raw_fd());
+        let _ = self.delete(self.event_fd.as_fd());
     }
 }
 
@@ -310,10 +316,13 @@ impl Events {
 
     /// Iterates over I/O events.
     pub fn iter(&self) -> impl Iterator<Item = Event> + '_ {
-        self.list.iter().map(|(flags, data)| Event {
-            key: data as usize,
-            readable: flags.intersects(read_flags()),
-            writable: flags.intersects(write_flags()),
+        self.list.iter().map(|ev| {
+            let flags = ev.flags;
+            Event {
+                key: ev.data.u64() as usize,
+                readable: flags.intersects(read_flags()),
+                writable: flags.intersects(write_flags()),
+            }
         })
     }
 }

@@ -7,7 +7,7 @@ use std::io;
 use std::process::Child;
 use std::time::Duration;
 
-use rustix::io::kqueue;
+use rustix::event::kqueue;
 
 use super::__private::PollerSealed;
 use __private::FilterSealed;
@@ -238,7 +238,7 @@ unsafe impl FilterSealed for Timer {
 impl Filter for Timer {}
 
 mod __private {
-    use rustix::io::kqueue;
+    use rustix::event::kqueue;
 
     #[doc(hidden)]
     pub unsafe trait FilterSealed {

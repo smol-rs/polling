@@ -56,14 +56,6 @@ jobs:
           RUSTFLAGS: ${{ env.RUSTFLAGS }} --cfg polling_test_poll_backend
         if: startsWith(matrix.os, 'ubuntu')
       - run: cargo hack build --feature-powerset --no-dev-deps
-      - name: Clone async-io
-        run: git clone https://github.com/smol-rs/async-io.git
-      - name: Add patch section
-        run: echo '[patch.crates-io]' >> async-io/Cargo.toml
-      - name: Patch polling
-        run: echo 'polling = { path = ".." }' >> async-io/Cargo.toml
-      - name: Test async-io
-        run: cargo test --manifest-path=async-io/Cargo.toml
 
   cross:
     runs-on: ${{ matrix.os }}

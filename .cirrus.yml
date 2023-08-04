@@ -28,11 +28,6 @@ freebsd_task:
     - sudo sysctl net.inet.tcp.blackhole=0
     - . $HOME/.cargo/env
     - cargo test --target $TARGET
-    # Test async-io
-    - git clone https://github.com/smol-rs/async-io.git
-    - echo '[patch.crates-io]' >> async-io/Cargo.toml
-    - echo 'polling = { path = ".." }' >> async-io/Cargo.toml
-    - cargo test --target $TARGET --manifest-path=async-io/Cargo.toml
 
 netbsd_task:
   name: test ($TARGET)
@@ -49,11 +44,6 @@ netbsd_task:
   test_script:
     - . $HOME/.cargo/env
     - cargo test
-    # Test async-io
-    - git clone https://github.com/smol-rs/async-io.git
-    - echo '[patch.crates-io]' >> async-io/Cargo.toml
-    - echo 'polling = { path = ".." }' >> async-io/Cargo.toml
-    - cargo test --manifest-path=async-io/Cargo.toml
 
 openbsd_task:
   name: test ($TARGET)
@@ -69,8 +59,3 @@ openbsd_task:
     - pkg_add git rust
   test_script:
     - cargo test
-    # Test async-io
-    - git clone https://github.com/smol-rs/async-io.git
-    - echo '[patch.crates-io]' >> async-io/Cargo.toml
-    - echo 'polling = { path = ".." }' >> async-io/Cargo.toml
-    - cargo test --manifest-path=async-io/Cargo.toml

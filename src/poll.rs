@@ -7,12 +7,11 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Condvar, Mutex};
 use std::time::{Duration, Instant};
 
+use rustix::event::{poll, PollFd, PollFlags};
 use rustix::fd::{AsFd, AsRawFd, BorrowedFd, OwnedFd};
 use rustix::fs::{fcntl_getfl, fcntl_setfl, OFlags};
-use rustix::io::{
-    fcntl_getfd, fcntl_setfd, pipe, pipe_with, poll, read, write, FdFlags, PipeFlags, PollFd,
-    PollFlags,
-};
+use rustix::io::{fcntl_getfd, fcntl_setfd, read, write, FdFlags};
+use rustix::pipe::{pipe, pipe_with, PipeFlags};
 
 // std::os::unix doesn't exist on Fuchsia
 type RawFd = std::os::raw::c_int;
@@ -158,7 +157,7 @@ impl Poller {
     }
 
     /// Modifies an existing file descriptor.
-    pub fn modify(&self, fd: RawFd, ev: Event, mode: PollMode) -> io::Result<()> {
+    pub fn modify(&self, fd: BorrowedFd<'_>, ev: Event, mode: PollMode) -> io::Result<()> {
         let span = tracing::trace_span!(
             "modify",
             notify_read = ?self.notify_read,
@@ -168,11 +167,19 @@ impl Poller {
         let _enter = span.enter();
 
         self.modify_fds(|fds| {
-            let data = fds.fd_data.get_mut(&fd).ok_or(io::ErrorKind::NotFound)?;
+            let data = fds
+                .fd_data
+                .get_mut(&fd.as_raw_fd())
+                .ok_or(io::ErrorKind::NotFound)?;
             data.key = ev.key;
             let poll_fds_index = data.poll_fds_index;
-            fds.poll_fds[poll_fds_index] =
-                PollFd::from_borrowed_fd(unsafe { BorrowedFd::borrow_raw(fd) }, poll_events(ev));
+
+            // SAFETY: This is essentially transmuting a `PollFd<'a>` to a `PollFd<'static>`, which
+            // only works if it's removed in time with `delete()`.
+            fds.poll_fds[poll_fds_index] = PollFd::from_borrowed_fd(
+                unsafe { BorrowedFd::borrow_raw(fd.as_raw_fd()) },
+                poll_events(ev),
+            );
             data.remove = cvt_mode_as_remove(mode)?;
 
             Ok(())
@@ -180,7 +187,7 @@ impl Poller {
     }
 
     /// Deletes a file descriptor.
-    pub fn delete(&self, fd: RawFd) -> io::Result<()> {
+    pub fn delete(&self, fd: BorrowedFd<'_>) -> io::Result<()> {
         let span = tracing::trace_span!(
             "delete",
             notify_read = ?self.notify_read,
@@ -189,7 +196,10 @@ impl Poller {
         let _enter = span.enter();
 
         self.modify_fds(|fds| {
-            let data = fds.fd_data.remove(&fd).ok_or(io::ErrorKind::NotFound)?;
+            let data = fds
+                .fd_data
+                .remove(&fd.as_raw_fd())
+                .ok_or(io::ErrorKind::NotFound)?;
             fds.poll_fds.swap_remove(data.poll_fds_index);
             if let Some(swapped_pollfd) = fds.poll_fds.get(data.poll_fds_index) {
                 fds.fd_data

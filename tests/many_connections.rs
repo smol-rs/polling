@@ -20,7 +20,9 @@ fn many_connections() {
     let poller = polling::Poller::new().unwrap();
 
     for (i, reader, _) in connections.iter() {
-        poller.add(reader, polling::Event::readable(*i)).unwrap();
+        unsafe {
+            poller.add(reader, polling::Event::readable(*i)).unwrap();
+        }
     }
 
     let mut events = vec![];

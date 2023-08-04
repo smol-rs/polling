@@ -13,20 +13,25 @@ fn concurrent_add() -> io::Result<()> {
 
     let mut events = Vec::new();
 
-    Parallel::new()
+    let result = Parallel::new()
         .add(|| {
             poller.wait(&mut events, None)?;
             Ok(())
         })
         .add(|| {
             thread::sleep(Duration::from_millis(100));
-            poller.add(&reader, Event::readable(0))?;
+            unsafe {
+                poller.add(&reader, Event::readable(0))?;
+            }
             writer.write_all(&[1])?;
             Ok(())
         })
         .run()
         .into_iter()
-        .collect::<io::Result<()>>()?;
+        .collect::<io::Result<()>>();
+
+    poller.delete(&reader)?;
+    result?;
 
     assert_eq!(events, [Event::readable(0)]);
 
@@ -37,7 +42,9 @@ fn concurrent_add() -> io::Result<()> {
 fn concurrent_modify() -> io::Result<()> {
     let (reader, mut writer) = tcp_pair()?;
     let poller = Poller::new()?;
-    poller.add(&reader, Event::none(0))?;
+    unsafe {
+        poller.add(&reader, Event::none(0))?;
+    }
 
     let mut events = Vec::new();
 

@@ -4,8 +4,9 @@ use std::io;
 use std::os::unix::io::{AsFd, AsRawFd, BorrowedFd, RawFd};
 use std::time::Duration;
 
+use rustix::event::{port, PollFlags};
 use rustix::fd::OwnedFd;
-use rustix::io::{fcntl_getfd, fcntl_setfd, port, FdFlags, PollFlags};
+use rustix::io::{fcntl_getfd, fcntl_setfd, FdFlags};
 
 use crate::{Event, PollMode};
 
@@ -42,13 +43,17 @@ impl Poller {
     }
 
     /// Adds a file descriptor.
-    pub fn add(&self, fd: RawFd, ev: Event, mode: PollMode) -> io::Result<()> {
+    ///
+    /// # Safety
+    ///
+    /// The `fd` must be a valid file descriptor and it must last until it is deleted.
+    pub unsafe fn add(&self, fd: RawFd, ev: Event, mode: PollMode) -> io::Result<()> {
         // File descriptors don't need to be added explicitly, so just modify the interest.
-        self.modify(fd, ev, mode)
+        self.modify(BorrowedFd::borrow_raw(fd), ev, mode)
     }
 
     /// Modifies an existing file descriptor.
-    pub fn modify(&self, fd: RawFd, ev: Event, mode: PollMode) -> io::Result<()> {
+    pub fn modify(&self, fd: BorrowedFd<'_>, ev: Event, mode: PollMode) -> io::Result<()> {
         let span = tracing::trace_span!(
             "modify",
             port_fd = ?self.port_fd.as_raw_fd(),
@@ -79,7 +84,7 @@ impl Poller {
     }
 
     /// Deletes a file descriptor.
-    pub fn delete(&self, fd: RawFd) -> io::Result<()> {
+    pub fn delete(&self, fd: BorrowedFd<'_>) -> io::Result<()> {
         let span = tracing::trace_span!(
             "delete",
             port_fd = ?self.port_fd.as_raw_fd(),

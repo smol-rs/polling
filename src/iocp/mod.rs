@@ -42,7 +42,9 @@ use std::collections::hash_map::{Entry, HashMap};
 use std::fmt;
 use std::io;
 use std::marker::PhantomPinned;
-use std::os::windows::io::{AsHandle, AsRawHandle, BorrowedHandle, RawHandle, RawSocket};
+use std::os::windows::io::{
+    AsHandle, AsRawHandle, AsRawSocket, BorrowedHandle, BorrowedSocket, RawHandle, RawSocket,
+};
 use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, RwLock, Weak};
@@ -134,7 +136,16 @@ impl Poller {
     }
 
     /// Add a new source to the poller.
-    pub(super) fn add(&self, socket: RawSocket, interest: Event, mode: PollMode) -> io::Result<()> {
+    ///
+    /// # Safety
+    ///
+    /// The socket must be a valid socket and must last until it is deleted.
+    pub(super) unsafe fn add(
+        &self,
+        socket: RawSocket,
+        interest: Event,
+        mode: PollMode,
+    ) -> io::Result<()> {
         let span = tracing::trace_span!(
             "add",
             handle = ?self.port,
@@ -192,7 +203,7 @@ impl Poller {
     /// Update a source in the poller.
     pub(super) fn modify(
         &self,
-        socket: RawSocket,
+        socket: BorrowedSocket<'_>,
         interest: Event,
         mode: PollMode,
     ) -> io::Result<()> {
@@ -217,7 +228,7 @@ impl Poller {
             let sources = lock!(self.sources.read());
 
             sources
-                .get(&socket)
+                .get(&socket.as_raw_socket())
                 .cloned()
                 .ok_or_else(|| io::Error::from(io::ErrorKind::NotFound))?
         };
@@ -231,7 +242,7 @@ impl Poller {
     }
 
     /// Delete a source from the poller.
-    pub(super) fn delete(&self, socket: RawSocket) -> io::Result<()> {
+    pub(super) fn delete(&self, socket: BorrowedSocket<'_>) -> io::Result<()> {
         let span = tracing::trace_span!(
             "remove",
             handle = ?self.port,
@@ -243,7 +254,7 @@ impl Poller {
         let source = {
             let mut sources = lock!(self.sources.write());
 
-            match sources.remove(&socket) {
+            match sources.remove(&socket.as_raw_socket()) {
                 Some(s) => s,
                 None => {
                     // If the source has already been removed, then we can just return.
