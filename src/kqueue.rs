@@ -4,8 +4,9 @@ use std::io;
 use std::os::unix::io::{AsFd, AsRawFd, BorrowedFd, RawFd};
 use std::time::Duration;
 
+use rustix::event::kqueue;
 use rustix::fd::OwnedFd;
-use rustix::io::{fcntl_setfd, kqueue, Errno, FdFlags};
+use rustix::io::{fcntl_setfd, Errno, FdFlags};
 
 use crate::{Event, PollMode};
 
@@ -268,7 +269,7 @@ pub(crate) fn mode_to_flags(mode: PollMode) -> kqueue::EventFlags {
 ))]
 mod notify {
     use super::Poller;
-    use rustix::io::kqueue;
+    use rustix::event::kqueue;
     use std::io;
     use std::os::unix::io::RawFd;
 
