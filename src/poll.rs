@@ -103,7 +103,7 @@ impl Poller {
 
         let span = tracing::trace_span!(
             "add",
-            notify = ?self.notify,
+            notify_read = ?self.notify.fd().as_raw_fd(),
             ?fd,
             ?ev,
         );
@@ -142,7 +142,7 @@ impl Poller {
 
         let span = tracing::trace_span!(
             "modify",
-            notify_read = ?self.notify,
+            notify_read = ?self.notify.fd().as_raw_fd(),
             ?fd,
             ?ev,
         );
@@ -176,7 +176,7 @@ impl Poller {
 
         let span = tracing::trace_span!(
             "delete",
-            notify = ?self.notify,
+            notify_read = ?self.notify.fd().as_raw_fd(),
             ?fd,
         );
         let _enter = span.enter();
@@ -202,7 +202,7 @@ impl Poller {
     pub fn wait(&self, events: &mut Events, timeout: Option<Duration>) -> io::Result<()> {
         let span = tracing::trace_span!(
             "wait",
-            notify = ?self.notify,
+            notify_read = ?self.notify.fd().as_raw_fd(),
             ?timeout,
         );
         let _enter = span.enter();
@@ -298,7 +298,7 @@ impl Poller {
     pub fn notify(&self) -> io::Result<()> {
         let span = tracing::trace_span!(
             "notify",
-            notify = ?self.notify,
+            notify_read = ?self.notify.fd().as_raw_fd(),
         );
         let _enter = span.enter();
 
