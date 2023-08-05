@@ -8,10 +8,7 @@ use std::sync::{Condvar, Mutex};
 use std::time::{Duration, Instant};
 
 use rustix::event::{poll, PollFd, PollFlags};
-use rustix::fd::{AsFd, AsRawFd, BorrowedFd, OwnedFd};
-use rustix::fs::{fcntl_getfl, fcntl_setfl, OFlags};
-use rustix::io::{fcntl_getfd, fcntl_setfd, read, write, FdFlags};
-use rustix::pipe::{pipe, pipe_with, PipeFlags};
+use rustix::fd::{AsFd, AsRawFd, BorrowedFd};
 
 // std::os::unix doesn't exist on Fuchsia
 type RawFd = std::os::raw::c_int;
@@ -23,17 +20,11 @@ use crate::{Event, PollMode};
 pub struct Poller {
     /// File descriptors to poll.
     fds: Mutex<Fds>,
-
-    /// The file descriptor of the read half of the notify pipe. This is also stored as the first
-    /// file descriptor in `fds.poll_fds`.
-    notify_read: OwnedFd,
-    /// The file descriptor of the write half of the notify pipe.
+    /// Notification pipe for waking up the poller.
     ///
-    /// Data is written to this to wake up the current instance of `wait`, which can occur when the
-    /// user notifies it (in which case `notified` would have been set) or when an operation needs
-    /// to occur (in which case `waiting_operations` would have been incremented).
-    notify_write: OwnedFd,
-
+    /// On all platforms except ESP IDF, the `pipe` syscall is used.
+    /// On ESP IDF, the `eventfd` syscall is used instead.
+    notify: notify::Notify,
     /// The number of operations (`add`, `modify` or `delete`) that are currently waiting on the
     /// mutex to become free. When this is nonzero, `wait` must be suspended until it reaches zero
     /// again.
@@ -74,33 +65,20 @@ struct FdData {
 impl Poller {
     /// Creates a new poller.
     pub fn new() -> io::Result<Poller> {
-        // Create the notification pipe.
-        let (notify_read, notify_write) = pipe_with(PipeFlags::CLOEXEC).or_else(|_| {
-            let (notify_read, notify_write) = pipe()?;
-            fcntl_setfd(&notify_read, fcntl_getfd(&notify_read)? | FdFlags::CLOEXEC)?;
-            fcntl_setfd(
-                &notify_write,
-                fcntl_getfd(&notify_write)? | FdFlags::CLOEXEC,
-            )?;
-            io::Result::Ok((notify_read, notify_write))
-        })?;
+        let notify = notify::Notify::new()?;
 
-        // Put the reading side into non-blocking mode.
-        fcntl_setfl(&notify_read, fcntl_getfl(&notify_read)? | OFlags::NONBLOCK)?;
-
-        tracing::trace!(?notify_read, ?notify_write, "new");
+        tracing::trace!(?notify, "new");
 
         Ok(Self {
             fds: Mutex::new(Fds {
                 poll_fds: vec![PollFd::from_borrowed_fd(
-                    // SAFETY: `read` will remain valid until we drop `self`.
-                    unsafe { BorrowedFd::borrow_raw(notify_read.as_raw_fd()) },
-                    PollFlags::RDNORM,
+                    // SAFETY: `notify.fd()` will remain valid until we drop `self`.
+                    unsafe { BorrowedFd::borrow_raw(notify.fd().as_raw_fd()) },
+                    notify.poll_flags(),
                 )],
                 fd_data: HashMap::new(),
             }),
-            notify_read,
-            notify_write,
+            notify,
             waiting_operations: AtomicUsize::new(0),
             operations_complete: Condvar::new(),
             notified: AtomicBool::new(false),
@@ -119,13 +97,13 @@ impl Poller {
 
     /// Adds a new file descriptor.
     pub fn add(&self, fd: RawFd, ev: Event, mode: PollMode) -> io::Result<()> {
-        if fd == self.notify_read.as_raw_fd() || fd == self.notify_write.as_raw_fd() {
+        if self.notify.has_fd(fd) {
             return Err(io::Error::from(io::ErrorKind::InvalidInput));
         }
 
         let span = tracing::trace_span!(
             "add",
-            notify_read = ?self.notify_read,
+            notify_read = ?self.notify.fd().as_raw_fd(),
             ?fd,
             ?ev,
         );
@@ -158,9 +136,13 @@ impl Poller {
 
     /// Modifies an existing file descriptor.
     pub fn modify(&self, fd: BorrowedFd<'_>, ev: Event, mode: PollMode) -> io::Result<()> {
+        if self.notify.has_fd(fd.as_raw_fd()) {
+            return Err(io::Error::from(io::ErrorKind::InvalidInput));
+        }
+
         let span = tracing::trace_span!(
             "modify",
-            notify_read = ?self.notify_read,
+            notify_read = ?self.notify.fd().as_raw_fd(),
             ?fd,
             ?ev,
         );
@@ -188,9 +170,13 @@ impl Poller {
 
     /// Deletes a file descriptor.
     pub fn delete(&self, fd: BorrowedFd<'_>) -> io::Result<()> {
+        if self.notify.has_fd(fd.as_raw_fd()) {
+            return Err(io::Error::from(io::ErrorKind::InvalidInput));
+        }
+
         let span = tracing::trace_span!(
             "delete",
-            notify_read = ?self.notify_read,
+            notify_read = ?self.notify.fd().as_raw_fd(),
             ?fd,
         );
         let _enter = span.enter();
@@ -216,7 +202,7 @@ impl Poller {
     pub fn wait(&self, events: &mut Events, timeout: Option<Duration>) -> io::Result<()> {
         let span = tracing::trace_span!(
             "wait",
-            notify_read = ?self.notify_read,
+            notify_read = ?self.notify.fd().as_raw_fd(),
             ?timeout,
         );
         let _enter = span.enter();
@@ -233,7 +219,7 @@ impl Poller {
                 if self.notified.swap(false, Ordering::SeqCst) {
                     // `notify` will have sent a notification in case we were polling. We weren't,
                     // so remove it.
-                    return self.pop_notification();
+                    return self.notify.pop_notification();
                 } else if self.waiting_operations.load(Ordering::SeqCst) == 0 {
                     break;
                 }
@@ -263,7 +249,7 @@ impl Poller {
 
             // Read all notifications.
             if notified {
-                while read(&self.notify_read, &mut [0; 64]).is_ok() {}
+                self.notify.pop_all_notifications()?;
             }
 
             // If the only event that occurred during polling was notification and it wasn't to
@@ -312,12 +298,12 @@ impl Poller {
     pub fn notify(&self) -> io::Result<()> {
         let span = tracing::trace_span!(
             "notify",
-            notify_read = ?self.notify_read,
+            notify_read = ?self.notify.fd().as_raw_fd(),
         );
         let _enter = span.enter();
 
         if !self.notified.swap(true, Ordering::SeqCst) {
-            self.notify_inner()?;
+            self.notify.notify()?;
             self.operations_complete.notify_one();
         }
 
@@ -329,13 +315,13 @@ impl Poller {
         self.waiting_operations.fetch_add(1, Ordering::SeqCst);
 
         // Wake up the current caller of `wait` if there is one.
-        let sent_notification = self.notify_inner().is_ok();
+        let sent_notification = self.notify.notify().is_ok();
 
         let mut fds = self.fds.lock().unwrap();
 
         // If there was no caller of `wait` our notification was not removed from the pipe.
         if sent_notification {
-            let _ = self.pop_notification();
+            let _ = self.notify.pop_notification();
         }
 
         let res = f(&mut fds);
@@ -345,18 +331,6 @@ impl Poller {
         }
 
         res
-    }
-
-    /// Wake the current thread that is calling `wait`.
-    fn notify_inner(&self) -> io::Result<()> {
-        write(&self.notify_write, &[0; 1])?;
-        Ok(())
-    }
-
-    /// Remove a notification created by `notify_inner`.
-    fn pop_notification(&self) -> io::Result<()> {
-        read(&self.notify_read, &mut [0; 1])?;
-        Ok(())
     }
 }
 
@@ -407,5 +381,176 @@ fn cvt_mode_as_remove(mode: PollMode) -> io::Result<bool> {
         _ => Err(crate::unsupported_error(
             "edge-triggered I/O events are not supported in poll()",
         )),
+    }
+}
+
+#[cfg(not(target_os = "espidf"))]
+mod notify {
+    use std::io;
+
+    use rustix::event::PollFlags;
+    use rustix::fd::{AsFd, AsRawFd, BorrowedFd, OwnedFd, RawFd};
+    use rustix::fs::{fcntl_getfl, fcntl_setfl, OFlags};
+    use rustix::io::{fcntl_getfd, fcntl_setfd, read, write, FdFlags};
+    use rustix::pipe::{pipe, pipe_with, PipeFlags};
+
+    /// A notification pipe.
+    ///
+    /// This implementation uses a pipe to send notifications.
+    #[derive(Debug)]
+    pub(super) struct Notify {
+        /// The file descriptor of the read half of the notify pipe. This is also stored as the first
+        /// file descriptor in `fds.poll_fds`.
+        read_pipe: OwnedFd,
+        /// The file descriptor of the write half of the notify pipe.
+        ///
+        /// Data is written to this to wake up the current instance of `Poller::wait`, which can occur when the
+        /// user notifies it (in which case `Poller::notified` would have been set) or when an operation needs
+        /// to occur (in which case `Poller::waiting_operations` would have been incremented).
+        write_pipe: OwnedFd,
+    }
+
+    impl Notify {
+        /// Creates a new notification pipe.
+        pub(super) fn new() -> io::Result<Self> {
+            let (read_pipe, write_pipe) = pipe_with(PipeFlags::CLOEXEC).or_else(|_| {
+                let (read_pipe, write_pipe) = pipe()?;
+                fcntl_setfd(&read_pipe, fcntl_getfd(&read_pipe)? | FdFlags::CLOEXEC)?;
+                fcntl_setfd(&write_pipe, fcntl_getfd(&write_pipe)? | FdFlags::CLOEXEC)?;
+                io::Result::Ok((read_pipe, write_pipe))
+            })?;
+
+            // Put the reading side into non-blocking mode.
+            fcntl_setfl(&read_pipe, fcntl_getfl(&read_pipe)? | OFlags::NONBLOCK)?;
+
+            Ok(Self {
+                read_pipe,
+                write_pipe,
+            })
+        }
+
+        /// Provides the file handle of the read half of the notify pipe that needs to be registered by the `Poller`.
+        pub(super) fn fd(&self) -> BorrowedFd<'_> {
+            self.read_pipe.as_fd()
+        }
+
+        /// Provides the poll flags to be used when registering the read half of the botify pipe with the `Poller`.
+        pub(super) fn poll_flags(&self) -> PollFlags {
+            PollFlags::RDNORM
+        }
+
+        /// Notifies the `Poller` instance via the write half of the notify pipe.
+        pub(super) fn notify(&self) -> Result<(), io::Error> {
+            write(&self.write_pipe, &[0; 1])?;
+
+            Ok(())
+        }
+
+        /// Pops a notification (if any) from the pipe.
+        pub(super) fn pop_notification(&self) -> Result<(), io::Error> {
+            read(&self.read_pipe, &mut [0; 1])?;
+
+            Ok(())
+        }
+
+        /// Pops all notifications from the pipe.
+        pub(super) fn pop_all_notifications(&self) -> Result<(), io::Error> {
+            while read(&self.read_pipe, &mut [0; 64]).is_ok() {}
+
+            Ok(())
+        }
+
+        /// Whether this raw file descriptor is associated with this notifier.
+        pub(super) fn has_fd(&self, fd: RawFd) -> bool {
+            self.read_pipe.as_raw_fd() == fd || self.write_pipe.as_raw_fd() == fd
+        }
+    }
+}
+
+#[cfg(target_os = "espidf")]
+mod notify {
+    use std::io;
+    use std::mem;
+
+    use rustix::event::PollFlags;
+    use rustix::event::{eventfd, EventfdFlags};
+
+    use rustix::fd::{AsFd, AsRawFd, BorrowedFd, OwnedFd, RawFd};
+    use rustix::io::{read, write};
+
+    /// A notification pipe.
+    ///
+    /// This implementation uses ther `eventfd` syscall to send notifications.
+    #[derive(Debug)]
+    pub(super) struct Notify {
+        /// The file descriptor of the eventfd object. This is also stored as the first
+        /// file descriptor in `fds.poll_fds`.
+        ///
+        /// Data is written to this to wake up the current instance of `Poller::wait`, which can occur when the
+        /// user notifies it (in which case `Poller::notified` would have been set) or when an operation needs
+        /// to occur (in which case `Poller::waiting_operations` would have been incremented).
+        event_fd: OwnedFd,
+    }
+
+    impl Notify {
+        /// Creates a new notification pipe.
+        pub(super) fn new() -> io::Result<Self> {
+            // Note that the eventfd() implementation in ESP-IDF deviates from the specification in the following ways:
+            // 1) The file descriptor is always in a non-blocking mode, as if EFD_NONBLOCK was passed as a flag;
+            //    passing EFD_NONBLOCK or calling fcntl(.., F_GETFL/F_SETFL) on the eventfd() file descriptor is not supported
+            // 2) It always returns the counter value, even if it is 0. This is contrary to the specification which mandates
+            //    that it should instead fail with EAGAIN
+            //
+            // (1) is not a problem for us, as we want the eventfd() file descriptor to be in a non-blocking mode anyway
+            // (2) is also not a problem, as long as we don't try to read the counter value in an endless loop when we detect being notified
+
+            #[cfg(not(target_os = "espidf"))]
+            let flags = EventfdFlags::NONBLOCK;
+
+            #[cfg(target_os = "espidf")]
+            let flags = EventfdFlags::empty();
+
+            let event_fd = eventfd(0, flags)?;
+
+            Ok(Self { event_fd })
+        }
+
+        /// Provides the eventfd file handle that needs to be registered by the `Poller`.
+        pub(super) fn fd(&self) -> BorrowedFd<'_> {
+            self.event_fd.as_fd()
+        }
+
+        /// Provides the eventfd file handle poll flags to be used when registering it with the `Poller`.
+        pub(super) fn poll_flags(&self) -> PollFlags {
+            PollFlags::IN
+        }
+
+        /// Notifies the `Poller` instance via the eventfd file descriptor.
+        pub(super) fn notify(&self) -> Result<(), io::Error> {
+            write(&self.event_fd, &1u64.to_ne_bytes())?;
+
+            Ok(())
+        }
+
+        /// Pops a notification (if any) from the eventfd file descriptor.
+        pub(super) fn pop_notification(&self) -> Result<(), io::Error> {
+            read(&self.event_fd, &mut [0; mem::size_of::<u64>()])?;
+
+            Ok(())
+        }
+
+        /// Pops all notifications from the eventfd file descriptor.
+        /// Since the eventfd object accumulates all writes in a single 64 bit value,
+        /// this operation is - in fact - equivalent to `pop_notification`.
+        pub(super) fn pop_all_notifications(&self) -> Result<(), io::Error> {
+            let _ = self.pop_notification();
+
+            Ok(())
+        }
+
+        /// Whether this raw file descriptor is associated with this notifier.
+        pub(super) fn has_fd(&self, fd: RawFd) -> bool {
+            self.event_fd.as_raw_fd() == fd
+        }
     }
 }
