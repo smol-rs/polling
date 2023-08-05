@@ -164,7 +164,7 @@ impl Poller {
                     None => TS_ZERO,
                     Some(t) => {
                         let mut ts = TS_ZERO;
-                        ts.tv_sec = t.as_secs() as libc::time_t;
+                        ts.tv_sec = t.as_secs() as _;
                         ts.tv_nsec = (t.subsec_nanos() as libc::c_long).into();
                         ts
                     }
