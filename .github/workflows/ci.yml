@@ -56,6 +56,12 @@ jobs:
           RUSTFLAGS: ${{ env.RUSTFLAGS }} --cfg polling_test_poll_backend
         if: startsWith(matrix.os, 'ubuntu')
       - run: cargo hack build --feature-powerset --no-dev-deps
+      - name: Add rust-src
+        if: matrix.rust == 'nightly'
+        run: rustup component add rust-src
+      - name: Check selected Tier 3 targets
+        if: matrix.rust == 'nightly' && matrix.os == 'ubuntu-latest'
+        run: cargo +nightly check -Z build-std --target=riscv32imc-esp-espidf --config 'patch.crates-io.rustix.git="https://github.com/bytecodealliance/rustix"'
 
   cross:
     runs-on: ${{ matrix.os }}
