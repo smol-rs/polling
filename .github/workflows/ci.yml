@@ -61,7 +61,7 @@ jobs:
         run: rustup component add rust-src
       - name: Check selected Tier 3 targets
         if: matrix.rust == 'nightly' && matrix.os == 'ubuntu-latest'
-        run: cargo +nightly check -Z build-std --target=riscv32imc-esp-espidf --config 'patch.crates-io.rustix.git="https://github.com/bytecodealliance/rustix"'
+        run: cargo +nightly check -Z build-std --target=riscv32imc-esp-espidf
 
   cross:
     runs-on: ${{ matrix.os }}
