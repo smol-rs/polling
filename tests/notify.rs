@@ -3,12 +3,13 @@ use std::thread;
 use std::time::Duration;
 
 use easy_parallel::Parallel;
+use polling::Events;
 use polling::Poller;
 
 #[test]
 fn simple() -> io::Result<()> {
     let poller = Poller::new()?;
-    let mut events = Vec::new();
+    let mut events = Events::new();
 
     for _ in 0..10 {
         poller.notify()?;
@@ -21,7 +22,7 @@ fn simple() -> io::Result<()> {
 #[test]
 fn concurrent() -> io::Result<()> {
     let poller = Poller::new()?;
-    let mut events = Vec::new();
+    let mut events = Events::new();
 
     for _ in 0..2 {
         Parallel::new()

@@ -308,9 +308,9 @@ unsafe impl Send for Events {}
 
 impl Events {
     /// Creates an empty list.
-    pub fn new() -> Events {
+    pub fn with_capacity(cap: usize) -> Events {
         Events {
-            list: epoll::EventVec::with_capacity(1024),
+            list: epoll::EventVec::with_capacity(cap),
         }
     }
 
@@ -324,5 +324,15 @@ impl Events {
                 writable: flags.intersects(write_flags()),
             }
         })
+    }
+
+    /// Clear the list.
+    pub fn clear(&mut self) {
+        self.list.clear();
+    }
+
+    /// Get the capacity of the list.
+    pub fn capacity(&self) -> usize {
+        self.list.capacity()
     }
 }

@@ -13,7 +13,7 @@
 ))]
 mod example {
     use polling::os::kqueue::{PollerKqueueExt, Signal};
-    use polling::{PollMode, Poller};
+    use polling::{Events, PollMode, Poller};
 
     pub(super) fn main2() {
         // Create a poller.
@@ -23,7 +23,7 @@ mod example {
         let sigint = Signal(libc::SIGINT);
         poller.add_filter(sigint, 1, PollMode::Oneshot).unwrap();
 
-        let mut events = vec![];
+        let mut events = Events::new();
 
         println!("Press Ctrl+C to exit...");
 
@@ -32,7 +32,7 @@ mod example {
             poller.wait(&mut events, None).unwrap();
 
             // Process events.
-            for ev in events.drain(..) {
+            for ev in events.iter() {
                 match ev.key {
                     1 => {
                         println!("SIGINT received");
@@ -41,6 +41,8 @@ mod example {
                     _ => unreachable!(),
                 }
             }
+
+            events.clear();
         }
     }
 }

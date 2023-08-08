@@ -181,9 +181,9 @@ unsafe impl Send for Events {}
 
 impl Events {
     /// Creates an empty list.
-    pub fn new() -> Events {
+    pub fn with_capacity(cap: usize) -> Events {
         Events {
-            list: Vec::with_capacity(1024),
+            list: Vec::with_capacity(cap),
         }
     }
 
@@ -194,5 +194,15 @@ impl Events {
             readable: PollFlags::from_bits_truncate(ev.events() as _).intersects(read_flags()),
             writable: PollFlags::from_bits_truncate(ev.events() as _).intersects(write_flags()),
         })
+    }
+
+    /// Clear the list.
+    pub fn clear(&mut self) {
+        self.list.clear();
+    }
+
+    /// Get the capacity of the list.
+    pub fn capacity(&self) -> usize {
+        self.list.capacity()
     }
 }

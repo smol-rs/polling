@@ -67,6 +67,7 @@
 
 use std::fmt;
 use std::io;
+use std::num::NonZeroUsize;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::time::Duration;
@@ -226,7 +227,7 @@ impl Event {
 /// Waits for I/O events.
 pub struct Poller {
     poller: sys::Poller,
-    events: Mutex<sys::Events>,
+    lock: Mutex<()>,
     notified: AtomicBool,
 }
 
@@ -244,7 +245,7 @@ impl Poller {
     pub fn new() -> io::Result<Poller> {
         Ok(Poller {
             poller: sys::Poller::new()?,
-            events: Mutex::new(sys::Events::new()),
+            lock: Mutex::new(()),
             notified: AtomicBool::new(false),
         })
     }
@@ -510,21 +511,19 @@ impl Poller {
     /// poller.delete(&socket)?;
     /// # std::io::Result::Ok(())
     /// ```
-    pub fn wait(&self, events: &mut Vec<Event>, timeout: Option<Duration>) -> io::Result<usize> {
+    pub fn wait(&self, events: &mut Events, timeout: Option<Duration>) -> io::Result<usize> {
         let span = tracing::trace_span!("Poller::wait", ?timeout);
         let _enter = span.enter();
 
-        if let Ok(mut lock) = self.events.try_lock() {
+        if let Ok(_lock) = self.lock.try_lock() {
             // Wait for I/O events.
-            self.poller.wait(&mut lock, timeout)?;
+            self.poller.wait(&mut events.events, timeout)?;
 
             // Clear the notification, if any.
             self.notified.swap(false, Ordering::SeqCst);
 
-            // Collect events.
-            let len = events.len();
-            events.extend(lock.iter().filter(|ev| ev.key != usize::MAX));
-            Ok(events.len() - len)
+            // Indicate number of events.
+            Ok(events.len())
         } else {
             tracing::trace!("wait: skipping because another thread is already waiting on I/O");
             Ok(0)
@@ -565,6 +564,160 @@ impl Poller {
             self.poller.notify()?;
         }
         Ok(())
+    }
+}
+
+/// A container for I/O events.
+pub struct Events {
+    events: sys::Events,
+}
+
+impl Default for Events {
+    #[inline]
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Events {
+    /// Create a new container for events, using the default capacity.
+    ///
+    /// The default capacity is 1024.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use polling::Events;
+    ///
+    /// let events = Events::new();
+    /// ```
+    #[inline]
+    pub fn new() -> Self {
+        // ESP-IDF has a low amount of RAM, so we use a smaller default capacity.
+        #[cfg(target_os = "espidf")]
+        const DEFAULT_CAPACITY: usize = 32;
+
+        #[cfg(not(target_os = "espidf"))]
+        const DEFAULT_CAPACITY: usize = 1024;
+
+        Self::with_capacity(NonZeroUsize::new(DEFAULT_CAPACITY).unwrap())
+    }
+
+    /// Create a new container with the provided capacity.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use polling::Events;
+    /// use std::num::NonZeroUsize;
+    ///
+    /// let capacity = NonZeroUsize::new(1024).unwrap();
+    /// let events = Events::with_capacity(capacity);
+    /// ```
+    #[inline]
+    pub fn with_capacity(capacity: NonZeroUsize) -> Self {
+        Self {
+            events: sys::Events::with_capacity(capacity.get()),
+        }
+    }
+
+    /// Create a new iterator over I/O events.
+    ///
+    /// This returns all of the events in the container, excluding the notification event.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use polling::{Event, Events, Poller};
+    /// use std::time::Duration;
+    ///
+    /// # fn main() -> std::io::Result<()> {
+    /// let poller = Poller::new()?;
+    /// let mut events = Events::new();
+    ///
+    /// poller.wait(&mut events, Some(Duration::from_secs(0)))?;
+    /// assert!(events.iter().next().is_none());
+    /// # Ok(()) }
+    /// ```
+    #[inline]
+    pub fn iter(&self) -> impl Iterator<Item = Event> + '_ {
+        self.events.iter().filter(|ev| ev.key != NOTIFY_KEY)
+    }
+
+    /// Delete all of the events in the container.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use polling::{Event, Events, Poller};
+    ///
+    /// # fn main() -> std::io::Result<()> {
+    /// let poller = Poller::new()?;
+    /// let mut events = Events::new();
+    ///
+    /// /* register some sources */
+    ///
+    /// poller.wait(&mut events, None)?;
+    ///
+    /// events.clear();
+    /// # Ok(()) }
+    /// ```
+    #[inline]
+    pub fn clear(&mut self) {
+        self.events.clear();
+    }
+
+    /// Returns the number of events in the container.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use polling::Events;
+    ///
+    /// let events = Events::new();
+    /// assert_eq!(events.len(), 0);
+    /// ```
+    #[inline]
+    pub fn len(&self) -> usize {
+        self.iter().count()
+    }
+
+    /// Returns `true` if the container contains no events.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use polling::Events;
+    ///
+    /// let events = Events::new();
+    /// assert!(events.is_empty());
+    /// ```
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.len() != 0
+    }
+
+    /// Get the total capacity of the list.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use polling::Events;
+    /// use std::num::NonZeroUsize;
+    ///
+    /// let cap = NonZeroUsize::new(10).unwrap();
+    /// let events = Events::with_capacity(std::num::NonZeroUsize::new(10).unwrap());
+    /// assert_eq!(events.capacity(), cap);
+    /// ```
+    #[inline]
+    pub fn capacity(&self) -> NonZeroUsize {
+        NonZeroUsize::new(self.events.capacity()).unwrap()
+    }
+}
+
+impl fmt::Debug for Events {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("Events { .. }")
     }
 }
 

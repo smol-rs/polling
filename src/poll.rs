@@ -364,13 +364,23 @@ pub struct Events {
 
 impl Events {
     /// Creates an empty list.
-    pub fn new() -> Events {
-        Self { inner: Vec::new() }
+    pub fn with_capacity(cap: usize) -> Events {
+        Self { inner: Vec::with_capacity(cap) }
     }
 
     /// Iterates over I/O events.
     pub fn iter(&self) -> impl Iterator<Item = Event> + '_ {
         self.inner.iter().copied()
+    }
+
+    /// Clear the list.
+    pub fn clear(&mut self) {
+        self.inner.clear();
+    }
+
+    /// Get the capacity of the list.
+    pub fn capacity(&self) -> usize {
+        self.inner.capacity()
     }
 }
 

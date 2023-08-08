@@ -7,6 +7,8 @@ use std::io::{self, prelude::*};
 use std::net::{TcpListener, TcpStream};
 use std::time::Duration;
 
+use polling::Events;
+
 #[test]
 fn many_connections() {
     // Create 100 connections.
@@ -25,7 +27,7 @@ fn many_connections() {
         }
     }
 
-    let mut events = vec![];
+    let mut events = Events::new();
     while !connections.is_empty() {
         // Choose a random connection to write to.
         let i = fastrand::usize(..connections.len());
@@ -40,10 +42,11 @@ fn many_connections() {
             .unwrap();
 
         // Check that the connection is readable.
-        assert_eq!(events.len(), 1, "events: {:?}", events);
-        assert_eq!(events[0].key, id);
-        assert!(events[0].readable);
-        assert!(!events[0].writable);
+        let current_events = events.iter().collect::<Vec<_>>();
+        assert_eq!(current_events.len(), 1, "events: {:?}", current_events);
+        assert_eq!(current_events[0].key, id);
+        assert!(current_events[0].readable);
+        assert!(!current_events[0].writable);
 
         // Read the byte from the connection.
         let mut buf = [0];

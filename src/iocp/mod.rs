@@ -74,10 +74,10 @@ pub(super) struct Poller {
     port: Arc<IoCompletionPort<Packet>>,
 
     /// List of currently active AFD instances.
-    /// 
+    ///
     /// AFD acts as the actual source of the socket events. It's essentially running `WSAPoll` on
     /// the sockets and then posting the events to the IOCP.
-    /// 
+    ///
     /// AFD instances can be keyed to an unlimited number of sockets. However, each AFD instance
     /// polls their sockets linearly. Therefore, it is best to limit the number of sockets each AFD
     /// instance is responsible for. The limit of 32 is chosen because that's what `wepoll` uses.
@@ -87,7 +87,7 @@ pub(super) struct Poller {
     afd: Mutex<Vec<Weak<Afd<Packet>>>>,
 
     /// The state of the sources registered with this poller.
-    /// 
+    ///
     /// Each source is keyed by its raw socket ID.
     sources: RwLock<HashMap<RawSocket, Packet>>,
 
@@ -95,7 +95,7 @@ pub(super) struct Poller {
     waitables: RwLock<HashMap<RawHandle, Packet>>,
 
     /// Sockets with pending updates.
-    /// 
+    ///
     /// This list contains packets with sockets that need to have their AFD state adjusted by
     /// calling the `update()` function on them. It's best to queue up packets as they need to
     /// be updated and then run all of the updates before we start waiting on the IOCP, rather than
@@ -103,18 +103,18 @@ pub(super) struct Poller {
     pending_updates: ConcurrentQueue<Packet>,
 
     /// Are we currently polling?
-    /// 
+    ///
     /// This indicates whether or not we are blocking on the IOCP, and is used to determine
     /// whether pending updates should be run immediately or queued.
     polling: AtomicBool,
 
     /// A list of completion packets.
-    /// 
+    ///
     /// The IOCP writes to this list when it has new events.
     packets: Mutex<Vec<OverlappedEntry<Packet>>>,
 
     /// The packet used to notify the poller.
-    /// 
+    ///
     /// This is a special-case packet that is used to wake up the poller when it is waiting.
     notifier: Packet,
 }
@@ -548,7 +548,7 @@ impl Poller {
     }
 
     /// Get a handle to the AFD reference.
-    /// 
+    ///
     /// This finds an AFD handle with less than 32 associated sockets, or creates a new one if
     /// one does not exist.
     fn afd_handle(&self) -> io::Result<Arc<Afd<Packet>>> {
@@ -622,15 +622,20 @@ unsafe impl Send for Events {}
 
 impl Events {
     /// Creates an empty list of events.
-    pub(super) fn new() -> Events {
+    pub(super) fn with_capacity(cap: usize) -> Events {
         Events {
-            packets: Vec::with_capacity(1024),
+            packets: Vec::with_capacity(cap),
         }
     }
 
     /// Iterate over I/O events.
     pub(super) fn iter(&self) -> impl Iterator<Item = Event> + '_ {
         self.packets.iter().copied()
+    }
+
+    /// Clear the list of events.
+    pub(super) fn clear(&mut self) {
+        self.packets.clear();
     }
 }
 
@@ -656,7 +661,7 @@ impl CompletionPacket {
 }
 
 /// The type of our completion packet.
-/// 
+///
 /// It needs to be pinned, since it contains data that is expected by IOCP not to be moved.
 type Packet = Pin<Arc<PacketUnwrapped>>;
 type PacketUnwrapped = IoStatusBlock<PacketInner>;
@@ -754,9 +759,9 @@ impl PacketUnwrapped {
     }
 
     /// Update the socket and install the new status in AFD.
-    /// 
+    ///
     /// This function does one of the following:
-    /// 
+    ///
     /// - Nothing, if the packet is waiting on being dropped anyways.
     /// - Cancels the ongoing poll, if we want to poll for different events than we are currently
     ///   polling for.
@@ -882,7 +887,7 @@ impl PacketUnwrapped {
     }
 
     /// This socket state was notified; see if we need to update it.
-    /// 
+    ///
     /// This indicates that this packet was indicated as "ready" by the IOCP and needs to be
     /// processed.
     fn feed_event(self: Pin<Arc<Self>>, poller: &Poller) -> io::Result<FeedEventResult> {

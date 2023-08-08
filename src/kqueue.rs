@@ -222,9 +222,9 @@ unsafe impl Send for Events {}
 
 impl Events {
     /// Creates an empty list.
-    pub fn new() -> Events {
+    pub fn with_capacity(cap: usize) -> Events {
         Events {
-            list: Vec::with_capacity(1024),
+            list: Vec::with_capacity(cap),
         }
     }
 
@@ -248,6 +248,16 @@ impl Events {
                 || (matches!(ev.filter(), kqueue::EventFilter::Read(..))
                     && (ev.flags().intersects(kqueue::EventFlags::EOF))),
         })
+    }
+
+    /// Clears the list.
+    pub fn clear(&mut self) {
+        self.list.clear();
+    }
+
+    /// Get the capacity of the list.
+    pub fn capacity(&self) -> usize {
+        self.list.capacity()
     }
 }
 
