@@ -87,7 +87,9 @@ pub trait PollerIocpExt: PollerSealed {
     /// let poller = Poller::new().unwrap();
     ///
     /// // Add the child process to the poller.
-    /// poller.add_waitable(&child, Event::all(0), PollMode::Oneshot).unwrap();
+    /// unsafe {
+    ///     poller.add_waitable(&child, Event::all(0), PollMode::Oneshot).unwrap();
+    /// }
     ///
     /// // Wait for the child process to exit.
     /// let mut events = vec![];
@@ -128,7 +130,9 @@ pub trait PollerIocpExt: PollerSealed {
     /// let poller = Poller::new().unwrap();
     ///
     /// // Add the child process to the poller.
-    /// poller.add_waitable(&child, Event::all(0), PollMode::Oneshot).unwrap();
+    /// unsafe {
+    ///     poller.add_waitable(&child, Event::all(0), PollMode::Oneshot).unwrap();
+    /// }
     ///
     /// // Wait for the child process to exit.
     /// let mut events = vec![];
@@ -172,7 +176,9 @@ pub trait PollerIocpExt: PollerSealed {
     /// let poller = Poller::new().unwrap();
     ///
     /// // Add the child process to the poller.
-    /// poller.add_waitable(&child, Event::all(0), PollMode::Oneshot).unwrap();
+    /// unsafe {
+    ///     poller.add_waitable(&child, Event::all(0), PollMode::Oneshot).unwrap();
+    /// }
     ///
     /// // Wait for the child process to exit.
     /// let mut events = vec![];
