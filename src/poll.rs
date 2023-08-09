@@ -402,6 +402,26 @@ impl EventExtra {
             flags: PollFlags::empty(),
         }
     }
+
+    /// Set the interrupt flag.
+    pub fn set_hup(&mut self) {
+        self.flags.set(PollFlags::HUP, true);
+    }
+
+    /// Set the priority flag.
+    pub fn set_pri(&mut self) {
+        self.flags.set(PollFlags::PRI, true);
+    }
+
+    /// Is this an interrupt event?
+    pub fn is_hup(&self) -> bool {
+        self.flags.contains(PollFlags::HUP)
+    }
+
+    /// Is this a priority event?
+    pub fn is_pri(&self) -> bool {
+        self.flags.contains(PollFlags::PRI)
+    }
 }
 
 fn cvt_mode_as_remove(mode: PollMode) -> io::Result<bool> {

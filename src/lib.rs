@@ -228,6 +228,110 @@ impl Event {
             extra: sys::EventExtra::empty(),
         }
     }
+
+    /// Add interruption events to this interest.
+    ///
+    /// This usually indicates that the file descriptor or socket has been closed. It corresponds
+    /// to the `EPOLLHUP` and `POLLHUP` events.
+    ///
+    /// Interruption events are only supported on the following platforms:
+    ///
+    /// - `epoll`
+    /// - `poll`
+    /// - IOCP
+    /// - Event Ports
+    ///
+    /// On other platforms, this function is a no-op.
+    pub fn set_interrupt(&mut self) {
+        self.extra.set_hup();
+    }
+
+    /// Add interruption events to this interest.
+    ///
+    /// This usually indicates that the file descriptor or socket has been closed. It corresponds
+    /// to the `EPOLLHUP` and `POLLHUP` events.
+    ///
+    /// Interruption events are only supported on the following platforms:
+    ///
+    /// - `epoll`
+    /// - `poll`
+    /// - IOCP
+    /// - Event Ports
+    ///
+    /// On other platforms, this function is a no-op.
+    pub fn with_interrupt(mut self) -> Self {
+        self.set_interrupt();
+        self
+    }
+
+    /// Add priority events to this interest.
+    ///
+    /// This indicates that there is urgent data to read. It corresponds to the `EPOLLPRI` and
+    /// `POLLPRI` events.
+    ///
+    /// Priority events are only supported on the following platforms:
+    ///
+    /// - `epoll`
+    /// - `poll`
+    /// - IOCP
+    /// - Event Ports
+    ///
+    /// On other platforms, this function is a no-op.
+    pub fn set_priority(&mut self) {
+        self.extra.set_pri();
+    }
+
+    /// Add priority events to this interest.
+    ///
+    /// This indicates that there is urgent data to read. It corresponds to the `EPOLLPRI` and
+    /// `POLLPRI` events.
+    ///
+    /// Priority events are only supported on the following platforms:
+    ///
+    /// - `epoll`
+    /// - `poll`
+    /// - IOCP
+    /// - Event Ports
+    ///
+    /// On other platforms, this function is a no-op.
+    pub fn with_priority(mut self) -> Self {
+        self.set_priority();
+        self
+    }
+
+    /// Tell if this event is the result of an interrupt notification.
+    ///
+    /// This usually indicates that the file descriptor or socket has been closed. It corresponds
+    /// to the `EPOLLHUP` and `POLLHUP` events.
+    ///
+    /// Interruption events are only supported on the following platforms:
+    ///
+    /// - `epoll`
+    /// - `poll`
+    /// - IOCP
+    /// - Event Ports
+    ///
+    /// On other platforms, this always returns `false`.
+    pub fn is_interrupt(&self) -> bool {
+        self.extra.is_hup()
+    }
+
+    /// Tell if this event is the result of a priority notification.
+    ///
+    /// This indicates that there is urgent data to read. It corresponds to the `EPOLLPRI` and
+    /// `POLLPRI` events.
+    ///
+    /// Priority events are only supported on the following platforms:
+    ///
+    /// - `epoll`
+    /// - `poll`
+    /// - IOCP
+    /// - Event Ports
+    ///
+    /// On other platforms, this always returns `false`.
+    pub fn is_priority(&self) -> bool {
+        self.extra.is_pri()
+    }
 }
 
 /// Waits for I/O events.

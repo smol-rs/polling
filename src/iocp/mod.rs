@@ -658,6 +658,26 @@ impl EventExtra {
             flags: AfdPollMask::empty(),
         }
     }
+
+    /// Is this a HUP event?
+    pub fn is_hup(&self) -> bool {
+        self.flags.intersects(AfdPollMask::ABORT)
+    }
+
+    /// Is this a PRI event?
+    pub fn is_pri(&self) -> bool {
+        self.flags.intersects(AfdPollMask::RECEIVE_EXPEDITED)
+    }
+
+    /// Set up a listener for HUP events.
+    pub fn set_hup(&mut self) {
+        self.flags |= AfdPollMask::ABORT;
+    }
+
+    /// Set up a listener for PRI events.
+    pub fn set_pri(&mut self) {
+        self.flags |= AfdPollMask::RECEIVE_EXPEDITED;
+    }
 }
 
 /// A packet used to wake up the poller with an event.
@@ -758,9 +778,13 @@ impl PacketUnwrapped {
                 socket.mode = mode;
                 socket.interest_error = true;
 
+                // If there was a change, indicate that we need an update.
                 match socket.status {
-                    SocketStatus::Polling { readable, writable } => {
-                        (interest.readable && !readable) || (interest.writable && !writable)
+                    SocketStatus::Polling { flags } => {
+                        let our_flags = event_to_afd_mask(interest.readable, interest.writable, true)
+                            | interest.extra.flags;
+
+                        our_flags != flags
                     }
                     _ => true,
                 }
@@ -775,7 +799,7 @@ impl PacketUnwrapped {
                 // Update if there is no ongoing wait.
                 handle.status.is_idle()
             }
-            _ => false,
+            _ => true
         }
     }
 
@@ -847,12 +871,16 @@ impl PacketUnwrapped {
 
         // Check the current status.
         match socket.status {
-            SocketStatus::Polling { readable, writable } => {
+            SocketStatus::Polling { flags } => {
                 // If we need to poll for events aside from what we are currently polling, we need
                 // to update the packet. Cancel the ongoing poll.
-                if (socket.interest.readable && !readable)
-                    || (socket.interest.writable && !writable)
-                {
+                let our_flags = event_to_afd_mask(
+                    socket.interest.readable,
+                    socket.interest.writable,
+                    socket.interest_error,
+                ) | socket.interest.extra.flags;
+
+                if our_flags != flags {
                     return self.cancel(socket);
                 }
 
@@ -868,15 +896,12 @@ impl PacketUnwrapped {
 
             SocketStatus::Idle => {
                 // Start a new poll.
-                let result = socket.afd.poll(
-                    self.clone(),
-                    socket.base_socket,
-                    event_to_afd_mask(
-                        socket.interest.readable,
-                        socket.interest.writable,
-                        socket.interest_error,
-                    ),
-                );
+                let mask = event_to_afd_mask(
+                    socket.interest.readable,
+                    socket.interest.writable,
+                    socket.interest_error,
+                ) | socket.interest.extra.flags;
+                let result = socket.afd.poll(self.clone(), socket.base_socket, mask);
 
                 match result {
                     Ok(()) => {}
@@ -897,10 +922,7 @@ impl PacketUnwrapped {
                 }
 
                 // We are now polling for the current events.
-                socket.status = SocketStatus::Polling {
-                    readable: socket.interest.readable,
-                    writable: socket.interest.writable,
-                };
+                socket.status = SocketStatus::Polling { flags: mask };
 
                 Ok(())
             }
@@ -988,6 +1010,7 @@ impl PacketUnwrapped {
                         let (readable, writable) = afd_mask_to_event(events);
                         event.readable = readable;
                         event.writable = writable;
+                        event.extra.flags = events;
                     }
                 }
             }
@@ -999,7 +1022,13 @@ impl PacketUnwrapped {
 
         // If this event doesn't have anything that interests us, don't return or
         // update the oneshot state.
-        let return_value = if event.readable || event.writable {
+        let return_value = if event.readable
+            || event.writable
+            || event
+                .extra
+                .flags
+                .intersects(socket_state.interest.extra.flags)
+        {
             // If we are in oneshot mode, remove the interest.
             if matches!(socket_state.mode, PollMode::Oneshot) {
                 socket_state.interest = Event::none(socket_state.interest.key);
@@ -1099,11 +1128,8 @@ enum SocketStatus {
 
     /// We are currently polling these events.
     Polling {
-        /// We are currently polling for readable events.
-        readable: bool,
-
-        /// We are currently polling for writable events.
-        writable: bool,
+        /// The flags we are currently polling for.
+        flags: AfdPollMask,
     },
 
     /// The last poll operation was cancelled, and we're waiting for it to

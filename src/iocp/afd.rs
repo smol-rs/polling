@@ -134,6 +134,20 @@ impl ops::BitOrAssign for AfdPollMask {
     }
 }
 
+impl ops::BitAnd for AfdPollMask {
+    type Output = Self;
+
+    fn bitand(self, rhs: Self) -> Self {
+        AfdPollMask(self.0 & rhs.0)
+    }
+}
+
+impl ops::BitAndAssign for AfdPollMask {
+    fn bitand_assign(&mut self, rhs: Self) {
+        self.0 &= rhs.0;
+    }
+}
+
 pub(super) trait HasAfdInfo {
     fn afd_info(self: Pin<&Self>) -> Pin<&UnsafeCell<AfdPollInfo>>;
 }

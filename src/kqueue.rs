@@ -271,6 +271,26 @@ impl EventExtra {
     pub fn empty() -> EventExtra {
         EventExtra
     }
+
+    /// Set the interrupt flag.
+    pub fn set_hup(&mut self) {
+        // No-op.
+    }
+
+    /// Set the priority flag.
+    pub fn set_pri(&mut self) {
+        // No-op.
+    }
+
+    /// Is the interrupt flag set?
+    pub fn is_hup(&self) -> bool {
+        false
+    }
+
+    /// Is the priority flag set?
+    pub fn is_pri(&self) -> bool {
+        false
+    }
 }
 
 pub(crate) fn mode_to_flags(mode: PollMode) -> kqueue::EventFlags {

@@ -102,7 +102,7 @@ impl Poller {
             &self.epoll_fd,
             unsafe { rustix::fd::BorrowedFd::borrow_raw(fd) },
             epoll::EventData::new_u64(ev.key as u64),
-            epoll_flags(&ev, mode),
+            epoll_flags(&ev, mode) | ev.extra.flags,
         )?;
 
         Ok(())
@@ -122,7 +122,7 @@ impl Poller {
             &self.epoll_fd,
             fd,
             epoll::EventData::new_u64(ev.key as u64),
-            epoll_flags(&ev, mode),
+            epoll_flags(&ev, mode) | ev.extra.flags,
         )?;
 
         Ok(())
@@ -338,5 +338,25 @@ impl EventExtra {
         EventExtra {
             flags: epoll::EventFlags::empty(),
         }
+    }
+
+    /// Add the interrupt flag to this event.
+    pub fn set_hup(&mut self) {
+        self.flags |= epoll::EventFlags::HUP;
+    }
+
+    /// Add the priority flag to this event.
+    pub fn set_pri(&mut self) {
+        self.flags |= epoll::EventFlags::PRI;
+    }
+
+    /// Tell if the interrupt flag is set.
+    pub fn is_hup(&self) -> bool {
+        self.flags.contains(epoll::EventFlags::HUP)
+    }
+
+    /// Tell if the priority flag is set.
+    pub fn is_pri(&self) -> bool {
+        self.flags.contains(epoll::EventFlags::PRI)
     }
 }
