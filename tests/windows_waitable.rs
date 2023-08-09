@@ -10,6 +10,7 @@ use windows_sys::Win32::System::Threading::{CreateEventW, ResetEvent, SetEvent};
 
 use std::io;
 use std::os::windows::io::{AsRawHandle, RawHandle};
+use std::os::windows::prelude::{AsHandle, BorrowedHandle};
 use std::time::Duration;
 
 /// A basic wrapper around the Windows event object.
@@ -66,15 +67,23 @@ impl AsRawHandle for EventHandle {
     }
 }
 
+impl AsHandle for EventHandle {
+    fn as_handle(&self) -> BorrowedHandle<'_> {
+        unsafe { BorrowedHandle::borrow_raw(self.0) }
+    }
+}
+
 #[test]
 fn smoke() {
     let poller = Poller::new().unwrap();
 
     let event = EventHandle::new(true).unwrap();
 
-    poller
-        .add_waitable(&event, Event::all(0), PollMode::Oneshot)
-        .unwrap();
+    unsafe {
+        poller
+            .add_waitable(&event, Event::all(0), PollMode::Oneshot)
+            .unwrap();
+    }
 
     let mut events = vec![];
     poller
