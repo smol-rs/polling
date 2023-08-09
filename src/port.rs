@@ -189,10 +189,14 @@ impl Events {
 
     /// Iterates over I/O events.
     pub fn iter(&self) -> impl Iterator<Item = Event> + '_ {
-        self.list.iter().map(|ev| Event {
-            key: ev.userdata() as usize,
-            readable: PollFlags::from_bits_truncate(ev.events() as _).intersects(read_flags()),
-            writable: PollFlags::from_bits_truncate(ev.events() as _).intersects(write_flags()),
+        self.list.iter().map(|ev| {
+            let flags = PollFlags::from_bits_truncate(ev.events() as _);
+            Event {
+                key: ev.userdata() as usize,
+                readable: flags.intersects(read_flags()),
+                writable: flags.intersects(write_flags()),
+                extra: EventExtra { flags },
+            }
         })
     }
 
@@ -204,5 +208,21 @@ impl Events {
     /// Get the capacity of the list.
     pub fn capacity(&self) -> usize {
         self.list.capacity()
+    }
+}
+
+/// Extra information associated with an event.
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub struct EventExtra {
+    /// Flags associated with this event.
+    flags: PollFlags,
+}
+
+impl EventExtra {
+    /// Create a new, empty version of this struct.
+    pub fn empty() -> EventExtra {
+        EventExtra {
+            flags: PollFlags::empty(),
+        }
     }
 }

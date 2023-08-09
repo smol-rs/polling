@@ -637,6 +637,27 @@ impl Events {
     pub(super) fn clear(&mut self) {
         self.packets.clear();
     }
+
+    /// The capacity of the list of events.
+    pub(super) fn capacity(&self) -> usize {
+        self.packets.capacity()
+    }
+}
+
+/// Extra information about an event.
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub struct EventExtra {
+    /// Flags associated with this event.
+    flags: AfdPollMask,
+}
+
+impl EventExtra {
+    /// Create a new, empty version of this struct.
+    pub fn empty() -> EventExtra {
+        EventExtra {
+            flags: AfdPollMask::empty(),
+        }
+    }
 }
 
 /// A packet used to wake up the poller with an event.

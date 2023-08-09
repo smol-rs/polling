@@ -247,6 +247,7 @@ impl Events {
             writable: matches!(ev.filter(), kqueue::EventFilter::Write(..))
                 || (matches!(ev.filter(), kqueue::EventFilter::Read(..))
                     && (ev.flags().intersects(kqueue::EventFlags::EOF))),
+            extra: EventExtra,
         })
     }
 
@@ -258,6 +259,17 @@ impl Events {
     /// Get the capacity of the list.
     pub fn capacity(&self) -> usize {
         self.list.capacity()
+    }
+}
+
+/// Extra information associated with an event.
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub struct EventExtra;
+
+impl EventExtra {
+    /// Create a new, empty version of this struct.
+    pub fn empty() -> EventExtra {
+        EventExtra
     }
 }
 

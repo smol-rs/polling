@@ -59,11 +59,7 @@ impl Poller {
 
             poller.add(
                 poller.event_fd.as_raw_fd(),
-                Event {
-                    key: crate::NOTIFY_KEY,
-                    readable: true,
-                    writable: false,
-                },
+                Event::readable(crate::NOTIFY_KEY),
                 PollMode::Oneshot,
             )?;
         }
@@ -177,11 +173,7 @@ impl Poller {
             // Set interest in timerfd.
             self.modify(
                 timer_fd.as_fd(),
-                Event {
-                    key: crate::NOTIFY_KEY,
-                    readable: true,
-                    writable: false,
-                },
+                Event::readable(crate::NOTIFY_KEY),
                 PollMode::Oneshot,
             )?;
         }
@@ -213,11 +205,7 @@ impl Poller {
         let _ = read(&self.event_fd, &mut buf);
         self.modify(
             self.event_fd.as_fd(),
-            Event {
-                key: crate::NOTIFY_KEY,
-                readable: true,
-                writable: false,
-            },
+            Event::readable(crate::NOTIFY_KEY),
             PollMode::Oneshot,
         )?;
         Ok(())
@@ -322,6 +310,7 @@ impl Events {
                 key: ev.data.u64() as usize,
                 readable: flags.intersects(read_flags()),
                 writable: flags.intersects(write_flags()),
+                extra: EventExtra { flags },
             }
         })
     }
@@ -334,5 +323,20 @@ impl Events {
     /// Get the capacity of the list.
     pub fn capacity(&self) -> usize {
         self.list.capacity()
+    }
+}
+
+/// Extra information about this event.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EventExtra {
+    flags: epoll::EventFlags,
+}
+
+impl EventExtra {
+    /// Create an empty version of the data.
+    pub fn empty() -> EventExtra {
+        EventExtra {
+            flags: epoll::EventFlags::empty(),
+        }
     }
 }

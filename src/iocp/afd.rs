@@ -66,7 +66,7 @@ impl AfdPollInfo {
     }
 }
 
-#[derive(Default, Copy, Clone)]
+#[derive(Default, Copy, Clone, PartialEq, Eq)]
 #[repr(transparent)]
 pub(super) struct AfdPollMask(u32);
 
@@ -88,6 +88,35 @@ impl AfdPollMask {
     /// Checks if this mask contains the other mask.
     pub(crate) fn intersects(self, other: AfdPollMask) -> bool {
         (self.0 & other.0) != 0
+    }
+}
+
+impl fmt::Debug for AfdPollMask {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        const FLAGS: &[(&str, AfdPollMask)] = &[
+            ("RECEIVE", AfdPollMask::RECEIVE),
+            ("RECEIVE_EXPEDITED", AfdPollMask::RECEIVE_EXPEDITED),
+            ("SEND", AfdPollMask::SEND),
+            ("DISCONNECT", AfdPollMask::DISCONNECT),
+            ("ABORT", AfdPollMask::ABORT),
+            ("LOCAL_CLOSE", AfdPollMask::LOCAL_CLOSE),
+            ("ACCEPT", AfdPollMask::ACCEPT),
+            ("CONNECT_FAIL", AfdPollMask::CONNECT_FAIL),
+        ];
+
+        let mut first = true;
+        for (name, value) in FLAGS {
+            if self.intersects(*value) {
+                if !first {
+                    write!(f, " | ")?;
+                }
+
+                first = false;
+                write!(f, "{}", name)?;
+            }
+        }
+
+        Ok(())
     }
 }
 

@@ -132,6 +132,8 @@ pub struct Event {
     pub readable: bool,
     /// Can it do a write operation without blocking?
     pub writable: bool,
+    /// System-specific event data.
+    extra: sys::EventExtra,
 }
 
 /// The mode in which the poller waits for I/O events.
@@ -187,6 +189,7 @@ impl Event {
             key,
             readable: true,
             writable: true,
+            extra: sys::EventExtra::empty(),
         }
     }
 
@@ -198,6 +201,7 @@ impl Event {
             key,
             readable: true,
             writable: false,
+            extra: sys::EventExtra::empty(),
         }
     }
 
@@ -209,6 +213,7 @@ impl Event {
             key,
             readable: false,
             writable: true,
+            extra: sys::EventExtra::empty(),
         }
     }
 
@@ -220,6 +225,7 @@ impl Event {
             key,
             readable: false,
             writable: false,
+            extra: sys::EventExtra::empty(),
         }
     }
 }
