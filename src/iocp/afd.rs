@@ -536,6 +536,9 @@ impl<T: fmt::Debug> fmt::Debug for IoStatusBlock<T> {
     }
 }
 
+unsafe impl<T: Send> Send for IoStatusBlock<T> {}
+unsafe impl<T: Sync> Sync for IoStatusBlock<T> {}
+
 impl<T> From<T> for IoStatusBlock<T> {
     fn from(data: T) -> Self {
         Self {
