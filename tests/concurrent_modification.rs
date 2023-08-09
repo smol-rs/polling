@@ -33,7 +33,9 @@ fn concurrent_add() -> io::Result<()> {
     poller.delete(&reader)?;
     result?;
 
-    assert_eq!(events.iter().collect::<Vec<_>>(), [Event::readable(0)]);
+    assert_eq!(events.len(), 1);
+    assert!(events.iter().next().unwrap().readable);
+    assert!(!events.iter().next().unwrap().writable);
 
     Ok(())
 }
@@ -63,7 +65,9 @@ fn concurrent_modify() -> io::Result<()> {
         .into_iter()
         .collect::<io::Result<()>>()?;
 
-    assert_eq!(events.iter().collect::<Vec<_>>(), [Event::readable(0)]);
+    assert_eq!(events.len(), 1);
+    assert!(events.iter().next().unwrap().readable);
+    assert!(!events.iter().next().unwrap().writable);
 
     Ok(())
 }

@@ -3,7 +3,7 @@
 #![cfg(windows)]
 
 use polling::os::iocp::PollerIocpExt;
-use polling::{Event, PollMode, Poller};
+use polling::{Event, Events, PollMode, Poller};
 
 use windows_sys::Win32::Foundation::CloseHandle;
 use windows_sys::Win32::System::Threading::{CreateEventW, ResetEvent, SetEvent};
@@ -85,7 +85,7 @@ fn smoke() {
             .unwrap();
     }
 
-    let mut events = vec![];
+    let mut events = Events::new();
     poller
         .wait(&mut events, Some(Duration::from_millis(100)))
         .unwrap();
@@ -100,7 +100,8 @@ fn smoke() {
         .unwrap();
 
     assert_eq!(events.len(), 1);
-    assert_eq!(events[0], Event::all(0));
+    assert!(events.iter().next().unwrap().readable);
+    assert!(events.iter().next().unwrap().writable);
 
     // Interest should be cleared.
     events.clear();
@@ -121,7 +122,8 @@ fn smoke() {
         .unwrap();
 
     assert_eq!(events.len(), 1);
-    assert_eq!(events[0], Event::all(0));
+    assert!(events.iter().next().unwrap().readable);
+    assert!(events.iter().next().unwrap().writable);
 
     // If we reset the event, it should not be signaled.
     event.reset().unwrap();

@@ -781,8 +781,9 @@ impl PacketUnwrapped {
                 // If there was a change, indicate that we need an update.
                 match socket.status {
                     SocketStatus::Polling { flags } => {
-                        let our_flags = event_to_afd_mask(interest.readable, interest.writable, true)
-                            | interest.extra.flags;
+                        let our_flags =
+                            event_to_afd_mask(interest.readable, interest.writable, true)
+                                | interest.extra.flags;
 
                         our_flags != flags
                     }
@@ -799,7 +800,7 @@ impl PacketUnwrapped {
                 // Update if there is no ongoing wait.
                 handle.status.is_idle()
             }
-            _ => true
+            _ => true,
         }
     }
 

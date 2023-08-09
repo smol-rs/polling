@@ -18,7 +18,7 @@
 //! # Examples
 //!
 //! ```no_run
-//! use polling::{Event, Poller};
+//! use polling::{Event, Events, Poller};
 //! use std::net::TcpListener;
 //!
 //! // Create a TCP listener.
@@ -33,13 +33,13 @@
 //! }
 //!
 //! // The event loop.
-//! let mut events = Vec::new();
+//! let mut events = Events::new();
 //! loop {
 //!     // Wait for at least one I/O event.
 //!     events.clear();
 //!     poller.wait(&mut events, None)?;
 //!
-//!     for ev in &events {
+//!     for ev in events.iter() {
 //!         if ev.key == key {
 //!             // Perform a non-blocking accept operation.
 //!             socket.accept()?;
@@ -603,7 +603,7 @@ impl Poller {
     /// # Examples
     ///
     /// ```
-    /// use polling::{Event, Poller};
+    /// use polling::{Event, Events, Poller};
     /// use std::net::TcpListener;
     /// use std::time::Duration;
     ///
@@ -616,7 +616,7 @@ impl Poller {
     ///     poller.add(&socket, Event::all(key))?;
     /// }
     ///
-    /// let mut events = Vec::new();
+    /// let mut events = Events::new();
     /// let n = poller.wait(&mut events, Some(Duration::from_secs(1)))?;
     /// poller.delete(&socket)?;
     /// # std::io::Result::Ok(())
@@ -650,14 +650,14 @@ impl Poller {
     /// # Examples
     ///
     /// ```
-    /// use polling::Poller;
+    /// use polling::{Events, Poller};
     ///
     /// let poller = Poller::new()?;
     ///
     /// // Notify the poller.
     /// poller.notify()?;
     ///
-    /// let mut events = Vec::new();
+    /// let mut events = Events::new();
     /// poller.wait(&mut events, None)?; // wakes up immediately
     /// assert!(events.is_empty());
     /// # std::io::Result::Ok(())
@@ -804,7 +804,7 @@ impl Events {
     /// ```
     #[inline]
     pub fn is_empty(&self) -> bool {
-        self.len() != 0
+        self.len() == 0
     }
 
     /// Get the total capacity of the list.

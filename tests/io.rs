@@ -29,7 +29,10 @@ fn basic_io() {
             .unwrap(),
         1
     );
-    assert_eq!(events.iter().collect::<Vec<_>>(), &[Event::readable(1)]);
+
+    assert_eq!(events.len(), 1);
+    assert!(events.iter().next().unwrap().readable);
+    assert!(!events.iter().next().unwrap().writable);
 
     poller.delete(&read).unwrap();
 }

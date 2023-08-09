@@ -39,10 +39,10 @@ fn level_triggered() {
         .wait(&mut events, Some(Duration::from_secs(10)))
         .unwrap();
 
-    assert_eq!(
-        events.iter().collect::<Vec<_>>(),
-        [Event::readable(reader_token)]
-    );
+    assert_eq!(events.len(), 1);
+    assert_eq!(events.iter().next().unwrap().key, reader_token);
+    assert!(events.iter().next().unwrap().readable);
+    assert!(!events.iter().next().unwrap().writable);
 
     // If we read some of the data, the notification should still be available.
     reader.read_exact(&mut [0; 3]).unwrap();
@@ -50,10 +50,11 @@ fn level_triggered() {
     poller
         .wait(&mut events, Some(Duration::from_secs(10)))
         .unwrap();
-    assert_eq!(
-        events.iter().collect::<Vec<_>>(),
-        [Event::readable(reader_token)]
-    );
+
+    assert_eq!(events.len(), 1);
+    assert_eq!(events.iter().next().unwrap().key, reader_token);
+    assert!(events.iter().next().unwrap().readable);
+    assert!(!events.iter().next().unwrap().writable);
 
     // If we read the rest of the data, the notification should be gone.
     reader.read_exact(&mut [0; 2]).unwrap();
@@ -77,10 +78,10 @@ fn level_triggered() {
         .wait(&mut events, Some(Duration::from_secs(10)))
         .unwrap();
 
-    assert_eq!(
-        events.iter().collect::<Vec<_>>(),
-        [Event::readable(reader_token)]
-    );
+    assert_eq!(events.len(), 1);
+    assert_eq!(events.iter().next().unwrap().key, reader_token);
+    assert!(events.iter().next().unwrap().readable);
+    assert!(!events.iter().next().unwrap().writable);
 
     // After reading, the notification should vanish.
     reader.read(&mut [0; 5]).unwrap();
@@ -137,10 +138,10 @@ fn edge_triggered() {
         .wait(&mut events, Some(Duration::from_secs(10)))
         .unwrap();
 
-    assert_eq!(
-        events.iter().collect::<Vec<_>>(),
-        [Event::readable(reader_token)]
-    );
+    assert_eq!(events.len(), 1);
+    assert_eq!(events.iter().next().unwrap().key, reader_token);
+    assert!(events.iter().next().unwrap().readable);
+    assert!(!events.iter().next().unwrap().writable);
 
     // If we read some of the data, the notification should not still be available.
     reader.read_exact(&mut [0; 3]).unwrap();
@@ -156,10 +157,11 @@ fn edge_triggered() {
     poller
         .wait(&mut events, Some(Duration::from_secs(10)))
         .unwrap();
-    assert_eq!(
-        events.iter().collect::<Vec<_>>(),
-        [Event::readable(reader_token)]
-    );
+
+    assert_eq!(events.len(), 1);
+    assert_eq!(events.iter().next().unwrap().key, reader_token);
+    assert!(events.iter().next().unwrap().readable);
+    assert!(!events.iter().next().unwrap().writable);
 
     // After modifying the stream and sending more data, it should be oneshot.
     poller
@@ -172,10 +174,10 @@ fn edge_triggered() {
         .wait(&mut events, Some(Duration::from_secs(10)))
         .unwrap();
 
-    assert_eq!(
-        events.iter().collect::<Vec<_>>(),
-        [Event::readable(reader_token)]
-    );
+    assert_eq!(events.len(), 1);
+    assert_eq!(events.iter().next().unwrap().key, reader_token);
+    assert!(events.iter().next().unwrap().readable);
+    assert!(!events.iter().next().unwrap().writable);
 }
 
 #[test]
@@ -229,10 +231,9 @@ fn edge_oneshot_triggered() {
         .wait(&mut events, Some(Duration::from_secs(10)))
         .unwrap();
 
-    assert_eq!(
-        events.iter().collect::<Vec<_>>(),
-        [Event::readable(reader_token)]
-    );
+    assert_eq!(events.len(), 1);
+    assert!(events.iter().next().unwrap().readable);
+    assert!(!events.iter().next().unwrap().writable);
 
     // If we read some of the data, the notification should not still be available.
     reader.read_exact(&mut [0; 3]).unwrap();
@@ -254,10 +255,10 @@ fn edge_oneshot_triggered() {
     poller
         .wait(&mut events, Some(Duration::from_secs(0)))
         .unwrap();
-    assert_eq!(
-        events.iter().collect::<Vec<_>>(),
-        [Event::readable(reader_token)]
-    );
+
+    assert_eq!(events.len(), 1);
+    assert!(events.iter().next().unwrap().readable);
+    assert!(!events.iter().next().unwrap().writable);
 }
 
 fn tcp_pair() -> io::Result<(TcpStream, TcpStream)> {
