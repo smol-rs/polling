@@ -289,7 +289,7 @@ impl Poller {
         interest: Event,
         mode: PollMode,
     ) -> io::Result<()> {
-        log::trace!(
+        tracing::trace!(
             "add_waitable: handle={:?}, waitable={:p}, ev={:?}",
             self.port,
             handle,
@@ -345,7 +345,7 @@ impl Poller {
         interest: Event,
         mode: PollMode,
     ) -> io::Result<()> {
-        log::trace!(
+        tracing::trace!(
             "modify_waitable: handle={:?}, waitable={:p}, ev={:?}",
             self.port,
             waitable,
@@ -380,125 +380,7 @@ impl Poller {
 
     /// Delete a waitable from the poller.
     pub(super) fn remove_waitable(&self, waitable: RawHandle) -> io::Result<()> {
-        log::trace!("remove: handle={:?}, waitable={:p}", self.port, waitable);
-
-        // Get a reference to the source.
-        let source = {
-            let mut sources = lock!(self.waitables.write());
-
-            match sources.remove(&waitable) {
-                Some(s) => s,
-                None => {
-                    // If the source has already been removed, then we can just return.
-                    return Ok(());
-                }
-            }
-        };
-
-        // Indicate to the source that it is being deleted.
-        // This cancels any ongoing AFD_IOCTL_POLL operations.
-        source.begin_delete()
-    }
-
-    /// Add a new waitable to the poller.
-    pub(super) fn add_waitable(
-        &self,
-        handle: RawHandle,
-        interest: Event,
-        mode: PollMode,
-    ) -> io::Result<()> {
-        log::trace!(
-            "add_waitable: handle={:?}, waitable={:p}, ev={:?}",
-            self.port,
-            handle,
-            interest
-        );
-
-        // We don't support edge-triggered events.
-        if matches!(mode, PollMode::Edge | PollMode::EdgeOneshot) {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "edge-triggered events are not supported",
-            ));
-        }
-
-        // Create a new packet.
-        let handle_state = {
-            let state = WaitableState {
-                handle,
-                port: Arc::downgrade(&self.port),
-                interest,
-                mode,
-                status: WaitableStatus::Idle,
-            };
-
-            Arc::pin(IoStatusBlock::from(PacketInner::Waitable {
-                handle: Mutex::new(state),
-            }))
-        };
-
-        // Keep track of the source in the poller.
-        {
-            let mut sources = lock!(self.waitables.write());
-
-            match sources.entry(handle) {
-                Entry::Vacant(v) => {
-                    v.insert(Pin::<Arc<_>>::clone(&handle_state));
-                }
-
-                Entry::Occupied(_) => {
-                    return Err(io::Error::from(io::ErrorKind::AlreadyExists));
-                }
-            }
-        }
-
-        // Update the packet.
-        self.update_packet(handle_state)
-    }
-
-    /// Update a waitable in the poller.
-    pub(crate) fn modify_waitable(
-        &self,
-        waitable: RawHandle,
-        interest: Event,
-        mode: PollMode,
-    ) -> io::Result<()> {
-        log::trace!(
-            "modify_waitable: handle={:?}, waitable={:p}, ev={:?}",
-            self.port,
-            waitable,
-            interest
-        );
-
-        // We don't support edge-triggered events.
-        if matches!(mode, PollMode::Edge | PollMode::EdgeOneshot) {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "edge-triggered events are not supported",
-            ));
-        }
-
-        // Get a reference to the source.
-        let source = {
-            let sources = lock!(self.waitables.read());
-
-            sources
-                .get(&waitable)
-                .cloned()
-                .ok_or_else(|| io::Error::from(io::ErrorKind::NotFound))?
-        };
-
-        // Set the new event.
-        if source.as_ref().set_events(interest, mode) {
-            self.update_packet(source)?;
-        }
-
-        Ok(())
-    }
-
-    /// Delete a waitable from the poller.
-    pub(super) fn remove_waitable(&self, waitable: RawHandle) -> io::Result<()> {
-        log::trace!("remove: handle={:?}, waitable={:p}", self.port, waitable);
+        tracing::trace!("remove: handle={:?}, waitable={:p}", self.port, waitable);
 
         // Get a reference to the source.
         let source = {
@@ -876,7 +758,7 @@ impl PacketUnwrapped {
                         // Push this packet.
                         drop(handle);
                         if let Err(e) = iocp.post(0, 0, packet) {
-                            log::error!("failed to post completion packet: {}", e);
+                            tracing::error!("failed to post completion packet: {}", e);
                         }
                     },
                     None,
