@@ -20,7 +20,10 @@ fn post_smoke() {
     poller.wait(&mut events, None).unwrap();
 
     assert_eq!(events.len(), 1);
-    assert_eq!(events.iter().next().unwrap(), Event::readable(1));
+    assert_eq!(
+        events.iter().next().unwrap().with_no_extra(),
+        Event::readable(1)
+    );
 }
 
 #[test]
@@ -47,9 +50,10 @@ fn post_multithread() {
             .unwrap();
 
         assert_eq!(events.len(), 1);
-        assert_eq!(events.iter().next().unwrap().key, i);
-        assert!(!events.iter().next().unwrap().readable);
-        assert!(events.iter().next().unwrap().writable);
+        assert_eq!(
+            events.iter().next().unwrap().with_no_extra(),
+            Event::writable(i)
+        );
         events.clear();
     }
 

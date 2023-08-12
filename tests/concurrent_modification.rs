@@ -34,8 +34,10 @@ fn concurrent_add() -> io::Result<()> {
     result?;
 
     assert_eq!(events.len(), 1);
-    assert!(events.iter().next().unwrap().readable);
-    assert!(!events.iter().next().unwrap().writable);
+    assert_eq!(
+        events.iter().next().unwrap().with_no_extra(),
+        Event::readable(0)
+    );
 
     Ok(())
 }
@@ -66,8 +68,10 @@ fn concurrent_modify() -> io::Result<()> {
         .collect::<io::Result<()>>()?;
 
     assert_eq!(events.len(), 1);
-    assert!(events.iter().next().unwrap().readable);
-    assert!(!events.iter().next().unwrap().writable);
+    assert_eq!(
+        events.iter().next().unwrap().with_no_extra(),
+        Event::readable(0)
+    );
 
     Ok(())
 }

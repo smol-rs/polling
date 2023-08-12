@@ -100,8 +100,7 @@ fn smoke() {
         .unwrap();
 
     assert_eq!(events.len(), 1);
-    assert!(events.iter().next().unwrap().readable);
-    assert!(events.iter().next().unwrap().writable);
+    assert_eq!(events.iter().next().unwrap().with_no_extra(), Event::all(0));
 
     // Interest should be cleared.
     events.clear();
@@ -122,8 +121,7 @@ fn smoke() {
         .unwrap();
 
     assert_eq!(events.len(), 1);
-    assert!(events.iter().next().unwrap().readable);
-    assert!(events.iter().next().unwrap().writable);
+    assert_eq!(events.iter().next().unwrap().with_no_extra(), Event::all(0));
 
     // If we reset the event, it should not be signaled.
     event.reset().unwrap();

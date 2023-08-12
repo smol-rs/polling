@@ -220,6 +220,7 @@ pub struct EventExtra {
 
 impl EventExtra {
     /// Create a new, empty version of this struct.
+    #[inline]
     pub fn empty() -> EventExtra {
         EventExtra {
             flags: PollFlags::empty(),
@@ -227,21 +228,25 @@ impl EventExtra {
     }
 
     /// Set the interrupt flag.
-    pub fn set_hup(&mut self) {
-        self.flags.set(PollFlags::HUP, true);
+    #[inline]
+    pub fn set_hup(&mut self, value: bool) {
+        self.flags.set(PollFlags::HUP, value);
     }
 
     /// Set the priority flag.
-    pub fn set_pri(&mut self) {
-        self.flags.set(PollFlags::PRI, true);
+    #[inline]
+    pub fn set_pri(&mut self, value: bool) {
+        self.flags.set(PollFlags::PRI, value);
     }
 
     /// Is this an interrupt event?
+    #[inline]
     pub fn is_hup(&self) -> bool {
         self.flags.contains(PollFlags::HUP)
     }
 
     /// Is this a priority event?
+    #[inline]
     pub fn is_pri(&self) -> bool {
         self.flags.contains(PollFlags::PRI)
     }

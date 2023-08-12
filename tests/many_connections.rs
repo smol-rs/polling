@@ -44,9 +44,10 @@ fn many_connections() {
         // Check that the connection is readable.
         let current_events = events.iter().collect::<Vec<_>>();
         assert_eq!(current_events.len(), 1, "events: {:?}", current_events);
-        assert_eq!(current_events[0].key, id);
-        assert!(current_events[0].readable);
-        assert!(!current_events[0].writable);
+        assert_eq!(
+            current_events[0].with_no_extra(),
+            polling::Event::readable(id)
+        );
 
         // Read the byte from the connection.
         let mut buf = [0];

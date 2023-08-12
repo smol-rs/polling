@@ -31,9 +31,10 @@ fn basic_io() {
     );
 
     assert_eq!(events.len(), 1);
-    assert!(events.iter().next().unwrap().readable);
-    assert!(!events.iter().next().unwrap().writable);
-
+    assert_eq!(
+        events.iter().next().unwrap().with_no_extra(),
+        Event::readable(1)
+    );
     poller.delete(&read).unwrap();
 }
 

@@ -65,8 +65,10 @@
     html_logo_url = "https://raw.githubusercontent.com/smol-rs/smol/master/assets/images/logo_fullsize_transparent.png"
 )]
 
+use std::cell::Cell;
 use std::fmt;
 use std::io;
+use std::marker::PhantomData;
 use std::num::NonZeroUsize;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
@@ -242,8 +244,9 @@ impl Event {
     /// - Event Ports
     ///
     /// On other platforms, this function is a no-op.
-    pub fn set_interrupt(&mut self) {
-        self.extra.set_hup();
+    #[inline]
+    pub fn set_interrupt(&mut self, active: bool) {
+        self.extra.set_hup(active);
     }
 
     /// Add interruption events to this interest.
@@ -259,8 +262,9 @@ impl Event {
     /// - Event Ports
     ///
     /// On other platforms, this function is a no-op.
+    #[inline]
     pub fn with_interrupt(mut self) -> Self {
-        self.set_interrupt();
+        self.set_interrupt(true);
         self
     }
 
@@ -277,8 +281,9 @@ impl Event {
     /// - Event Ports
     ///
     /// On other platforms, this function is a no-op.
-    pub fn set_priority(&mut self) {
-        self.extra.set_pri();
+    #[inline]
+    pub fn set_priority(&mut self, active: bool) {
+        self.extra.set_pri(active);
     }
 
     /// Add priority events to this interest.
@@ -294,8 +299,9 @@ impl Event {
     /// - Event Ports
     ///
     /// On other platforms, this function is a no-op.
+    #[inline]
     pub fn with_priority(mut self) -> Self {
-        self.set_priority();
+        self.set_priority(true);
         self
     }
 
@@ -312,6 +318,7 @@ impl Event {
     /// - Event Ports
     ///
     /// On other platforms, this always returns `false`.
+    #[inline]
     pub fn is_interrupt(&self) -> bool {
         self.extra.is_hup()
     }
@@ -329,8 +336,24 @@ impl Event {
     /// - Event Ports
     ///
     /// On other platforms, this always returns `false`.
+    #[inline]
     pub fn is_priority(&self) -> bool {
         self.extra.is_pri()
+    }
+
+    /// Remove any extra information from this event.
+    #[inline]
+    pub fn clear_extra(&mut self) {
+        self.extra = sys::EventExtra::empty();
+    }
+
+    /// Get a version of this event with no extra information.
+    ///
+    /// This is useful for comparing events with `==`.
+    #[inline]
+    pub fn with_no_extra(mut self) -> Self {
+        self.clear_extra();
+        self
     }
 }
 
@@ -680,6 +703,10 @@ impl Poller {
 /// A container for I/O events.
 pub struct Events {
     events: sys::Events,
+
+    /// This is intended to be used from &mut, thread locally, so we should make it !Sync
+    /// for consistency with the rest of the API.
+    _not_sync: PhantomData<Cell<()>>,
 }
 
 impl Default for Events {
@@ -728,6 +755,7 @@ impl Events {
     pub fn with_capacity(capacity: NonZeroUsize) -> Self {
         Self {
             events: sys::Events::with_capacity(capacity.get()),
+            _not_sync: PhantomData,
         }
     }
 
@@ -974,4 +1002,18 @@ cfg_if! {
 #[allow(unused)]
 fn unsupported_error(err: impl Into<String>) -> io::Error {
     io::Error::new(io::ErrorKind::Unsupported, err.into())
+}
+
+fn _assert_send_and_sync() {
+    fn assert_send<T: Send>() {}
+    fn assert_sync<T: Sync>() {}
+
+    assert_send::<Poller>();
+    assert_sync::<Poller>();
+
+    assert_send::<Event>();
+    assert_sync::<Event>();
+
+    assert_send::<Events>();
+    // Events can be !Sync
 }

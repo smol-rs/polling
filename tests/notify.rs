@@ -14,6 +14,7 @@ fn simple() -> io::Result<()> {
     for _ in 0..10 {
         poller.notify()?;
         poller.wait(&mut events, None)?;
+        assert!(events.is_empty());
     }
 
     Ok(())

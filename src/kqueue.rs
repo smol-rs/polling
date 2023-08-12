@@ -268,26 +268,31 @@ pub struct EventExtra;
 
 impl EventExtra {
     /// Create a new, empty version of this struct.
+    #[inline]
     pub fn empty() -> EventExtra {
         EventExtra
     }
 
     /// Set the interrupt flag.
-    pub fn set_hup(&mut self) {
+    #[inline]
+    pub fn set_hup(&mut self, _value: bool) {
         // No-op.
     }
 
     /// Set the priority flag.
-    pub fn set_pri(&mut self) {
+    #[inline]
+    pub fn set_pri(&mut self, _value: bool) {
         // No-op.
     }
 
     /// Is the interrupt flag set?
+    #[inline]
     pub fn is_hup(&self) -> bool {
         false
     }
 
     /// Is the priority flag set?
+    #[inline]
     pub fn is_pri(&self) -> bool {
         false
     }

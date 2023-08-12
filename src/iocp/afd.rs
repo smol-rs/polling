@@ -89,6 +89,15 @@ impl AfdPollMask {
     pub(crate) fn intersects(self, other: AfdPollMask) -> bool {
         (self.0 & other.0) != 0
     }
+
+    /// Sets a flag.
+    pub(crate) fn set(&mut self, other: AfdPollMask, value: bool) {
+        if value {
+            *self |= other;
+        } else {
+            self.0 &= !other.0;
+        }
+    }
 }
 
 impl fmt::Debug for AfdPollMask {

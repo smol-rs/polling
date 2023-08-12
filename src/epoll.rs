@@ -334,6 +334,7 @@ pub struct EventExtra {
 
 impl EventExtra {
     /// Create an empty version of the data.
+    #[inline]
     pub fn empty() -> EventExtra {
         EventExtra {
             flags: epoll::EventFlags::empty(),
@@ -341,21 +342,25 @@ impl EventExtra {
     }
 
     /// Add the interrupt flag to this event.
-    pub fn set_hup(&mut self) {
-        self.flags |= epoll::EventFlags::HUP;
+    #[inline]
+    pub fn set_hup(&mut self, active: bool) {
+        self.flags.set(epoll::EventFlags::HUP, active);
     }
 
     /// Add the priority flag to this event.
-    pub fn set_pri(&mut self) {
-        self.flags |= epoll::EventFlags::PRI;
+    #[inline]
+    pub fn set_pri(&mut self, active: bool) {
+        self.flags.set(epoll::EventFlags::PRI, active);
     }
 
     /// Tell if the interrupt flag is set.
+    #[inline]
     pub fn is_hup(&self) -> bool {
         self.flags.contains(epoll::EventFlags::HUP)
     }
 
     /// Tell if the priority flag is set.
+    #[inline]
     pub fn is_pri(&self) -> bool {
         self.flags.contains(epoll::EventFlags::PRI)
     }

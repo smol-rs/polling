@@ -622,24 +622,24 @@ unsafe impl Send for Events {}
 
 impl Events {
     /// Creates an empty list of events.
-    pub(super) fn with_capacity(cap: usize) -> Events {
+    pub fn with_capacity(cap: usize) -> Events {
         Events {
             packets: Vec::with_capacity(cap),
         }
     }
 
     /// Iterate over I/O events.
-    pub(super) fn iter(&self) -> impl Iterator<Item = Event> + '_ {
+    pub fn iter(&self) -> impl Iterator<Item = Event> + '_ {
         self.packets.iter().copied()
     }
 
     /// Clear the list of events.
-    pub(super) fn clear(&mut self) {
+    pub fn clear(&mut self) {
         self.packets.clear();
     }
 
     /// The capacity of the list of events.
-    pub(super) fn capacity(&self) -> usize {
+    pub fn capacity(&self) -> usize {
         self.packets.capacity()
     }
 }
@@ -653,6 +653,7 @@ pub struct EventExtra {
 
 impl EventExtra {
     /// Create a new, empty version of this struct.
+    #[inline]
     pub fn empty() -> EventExtra {
         EventExtra {
             flags: AfdPollMask::empty(),
@@ -660,23 +661,27 @@ impl EventExtra {
     }
 
     /// Is this a HUP event?
+    #[inline]
     pub fn is_hup(&self) -> bool {
         self.flags.intersects(AfdPollMask::ABORT)
     }
 
     /// Is this a PRI event?
+    #[inline]
     pub fn is_pri(&self) -> bool {
         self.flags.intersects(AfdPollMask::RECEIVE_EXPEDITED)
     }
 
     /// Set up a listener for HUP events.
-    pub fn set_hup(&mut self) {
-        self.flags |= AfdPollMask::ABORT;
+    #[inline]
+    pub fn set_hup(&mut self, active: bool) {
+        self.flags.set(AfdPollMask::ABORT, active);
     }
 
     /// Set up a listener for PRI events.
-    pub fn set_pri(&mut self) {
-        self.flags |= AfdPollMask::RECEIVE_EXPEDITED;
+    #[inline]
+    pub fn set_pri(&mut self, active: bool) {
+        self.flags.set(AfdPollMask::RECEIVE_EXPEDITED, active);
     }
 }
 
