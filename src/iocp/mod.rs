@@ -783,10 +783,7 @@ impl PacketUnwrapped {
                 // If there was a change, indicate that we need an update.
                 match socket.status {
                     SocketStatus::Polling { flags } => {
-                        let our_flags =
-                            event_to_afd_mask(interest.readable, interest.writable, true)
-                                | interest.extra.flags;
-
+                        let our_flags = event_to_afd_mask(socket.interest, socket.interest_error);
                         our_flags != flags
                     }
                     _ => true,
@@ -877,12 +874,7 @@ impl PacketUnwrapped {
             SocketStatus::Polling { flags } => {
                 // If we need to poll for events aside from what we are currently polling, we need
                 // to update the packet. Cancel the ongoing poll.
-                let our_flags = event_to_afd_mask(
-                    socket.interest.readable,
-                    socket.interest.writable,
-                    socket.interest_error,
-                ) | socket.interest.extra.flags;
-
+                let our_flags = event_to_afd_mask(socket.interest, socket.interest_error);
                 if our_flags != flags {
                     return self.cancel(socket);
                 }
@@ -899,11 +891,7 @@ impl PacketUnwrapped {
 
             SocketStatus::Idle => {
                 // Start a new poll.
-                let mask = event_to_afd_mask(
-                    socket.interest.readable,
-                    socket.interest.writable,
-                    socket.interest_error,
-                ) | socket.interest.extra.flags;
+                let mask = event_to_afd_mask(socket.interest, socket.interest_error);
                 let result = socket.afd.poll(self.clone(), socket.base_socket, mask);
 
                 match result {
@@ -1262,7 +1250,14 @@ impl WaitHandle {
 }
 
 /// Translate an event to the mask expected by AFD.
-fn event_to_afd_mask(readable: bool, writable: bool, error: bool) -> afd::AfdPollMask {
+#[inline]
+fn event_to_afd_mask(event: Event, error: bool) -> afd::AfdPollMask {
+    event_properties_to_afd_mask(event.readable, event.writable, error) | event.extra.flags
+}
+
+/// Translate an event to the mask expected by AFD.
+#[inline]
+fn event_properties_to_afd_mask(readable: bool, writable: bool, error: bool) -> afd::AfdPollMask {
     use afd::AfdPollMask as AfdPoll;
 
     let mut mask = AfdPoll::empty();
@@ -1284,6 +1279,7 @@ fn event_to_afd_mask(readable: bool, writable: bool, error: bool) -> afd::AfdPol
 }
 
 /// Convert the mask reported by AFD to an event.
+#[inline]
 fn afd_mask_to_event(mask: afd::AfdPollMask) -> (bool, bool) {
     use afd::AfdPollMask as AfdPoll;
 
