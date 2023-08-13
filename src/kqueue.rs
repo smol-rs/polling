@@ -128,8 +128,7 @@ impl Poller {
 
         // Check for errors.
         for &ev in &eventlist {
-            // TODO: Once the data field is exposed in rustix, use that.
-            let data = unsafe { (*(&ev as *const kqueue::Event as *const libc::kevent)).data };
+            let data = ev.data();
 
             // Explanation for ignoring EPIPE: https://github.com/tokio-rs/mio/issues/582
             if (ev.flags().contains(kqueue::EventFlags::ERROR))
