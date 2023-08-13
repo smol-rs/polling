@@ -108,11 +108,6 @@ pub(super) struct Poller {
     /// whether pending updates should be run immediately or queued.
     polling: AtomicBool,
 
-    /// A list of completion packets.
-    ///
-    /// The IOCP writes to this list when it has new events.
-    packets: Mutex<Vec<OverlappedEntry<Packet>>>,
-
     /// The packet used to notify the poller.
     ///
     /// This is a special-case packet that is used to wake up the poller when it is waiting.
@@ -149,7 +144,6 @@ impl Poller {
             waitables: RwLock::new(HashMap::new()),
             pending_updates: ConcurrentQueue::bounded(1024),
             polling: AtomicBool::new(false),
-            packets: Mutex::new(Vec::with_capacity(1024)),
             notifier: Arc::pin(
                 PacketInner::Wakeup {
                     _pinned: PhantomPinned,
@@ -434,7 +428,6 @@ impl Poller {
 
         // Make sure we have a consistent timeout.
         let deadline = timeout.and_then(|timeout| Instant::now().checked_add(timeout));
-        let mut packets = lock!(self.packets.lock());
         let mut notified = false;
         events.packets.clear();
 
@@ -458,7 +451,7 @@ impl Poller {
             let timeout = deadline.map(|t| t.saturating_duration_since(Instant::now()));
 
             // Wait for I/O events.
-            let len = self.port.wait(&mut packets, timeout)?;
+            let len = self.port.wait(&mut events.completions, timeout)?;
             tracing::trace!(
                 handle = ?self.port,
                 res = ?len,
@@ -468,7 +461,7 @@ impl Poller {
             drop(guard);
 
             // Process all of the events.
-            for entry in packets.drain(..) {
+            for entry in events.completions.drain(..) {
                 let packet = entry.into_packet();
 
                 // Feed the event into the packet.
@@ -616,6 +609,9 @@ impl AsHandle for Poller {
 pub(super) struct Events {
     /// List of IOCP packets.
     packets: Vec<Event>,
+
+    /// Buffer for completion packets.
+    completions: Vec<OverlappedEntry<Packet>>,
 }
 
 unsafe impl Send for Events {}
@@ -625,6 +621,7 @@ impl Events {
     pub fn with_capacity(cap: usize) -> Events {
         Events {
             packets: Vec::with_capacity(cap),
+            completions: Vec::with_capacity(cap),
         }
     }
 
