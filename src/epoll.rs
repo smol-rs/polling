@@ -165,7 +165,7 @@ impl Poller {
                     Some(t) => {
                         let mut ts = TS_ZERO;
                         ts.tv_sec = t.as_secs() as _;
-                        ts.tv_nsec = (t.subsec_nanos() as libc::c_long).into();
+                        ts.tv_nsec = t.subsec_nanos() as _;
                         ts
                     }
                 },
