@@ -18,7 +18,7 @@
 //! # Examples
 //!
 //! ```no_run
-//! use polling::{Event, Poller};
+//! use polling::{Event, Events, Poller};
 //! use std::net::TcpListener;
 //!
 //! // Create a TCP listener.
@@ -33,13 +33,13 @@
 //! }
 //!
 //! // The event loop.
-//! let mut events = Vec::new();
+//! let mut events = Events::new();
 //! loop {
 //!     // Wait for at least one I/O event.
 //!     events.clear();
 //!     poller.wait(&mut events, None)?;
 //!
-//!     for ev in &events {
+//!     for ev in events.iter() {
 //!         if ev.key == key {
 //!             // Perform a non-blocking accept operation.
 //!             socket.accept()?;
@@ -65,8 +65,11 @@
     html_logo_url = "https://raw.githubusercontent.com/smol-rs/smol/master/assets/images/logo_fullsize_transparent.png"
 )]
 
+use std::cell::Cell;
 use std::fmt;
 use std::io;
+use std::marker::PhantomData;
+use std::num::NonZeroUsize;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::time::Duration;
@@ -131,6 +134,8 @@ pub struct Event {
     pub readable: bool,
     /// Can it do a write operation without blocking?
     pub writable: bool,
+    /// System-specific event data.
+    extra: sys::EventExtra,
 }
 
 /// The mode in which the poller waits for I/O events.
@@ -186,6 +191,7 @@ impl Event {
             key,
             readable: true,
             writable: true,
+            extra: sys::EventExtra::empty(),
         }
     }
 
@@ -197,6 +203,7 @@ impl Event {
             key,
             readable: true,
             writable: false,
+            extra: sys::EventExtra::empty(),
         }
     }
 
@@ -208,6 +215,7 @@ impl Event {
             key,
             readable: false,
             writable: true,
+            extra: sys::EventExtra::empty(),
         }
     }
 
@@ -219,14 +227,140 @@ impl Event {
             key,
             readable: false,
             writable: false,
+            extra: sys::EventExtra::empty(),
         }
+    }
+
+    /// Add interruption events to this interest.
+    ///
+    /// This usually indicates that the file descriptor or socket has been closed. It corresponds
+    /// to the `EPOLLHUP` and `POLLHUP` events.
+    ///
+    /// Interruption events are only supported on the following platforms:
+    ///
+    /// - `epoll`
+    /// - `poll`
+    /// - IOCP
+    /// - Event Ports
+    ///
+    /// On other platforms, this function is a no-op.
+    #[inline]
+    pub fn set_interrupt(&mut self, active: bool) {
+        self.extra.set_hup(active);
+    }
+
+    /// Add interruption events to this interest.
+    ///
+    /// This usually indicates that the file descriptor or socket has been closed. It corresponds
+    /// to the `EPOLLHUP` and `POLLHUP` events.
+    ///
+    /// Interruption events are only supported on the following platforms:
+    ///
+    /// - `epoll`
+    /// - `poll`
+    /// - IOCP
+    /// - Event Ports
+    ///
+    /// On other platforms, this function is a no-op.
+    #[inline]
+    pub fn with_interrupt(mut self) -> Self {
+        self.set_interrupt(true);
+        self
+    }
+
+    /// Add priority events to this interest.
+    ///
+    /// This indicates that there is urgent data to read. It corresponds to the `EPOLLPRI` and
+    /// `POLLPRI` events.
+    ///
+    /// Priority events are only supported on the following platforms:
+    ///
+    /// - `epoll`
+    /// - `poll`
+    /// - IOCP
+    /// - Event Ports
+    ///
+    /// On other platforms, this function is a no-op.
+    #[inline]
+    pub fn set_priority(&mut self, active: bool) {
+        self.extra.set_pri(active);
+    }
+
+    /// Add priority events to this interest.
+    ///
+    /// This indicates that there is urgent data to read. It corresponds to the `EPOLLPRI` and
+    /// `POLLPRI` events.
+    ///
+    /// Priority events are only supported on the following platforms:
+    ///
+    /// - `epoll`
+    /// - `poll`
+    /// - IOCP
+    /// - Event Ports
+    ///
+    /// On other platforms, this function is a no-op.
+    #[inline]
+    pub fn with_priority(mut self) -> Self {
+        self.set_priority(true);
+        self
+    }
+
+    /// Tell if this event is the result of an interrupt notification.
+    ///
+    /// This usually indicates that the file descriptor or socket has been closed. It corresponds
+    /// to the `EPOLLHUP` and `POLLHUP` events.
+    ///
+    /// Interruption events are only supported on the following platforms:
+    ///
+    /// - `epoll`
+    /// - `poll`
+    /// - IOCP
+    /// - Event Ports
+    ///
+    /// On other platforms, this always returns `false`.
+    #[inline]
+    pub fn is_interrupt(&self) -> bool {
+        self.extra.is_hup()
+    }
+
+    /// Tell if this event is the result of a priority notification.
+    ///
+    /// This indicates that there is urgent data to read. It corresponds to the `EPOLLPRI` and
+    /// `POLLPRI` events.
+    ///
+    /// Priority events are only supported on the following platforms:
+    ///
+    /// - `epoll`
+    /// - `poll`
+    /// - IOCP
+    /// - Event Ports
+    ///
+    /// On other platforms, this always returns `false`.
+    #[inline]
+    pub fn is_priority(&self) -> bool {
+        self.extra.is_pri()
+    }
+
+    /// Remove any extra information from this event.
+    #[inline]
+    pub fn clear_extra(&mut self) {
+        self.extra = sys::EventExtra::empty();
+    }
+
+    /// Get a version of this event with no extra information.
+    ///
+    /// This is useful for comparing events with `==`.
+    #[inline]
+    pub fn with_no_extra(mut self) -> Self {
+        self.clear_extra();
+        self
     }
 }
 
 /// Waits for I/O events.
 pub struct Poller {
     poller: sys::Poller,
-    events: Mutex<sys::Events>,
+    lock: Mutex<()>,
     notified: AtomicBool,
 }
 
@@ -244,7 +378,7 @@ impl Poller {
     pub fn new() -> io::Result<Poller> {
         Ok(Poller {
             poller: sys::Poller::new()?,
-            events: Mutex::new(sys::Events::new()),
+            lock: Mutex::new(()),
             notified: AtomicBool::new(false),
         })
     }
@@ -492,7 +626,7 @@ impl Poller {
     /// # Examples
     ///
     /// ```
-    /// use polling::{Event, Poller};
+    /// use polling::{Event, Events, Poller};
     /// use std::net::TcpListener;
     /// use std::time::Duration;
     ///
@@ -505,26 +639,24 @@ impl Poller {
     ///     poller.add(&socket, Event::all(key))?;
     /// }
     ///
-    /// let mut events = Vec::new();
+    /// let mut events = Events::new();
     /// let n = poller.wait(&mut events, Some(Duration::from_secs(1)))?;
     /// poller.delete(&socket)?;
     /// # std::io::Result::Ok(())
     /// ```
-    pub fn wait(&self, events: &mut Vec<Event>, timeout: Option<Duration>) -> io::Result<usize> {
+    pub fn wait(&self, events: &mut Events, timeout: Option<Duration>) -> io::Result<usize> {
         let span = tracing::trace_span!("Poller::wait", ?timeout);
         let _enter = span.enter();
 
-        if let Ok(mut lock) = self.events.try_lock() {
+        if let Ok(_lock) = self.lock.try_lock() {
             // Wait for I/O events.
-            self.poller.wait(&mut lock, timeout)?;
+            self.poller.wait(&mut events.events, timeout)?;
 
             // Clear the notification, if any.
             self.notified.swap(false, Ordering::SeqCst);
 
-            // Collect events.
-            let len = events.len();
-            events.extend(lock.iter().filter(|ev| ev.key != usize::MAX));
-            Ok(events.len() - len)
+            // Indicate number of events.
+            Ok(events.len())
         } else {
             tracing::trace!("wait: skipping because another thread is already waiting on I/O");
             Ok(0)
@@ -541,14 +673,14 @@ impl Poller {
     /// # Examples
     ///
     /// ```
-    /// use polling::Poller;
+    /// use polling::{Events, Poller};
     ///
     /// let poller = Poller::new()?;
     ///
     /// // Notify the poller.
     /// poller.notify()?;
     ///
-    /// let mut events = Vec::new();
+    /// let mut events = Events::new();
     /// poller.wait(&mut events, None)?; // wakes up immediately
     /// assert!(events.is_empty());
     /// # std::io::Result::Ok(())
@@ -565,6 +697,165 @@ impl Poller {
             self.poller.notify()?;
         }
         Ok(())
+    }
+}
+
+/// A container for I/O events.
+pub struct Events {
+    events: sys::Events,
+
+    /// This is intended to be used from &mut, thread locally, so we should make it !Sync
+    /// for consistency with the rest of the API.
+    _not_sync: PhantomData<Cell<()>>,
+}
+
+impl Default for Events {
+    #[inline]
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Events {
+    /// Create a new container for events, using the default capacity.
+    ///
+    /// The default capacity is 1024.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use polling::Events;
+    ///
+    /// let events = Events::new();
+    /// ```
+    #[inline]
+    pub fn new() -> Self {
+        // ESP-IDF has a low amount of RAM, so we use a smaller default capacity.
+        #[cfg(target_os = "espidf")]
+        const DEFAULT_CAPACITY: usize = 32;
+
+        #[cfg(not(target_os = "espidf"))]
+        const DEFAULT_CAPACITY: usize = 1024;
+
+        Self::with_capacity(NonZeroUsize::new(DEFAULT_CAPACITY).unwrap())
+    }
+
+    /// Create a new container with the provided capacity.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use polling::Events;
+    /// use std::num::NonZeroUsize;
+    ///
+    /// let capacity = NonZeroUsize::new(1024).unwrap();
+    /// let events = Events::with_capacity(capacity);
+    /// ```
+    #[inline]
+    pub fn with_capacity(capacity: NonZeroUsize) -> Self {
+        Self {
+            events: sys::Events::with_capacity(capacity.get()),
+            _not_sync: PhantomData,
+        }
+    }
+
+    /// Create a new iterator over I/O events.
+    ///
+    /// This returns all of the events in the container, excluding the notification event.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use polling::{Event, Events, Poller};
+    /// use std::time::Duration;
+    ///
+    /// # fn main() -> std::io::Result<()> {
+    /// let poller = Poller::new()?;
+    /// let mut events = Events::new();
+    ///
+    /// poller.wait(&mut events, Some(Duration::from_secs(0)))?;
+    /// assert!(events.iter().next().is_none());
+    /// # Ok(()) }
+    /// ```
+    #[inline]
+    pub fn iter(&self) -> impl Iterator<Item = Event> + '_ {
+        self.events.iter().filter(|ev| ev.key != NOTIFY_KEY)
+    }
+
+    /// Delete all of the events in the container.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use polling::{Event, Events, Poller};
+    ///
+    /// # fn main() -> std::io::Result<()> {
+    /// let poller = Poller::new()?;
+    /// let mut events = Events::new();
+    ///
+    /// /* register some sources */
+    ///
+    /// poller.wait(&mut events, None)?;
+    ///
+    /// events.clear();
+    /// # Ok(()) }
+    /// ```
+    #[inline]
+    pub fn clear(&mut self) {
+        self.events.clear();
+    }
+
+    /// Returns the number of events in the container.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use polling::Events;
+    ///
+    /// let events = Events::new();
+    /// assert_eq!(events.len(), 0);
+    /// ```
+    #[inline]
+    pub fn len(&self) -> usize {
+        self.iter().count()
+    }
+
+    /// Returns `true` if the container contains no events.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use polling::Events;
+    ///
+    /// let events = Events::new();
+    /// assert!(events.is_empty());
+    /// ```
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    /// Get the total capacity of the list.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use polling::Events;
+    /// use std::num::NonZeroUsize;
+    ///
+    /// let cap = NonZeroUsize::new(10).unwrap();
+    /// let events = Events::with_capacity(std::num::NonZeroUsize::new(10).unwrap());
+    /// assert_eq!(events.capacity(), cap);
+    /// ```
+    #[inline]
+    pub fn capacity(&self) -> NonZeroUsize {
+        NonZeroUsize::new(self.events.capacity()).unwrap()
+    }
+}
+
+impl fmt::Debug for Events {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("Events { .. }")
     }
 }
 
@@ -711,4 +1002,18 @@ cfg_if! {
 #[allow(unused)]
 fn unsupported_error(err: impl Into<String>) -> io::Error {
     io::Error::new(io::ErrorKind::Unsupported, err.into())
+}
+
+fn _assert_send_and_sync() {
+    fn assert_send<T: Send>() {}
+    fn assert_sync<T: Sync>() {}
+
+    assert_send::<Poller>();
+    assert_sync::<Poller>();
+
+    assert_send::<Event>();
+    assert_sync::<Event>();
+
+    assert_send::<Events>();
+    // Events can be !Sync
 }

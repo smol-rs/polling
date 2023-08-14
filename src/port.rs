@@ -181,18 +181,73 @@ unsafe impl Send for Events {}
 
 impl Events {
     /// Creates an empty list.
-    pub fn new() -> Events {
+    pub fn with_capacity(cap: usize) -> Events {
         Events {
-            list: Vec::with_capacity(1024),
+            list: Vec::with_capacity(cap),
         }
     }
 
     /// Iterates over I/O events.
     pub fn iter(&self) -> impl Iterator<Item = Event> + '_ {
-        self.list.iter().map(|ev| Event {
-            key: ev.userdata() as usize,
-            readable: PollFlags::from_bits_truncate(ev.events() as _).intersects(read_flags()),
-            writable: PollFlags::from_bits_truncate(ev.events() as _).intersects(write_flags()),
+        self.list.iter().map(|ev| {
+            let flags = PollFlags::from_bits_truncate(ev.events() as _);
+            Event {
+                key: ev.userdata() as usize,
+                readable: flags.intersects(read_flags()),
+                writable: flags.intersects(write_flags()),
+                extra: EventExtra { flags },
+            }
         })
+    }
+
+    /// Clear the list.
+    pub fn clear(&mut self) {
+        self.list.clear();
+    }
+
+    /// Get the capacity of the list.
+    pub fn capacity(&self) -> usize {
+        self.list.capacity()
+    }
+}
+
+/// Extra information associated with an event.
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub struct EventExtra {
+    /// Flags associated with this event.
+    flags: PollFlags,
+}
+
+impl EventExtra {
+    /// Create a new, empty version of this struct.
+    #[inline]
+    pub fn empty() -> EventExtra {
+        EventExtra {
+            flags: PollFlags::empty(),
+        }
+    }
+
+    /// Set the interrupt flag.
+    #[inline]
+    pub fn set_hup(&mut self, value: bool) {
+        self.flags.set(PollFlags::HUP, value);
+    }
+
+    /// Set the priority flag.
+    #[inline]
+    pub fn set_pri(&mut self, value: bool) {
+        self.flags.set(PollFlags::PRI, value);
+    }
+
+    /// Is this an interrupt event?
+    #[inline]
+    pub fn is_hup(&self) -> bool {
+        self.flags.contains(PollFlags::HUP)
+    }
+
+    /// Is this a priority event?
+    #[inline]
+    pub fn is_pri(&self) -> bool {
+        self.flags.contains(PollFlags::PRI)
     }
 }

@@ -31,7 +31,7 @@ pub trait PollerKqueueExt<F: Filter>: PollerSealed {
     /// # Examples
     ///
     /// ```no_run
-    /// use polling::{Poller, PollMode};
+    /// use polling::{Events, Poller, PollMode};
     /// use polling::os::kqueue::{Filter, PollerKqueueExt, Signal};
     ///
     /// let poller = Poller::new().unwrap();
@@ -40,7 +40,7 @@ pub trait PollerKqueueExt<F: Filter>: PollerSealed {
     /// poller.add_filter(Signal(libc::SIGINT), 0, PollMode::Oneshot).unwrap();
     ///
     /// // Wait for the signal.
-    /// let mut events = vec![];
+    /// let mut events = Events::new();
     /// poller.wait(&mut events, None).unwrap();
     /// # let _ = events;
     /// ```
@@ -54,7 +54,7 @@ pub trait PollerKqueueExt<F: Filter>: PollerSealed {
     /// # Examples
     ///
     /// ```no_run
-    /// use polling::{Poller, PollMode};
+    /// use polling::{Events, Poller, PollMode};
     /// use polling::os::kqueue::{Filter, PollerKqueueExt, Signal};
     ///
     /// let poller = Poller::new().unwrap();
@@ -66,7 +66,7 @@ pub trait PollerKqueueExt<F: Filter>: PollerSealed {
     /// poller.modify_filter(Signal(libc::SIGINT), 1, PollMode::Oneshot).unwrap();
     ///
     /// // Wait for the signal.
-    /// let mut events = vec![];
+    /// let mut events = Events::new();
     /// poller.wait(&mut events, None).unwrap();
     /// # let _ = events;
     /// ```
@@ -183,7 +183,12 @@ pub enum ProcessOps {
 
 impl<'a> Process<'a> {
     /// Monitor a child process.
-    pub fn new(child: &'a Child, ops: ProcessOps) -> Self {
+    ///
+    /// # Safety
+    ///
+    /// Once registered into the `Poller`, the `Child` object must outlive this filter's
+    /// registration into the poller.
+    pub unsafe fn new(child: &'a Child, ops: ProcessOps) -> Self {
         Self { child, ops }
     }
 }

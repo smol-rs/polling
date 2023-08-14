@@ -59,11 +59,7 @@ impl Poller {
 
             poller.add(
                 poller.event_fd.as_raw_fd(),
-                Event {
-                    key: crate::NOTIFY_KEY,
-                    readable: true,
-                    writable: false,
-                },
+                Event::readable(crate::NOTIFY_KEY),
                 PollMode::Oneshot,
             )?;
         }
@@ -106,7 +102,7 @@ impl Poller {
             &self.epoll_fd,
             unsafe { rustix::fd::BorrowedFd::borrow_raw(fd) },
             epoll::EventData::new_u64(ev.key as u64),
-            epoll_flags(&ev, mode),
+            epoll_flags(&ev, mode) | ev.extra.flags,
         )?;
 
         Ok(())
@@ -126,7 +122,7 @@ impl Poller {
             &self.epoll_fd,
             fd,
             epoll::EventData::new_u64(ev.key as u64),
-            epoll_flags(&ev, mode),
+            epoll_flags(&ev, mode) | ev.extra.flags,
         )?;
 
         Ok(())
@@ -177,11 +173,7 @@ impl Poller {
             // Set interest in timerfd.
             self.modify(
                 timer_fd.as_fd(),
-                Event {
-                    key: crate::NOTIFY_KEY,
-                    readable: true,
-                    writable: false,
-                },
+                Event::readable(crate::NOTIFY_KEY),
                 PollMode::Oneshot,
             )?;
         }
@@ -213,11 +205,7 @@ impl Poller {
         let _ = read(&self.event_fd, &mut buf);
         self.modify(
             self.event_fd.as_fd(),
-            Event {
-                key: crate::NOTIFY_KEY,
-                readable: true,
-                writable: false,
-            },
+            Event::readable(crate::NOTIFY_KEY),
             PollMode::Oneshot,
         )?;
         Ok(())
@@ -308,9 +296,9 @@ unsafe impl Send for Events {}
 
 impl Events {
     /// Creates an empty list.
-    pub fn new() -> Events {
+    pub fn with_capacity(cap: usize) -> Events {
         Events {
-            list: epoll::EventVec::with_capacity(1024),
+            list: epoll::EventVec::with_capacity(cap),
         }
     }
 
@@ -322,7 +310,58 @@ impl Events {
                 key: ev.data.u64() as usize,
                 readable: flags.intersects(read_flags()),
                 writable: flags.intersects(write_flags()),
+                extra: EventExtra { flags },
             }
         })
+    }
+
+    /// Clear the list.
+    pub fn clear(&mut self) {
+        self.list.clear();
+    }
+
+    /// Get the capacity of the list.
+    pub fn capacity(&self) -> usize {
+        self.list.capacity()
+    }
+}
+
+/// Extra information about this event.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EventExtra {
+    flags: epoll::EventFlags,
+}
+
+impl EventExtra {
+    /// Create an empty version of the data.
+    #[inline]
+    pub fn empty() -> EventExtra {
+        EventExtra {
+            flags: epoll::EventFlags::empty(),
+        }
+    }
+
+    /// Add the interrupt flag to this event.
+    #[inline]
+    pub fn set_hup(&mut self, active: bool) {
+        self.flags.set(epoll::EventFlags::HUP, active);
+    }
+
+    /// Add the priority flag to this event.
+    #[inline]
+    pub fn set_pri(&mut self, active: bool) {
+        self.flags.set(epoll::EventFlags::PRI, active);
+    }
+
+    /// Tell if the interrupt flag is set.
+    #[inline]
+    pub fn is_hup(&self) -> bool {
+        self.flags.contains(epoll::EventFlags::HUP)
+    }
+
+    /// Tell if the priority flag is set.
+    #[inline]
+    pub fn is_pri(&self) -> bool {
+        self.flags.contains(epoll::EventFlags::PRI)
     }
 }

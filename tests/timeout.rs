@@ -1,12 +1,12 @@
 use std::io;
 use std::time::{Duration, Instant};
 
-use polling::Poller;
+use polling::{Events, Poller};
 
 #[test]
 fn twice() -> io::Result<()> {
     let poller = Poller::new()?;
-    let mut events = Vec::new();
+    let mut events = Events::new();
 
     for _ in 0..2 {
         let start = Instant::now();
@@ -22,7 +22,7 @@ fn twice() -> io::Result<()> {
 #[test]
 fn non_blocking() -> io::Result<()> {
     let poller = Poller::new()?;
-    let mut events = Vec::new();
+    let mut events = Events::new();
 
     for _ in 0..100 {
         poller.wait(&mut events, Some(Duration::from_secs(0)))?;

@@ -6,7 +6,7 @@ use std::io::{self, prelude::*};
 use std::net::{TcpListener, TcpStream};
 use std::time::Duration;
 
-use polling::{Event, PollMode, Poller};
+use polling::{Event, Events, PollMode, Poller};
 
 #[test]
 fn level_triggered() {
@@ -34,12 +34,16 @@ fn level_triggered() {
     writer.write_all(&data).unwrap();
 
     // A "readable" notification should be delivered.
-    let mut events = Vec::new();
+    let mut events = Events::new();
     poller
         .wait(&mut events, Some(Duration::from_secs(10)))
         .unwrap();
 
-    assert_eq!(events, [Event::readable(reader_token)]);
+    assert_eq!(events.len(), 1);
+    assert_eq!(
+        events.iter().next().unwrap().with_no_extra(),
+        Event::readable(reader_token)
+    );
 
     // If we read some of the data, the notification should still be available.
     reader.read_exact(&mut [0; 3]).unwrap();
@@ -47,7 +51,12 @@ fn level_triggered() {
     poller
         .wait(&mut events, Some(Duration::from_secs(10)))
         .unwrap();
-    assert_eq!(events, [Event::readable(reader_token)]);
+
+    assert_eq!(events.len(), 1);
+    assert_eq!(
+        events.iter().next().unwrap().with_no_extra(),
+        Event::readable(reader_token)
+    );
 
     // If we read the rest of the data, the notification should be gone.
     reader.read_exact(&mut [0; 2]).unwrap();
@@ -56,7 +65,7 @@ fn level_triggered() {
         .wait(&mut events, Some(Duration::from_secs(0)))
         .unwrap();
 
-    assert_eq!(events, []);
+    assert!(events.is_empty());
 
     // After modifying the stream and sending more data, it should be oneshot.
     poller
@@ -71,7 +80,11 @@ fn level_triggered() {
         .wait(&mut events, Some(Duration::from_secs(10)))
         .unwrap();
 
-    assert_eq!(events, [Event::readable(reader_token)]);
+    assert_eq!(events.len(), 1);
+    assert_eq!(
+        events.iter().next().unwrap().with_no_extra(),
+        Event::readable(reader_token)
+    );
 
     // After reading, the notification should vanish.
     reader.read(&mut [0; 5]).unwrap();
@@ -80,7 +93,7 @@ fn level_triggered() {
         .wait(&mut events, Some(Duration::from_secs(0)))
         .unwrap();
 
-    assert_eq!(events, []);
+    assert!(events.is_empty());
 }
 
 #[test]
@@ -123,12 +136,16 @@ fn edge_triggered() {
     writer.write_all(&data).unwrap();
 
     // A "readable" notification should be delivered.
-    let mut events = Vec::new();
+    let mut events = Events::new();
     poller
         .wait(&mut events, Some(Duration::from_secs(10)))
         .unwrap();
 
-    assert_eq!(events, [Event::readable(reader_token)]);
+    assert_eq!(events.len(), 1);
+    assert_eq!(
+        events.iter().next().unwrap().with_no_extra(),
+        Event::readable(reader_token)
+    );
 
     // If we read some of the data, the notification should not still be available.
     reader.read_exact(&mut [0; 3]).unwrap();
@@ -136,7 +153,7 @@ fn edge_triggered() {
     poller
         .wait(&mut events, Some(Duration::from_secs(0)))
         .unwrap();
-    assert_eq!(events, []);
+    assert!(events.is_empty());
 
     // If we write more data, a notification should be delivered.
     writer.write_all(&data).unwrap();
@@ -144,7 +161,12 @@ fn edge_triggered() {
     poller
         .wait(&mut events, Some(Duration::from_secs(10)))
         .unwrap();
-    assert_eq!(events, [Event::readable(reader_token)]);
+
+    assert_eq!(events.len(), 1);
+    assert_eq!(
+        events.iter().next().unwrap().with_no_extra(),
+        Event::readable(reader_token)
+    );
 
     // After modifying the stream and sending more data, it should be oneshot.
     poller
@@ -157,7 +179,11 @@ fn edge_triggered() {
         .wait(&mut events, Some(Duration::from_secs(10)))
         .unwrap();
 
-    assert_eq!(events, [Event::readable(reader_token)]);
+    assert_eq!(events.len(), 1);
+    assert_eq!(
+        events.iter().next().unwrap().with_no_extra(),
+        Event::readable(reader_token)
+    );
 }
 
 #[test]
@@ -206,12 +232,16 @@ fn edge_oneshot_triggered() {
     writer.write_all(&data).unwrap();
 
     // A "readable" notification should be delivered.
-    let mut events = Vec::new();
+    let mut events = Events::new();
     poller
         .wait(&mut events, Some(Duration::from_secs(10)))
         .unwrap();
 
-    assert_eq!(events, [Event::readable(reader_token)]);
+    assert_eq!(events.len(), 1);
+    assert_eq!(
+        events.iter().next().unwrap().with_no_extra(),
+        Event::readable(reader_token)
+    );
 
     // If we read some of the data, the notification should not still be available.
     reader.read_exact(&mut [0; 3]).unwrap();
@@ -219,7 +249,7 @@ fn edge_oneshot_triggered() {
     poller
         .wait(&mut events, Some(Duration::from_secs(0)))
         .unwrap();
-    assert_eq!(events, []);
+    assert!(events.is_empty());
 
     // If we modify to re-enable the notification, it should be delivered.
     poller
@@ -233,7 +263,12 @@ fn edge_oneshot_triggered() {
     poller
         .wait(&mut events, Some(Duration::from_secs(0)))
         .unwrap();
-    assert_eq!(events, [Event::readable(reader_token)]);
+
+    assert_eq!(events.len(), 1);
+    assert_eq!(
+        events.iter().next().unwrap().with_no_extra(),
+        Event::readable(reader_token)
+    );
 }
 
 fn tcp_pair() -> io::Result<(TcpStream, TcpStream)> {

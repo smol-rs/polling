@@ -4,14 +4,14 @@ use std::thread;
 use std::time::Duration;
 
 use easy_parallel::Parallel;
-use polling::{Event, Poller};
+use polling::{Event, Events, Poller};
 
 #[test]
 fn concurrent_add() -> io::Result<()> {
     let (reader, mut writer) = tcp_pair()?;
     let poller = Poller::new()?;
 
-    let mut events = Vec::new();
+    let mut events = Events::new();
 
     let result = Parallel::new()
         .add(|| {
@@ -33,7 +33,11 @@ fn concurrent_add() -> io::Result<()> {
     poller.delete(&reader)?;
     result?;
 
-    assert_eq!(events, [Event::readable(0)]);
+    assert_eq!(events.len(), 1);
+    assert_eq!(
+        events.iter().next().unwrap().with_no_extra(),
+        Event::readable(0)
+    );
 
     Ok(())
 }
@@ -46,7 +50,7 @@ fn concurrent_modify() -> io::Result<()> {
         poller.add(&reader, Event::none(0))?;
     }
 
-    let mut events = Vec::new();
+    let mut events = Events::new();
 
     Parallel::new()
         .add(|| {
@@ -63,7 +67,11 @@ fn concurrent_modify() -> io::Result<()> {
         .into_iter()
         .collect::<io::Result<()>>()?;
 
-    assert_eq!(events, [Event::readable(0)]);
+    assert_eq!(events.len(), 1);
+    assert_eq!(
+        events.iter().next().unwrap().with_no_extra(),
+        Event::readable(0)
+    );
 
     Ok(())
 }

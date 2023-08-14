@@ -1,4 +1,4 @@
-use polling::{Event, Poller};
+use polling::{Event, Events, Poller};
 use std::io::{self, Write};
 use std::net::{TcpListener, TcpStream};
 use std::time::Duration;
@@ -12,7 +12,7 @@ fn basic_io() {
     }
 
     // Nothing should be available at first.
-    let mut events = vec![];
+    let mut events = Events::new();
     assert_eq!(
         poller
             .wait(&mut events, Some(Duration::from_secs(0)))
@@ -29,8 +29,12 @@ fn basic_io() {
             .unwrap(),
         1
     );
-    assert_eq!(&*events, &[Event::readable(1)]);
 
+    assert_eq!(events.len(), 1);
+    assert_eq!(
+        events.iter().next().unwrap().with_no_extra(),
+        Event::readable(1)
+    );
     poller.delete(&read).unwrap();
 }
 

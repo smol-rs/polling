@@ -1,12 +1,12 @@
 use std::io;
 use std::time::{Duration, Instant};
 
-use polling::Poller;
+use polling::{Events, Poller};
 
 #[test]
 fn below_ms() -> io::Result<()> {
     let poller = Poller::new()?;
-    let mut events = Vec::new();
+    let mut events = Events::new();
 
     let dur = Duration::from_micros(100);
     let margin = Duration::from_micros(500);
@@ -42,7 +42,7 @@ fn below_ms() -> io::Result<()> {
 #[test]
 fn above_ms() -> io::Result<()> {
     let poller = Poller::new()?;
-    let mut events = Vec::new();
+    let mut events = Events::new();
 
     let dur = Duration::from_micros(3_100);
     let margin = Duration::from_micros(500);

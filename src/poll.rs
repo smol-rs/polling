@@ -268,10 +268,12 @@ impl Poller {
                     let poll_fd = &mut fds.poll_fds[fd_data.poll_fds_index];
                     if !poll_fd.revents().is_empty() {
                         // Store event
+                        let revents = poll_fd.revents();
                         events.inner.push(Event {
                             key: fd_data.key,
-                            readable: poll_fd.revents().intersects(read_events()),
-                            writable: poll_fd.revents().intersects(write_events()),
+                            readable: revents.intersects(read_events()),
+                            writable: revents.intersects(write_events()),
+                            extra: EventExtra { flags: revents },
                         });
                         // Remove interest if necessary
                         if fd_data.remove {
@@ -364,13 +366,66 @@ pub struct Events {
 
 impl Events {
     /// Creates an empty list.
-    pub fn new() -> Events {
-        Self { inner: Vec::new() }
+    pub fn with_capacity(cap: usize) -> Events {
+        Self {
+            inner: Vec::with_capacity(cap),
+        }
     }
 
     /// Iterates over I/O events.
     pub fn iter(&self) -> impl Iterator<Item = Event> + '_ {
         self.inner.iter().copied()
+    }
+
+    /// Clear the list.
+    pub fn clear(&mut self) {
+        self.inner.clear();
+    }
+
+    /// Get the capacity of the list.
+    pub fn capacity(&self) -> usize {
+        self.inner.capacity()
+    }
+}
+
+/// Extra information associated with an event.
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub struct EventExtra {
+    /// Flags associated with this event.
+    flags: PollFlags,
+}
+
+impl EventExtra {
+    /// Creates an empty set of extra information.
+    #[inline]
+    pub fn empty() -> Self {
+        Self {
+            flags: PollFlags::empty(),
+        }
+    }
+
+    /// Set the interrupt flag.
+    #[inline]
+    pub fn set_hup(&mut self, value: bool) {
+        self.flags.set(PollFlags::HUP, value);
+    }
+
+    /// Set the priority flag.
+    #[inline]
+    pub fn set_pri(&mut self, value: bool) {
+        self.flags.set(PollFlags::PRI, value);
+    }
+
+    /// Is this an interrupt event?
+    #[inline]
+    pub fn is_hup(&self) -> bool {
+        self.flags.contains(PollFlags::HUP)
+    }
+
+    /// Is this a priority event?
+    #[inline]
+    pub fn is_pri(&self) -> bool {
+        self.flags.contains(PollFlags::PRI)
     }
 }
 

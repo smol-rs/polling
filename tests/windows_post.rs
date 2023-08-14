@@ -3,7 +3,7 @@
 #![cfg(windows)]
 
 use polling::os::iocp::{CompletionPacket, PollerIocpExt};
-use polling::{Event, Poller};
+use polling::{Event, Events, Poller};
 
 use std::sync::Arc;
 use std::thread;
@@ -12,7 +12,7 @@ use std::time::Duration;
 #[test]
 fn post_smoke() {
     let poller = Poller::new().unwrap();
-    let mut events = Vec::new();
+    let mut events = Events::new();
 
     poller
         .post(CompletionPacket::new(Event::readable(1)))
@@ -20,13 +20,16 @@ fn post_smoke() {
     poller.wait(&mut events, None).unwrap();
 
     assert_eq!(events.len(), 1);
-    assert_eq!(events[0], Event::readable(1));
+    assert_eq!(
+        events.iter().next().unwrap().with_no_extra(),
+        Event::readable(1)
+    );
 }
 
 #[test]
 fn post_multithread() {
     let poller = Arc::new(Poller::new().unwrap());
-    let mut events = Vec::new();
+    let mut events = Events::new();
 
     thread::spawn({
         let poller = Arc::clone(&poller);
@@ -47,7 +50,11 @@ fn post_multithread() {
             .unwrap();
 
         assert_eq!(events.len(), 1);
-        assert_eq!(events.pop(), Some(Event::writable(i)));
+        assert_eq!(
+            events.iter().next().unwrap().with_no_extra(),
+            Event::writable(i)
+        );
+        events.clear();
     }
 
     poller

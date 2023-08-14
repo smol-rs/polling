@@ -66,7 +66,7 @@ impl AfdPollInfo {
     }
 }
 
-#[derive(Default, Copy, Clone)]
+#[derive(Default, Copy, Clone, PartialEq, Eq)]
 #[repr(transparent)]
 pub(super) struct AfdPollMask(u32);
 
@@ -89,6 +89,44 @@ impl AfdPollMask {
     pub(crate) fn intersects(self, other: AfdPollMask) -> bool {
         (self.0 & other.0) != 0
     }
+
+    /// Sets a flag.
+    pub(crate) fn set(&mut self, other: AfdPollMask, value: bool) {
+        if value {
+            *self |= other;
+        } else {
+            self.0 &= !other.0;
+        }
+    }
+}
+
+impl fmt::Debug for AfdPollMask {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        const FLAGS: &[(&str, AfdPollMask)] = &[
+            ("RECEIVE", AfdPollMask::RECEIVE),
+            ("RECEIVE_EXPEDITED", AfdPollMask::RECEIVE_EXPEDITED),
+            ("SEND", AfdPollMask::SEND),
+            ("DISCONNECT", AfdPollMask::DISCONNECT),
+            ("ABORT", AfdPollMask::ABORT),
+            ("LOCAL_CLOSE", AfdPollMask::LOCAL_CLOSE),
+            ("ACCEPT", AfdPollMask::ACCEPT),
+            ("CONNECT_FAIL", AfdPollMask::CONNECT_FAIL),
+        ];
+
+        let mut first = true;
+        for (name, value) in FLAGS {
+            if self.intersects(*value) {
+                if !first {
+                    write!(f, " | ")?;
+                }
+
+                first = false;
+                write!(f, "{}", name)?;
+            }
+        }
+
+        Ok(())
+    }
 }
 
 impl ops::BitOr for AfdPollMask {
@@ -102,6 +140,20 @@ impl ops::BitOr for AfdPollMask {
 impl ops::BitOrAssign for AfdPollMask {
     fn bitor_assign(&mut self, rhs: Self) {
         self.0 |= rhs.0;
+    }
+}
+
+impl ops::BitAnd for AfdPollMask {
+    type Output = Self;
+
+    fn bitand(self, rhs: Self) -> Self {
+        AfdPollMask(self.0 & rhs.0)
+    }
+}
+
+impl ops::BitAndAssign for AfdPollMask {
+    fn bitand_assign(&mut self, rhs: Self) {
+        self.0 &= rhs.0;
     }
 }
 
