@@ -1,6 +1,6 @@
 //! Functionality that is only availale for IOCP-based platforms.
 
-pub use crate::sys::CompletionPacket;
+use crate::sys::{IoStatusBlock, Packet, PacketInner};
 
 use super::__private::PollerSealed;
 use crate::{Event, PollMode, Poller};
@@ -8,6 +8,23 @@ use crate::{Event, PollMode, Poller};
 use std::io;
 use std::os::windows::io::{AsRawHandle, RawHandle};
 use std::os::windows::prelude::{AsHandle, BorrowedHandle};
+use std::sync::Arc;
+
+/// A packet used to wake up the poller with an event.
+#[derive(Debug, Clone)]
+pub struct CompletionPacket(pub(crate) Packet);
+
+impl CompletionPacket {
+    /// Create a new completion packet with a custom event.
+    pub fn new(event: Event) -> Self {
+        Self(Arc::pin(IoStatusBlock::from(PacketInner::Custom { event })))
+    }
+
+    /// Get the event associated with this packet.
+    pub fn event(&self) -> &Event {
+        self.0.as_ref().event()
+    }
+}
 
 /// Extension trait for the [`Poller`] type that provides functionality specific to IOCP-based
 /// platforms.

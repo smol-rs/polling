@@ -28,8 +28,10 @@
 mod afd;
 mod port;
 
-use afd::{base_socket, Afd, AfdPollInfo, AfdPollMask, HasAfdInfo, IoStatusBlock};
+use afd::{base_socket, Afd, AfdPollInfo, AfdPollMask, HasAfdInfo};
 use port::{IoCompletionPort, OverlappedEntry};
+
+pub(crate) use afd::IoStatusBlock;
 
 use windows_sys::Win32::Foundation::{
     BOOLEAN, ERROR_INVALID_HANDLE, ERROR_IO_PENDING, STATUS_CANCELLED,
@@ -497,7 +499,7 @@ impl Poller {
     }
 
     /// Push an IOCP packet into the queue.
-    pub(super) fn post(&self, packet: CompletionPacket) -> io::Result<()> {
+    pub(super) fn post(&self, packet: crate::os::iocp::CompletionPacket) -> io::Result<()> {
         self.port.post(0, 0, packet.0)
     }
 
@@ -682,38 +684,17 @@ impl EventExtra {
     }
 }
 
-/// A packet used to wake up the poller with an event.
-#[derive(Debug, Clone)]
-pub struct CompletionPacket(Packet);
-
-impl CompletionPacket {
-    /// Create a new completion packet with a custom event.
-    pub fn new(event: Event) -> Self {
-        Self(Arc::pin(IoStatusBlock::from(PacketInner::Custom { event })))
-    }
-
-    /// Get the event associated with this packet.
-    pub fn event(&self) -> &Event {
-        let data = self.0.as_ref().data().project_ref();
-
-        match data {
-            PacketInnerProj::Custom { event } => event,
-            _ => unreachable!(),
-        }
-    }
-}
-
 /// The type of our completion packet.
 ///
 /// It needs to be pinned, since it contains data that is expected by IOCP not to be moved.
-type Packet = Pin<Arc<PacketUnwrapped>>;
+pub(crate) type Packet = Pin<Arc<PacketUnwrapped>>;
 type PacketUnwrapped = IoStatusBlock<PacketInner>;
 
 pin_project! {
     /// The inner type of the packet.
     #[project_ref = PacketInnerProj]
     #[project = PacketInnerProjMut]
-    enum PacketInner {
+    pub(crate) enum PacketInner {
         // A packet for a socket.
         Socket {
             // The AFD packet state.
@@ -769,6 +750,16 @@ impl HasAfdInfo for PacketInner {
 }
 
 impl PacketUnwrapped {
+    /// If this is an event packet, get the event.
+    pub(crate) fn event(self: Pin<&Self>) -> &Event {
+        let data = self.data().project_ref();
+
+        match data {
+            PacketInnerProj::Custom { event } => event,
+            _ => unreachable!(),
+        }
+    }
+
     /// Set the new events that this socket is waiting on.
     ///
     /// Returns `true` if we need to be updated.
@@ -1085,7 +1076,7 @@ impl PacketUnwrapped {
 
 /// Per-socket state.
 #[derive(Debug)]
-struct SocketState {
+pub(crate) struct SocketState {
     /// The raw socket handle.
     socket: RawSocket,
 
@@ -1130,7 +1121,7 @@ enum SocketStatus {
 
 /// Per-waitable handle state.
 #[derive(Debug)]
-struct WaitableState {
+pub(crate) struct WaitableState {
     /// The handle that this state is for.
     handle: RawHandle,
 
