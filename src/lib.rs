@@ -412,10 +412,10 @@ impl Poller {
     /// the next event of the same kind.
     ///
     /// It is possible to register interest in the same file descriptor or socket using multiple
-    /// separate [`Poller`] instances. When one event is delivered, all [`Poller`] instances will
-    /// be notified. The only exception is `Oneshot` mode. Due to underlying platform limitations,
-    /// it is possible for the same event to be reported on multiple [`Poller`] instances in
-    /// `Oneshot` mode.
+    /// separate [`Poller`] instances. When the event is delivered, one or more [`Poller`]s are
+    /// notified with that event. The exact number of [`Poller`]s notified depends on the
+    /// underlying platform. When registering multiple sources into one event, the user should
+    /// be careful to accommodate for events lost to other pollers.
     ///
     /// One may also register one source into other, non-`polling` event loops, like GLib's
     /// context. While the plumbing will vary from platform to platform, in general the [`Poller`]
