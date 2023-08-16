@@ -32,6 +32,7 @@ use afd::{base_socket, Afd, AfdPollInfo, AfdPollMask, HasAfdInfo};
 use port::{IoCompletionPort, OverlappedEntry};
 
 pub(crate) use afd::IoStatusBlock;
+pub(crate) use port::{Completion, CompletionHandle};
 
 use windows_sys::Win32::Foundation::{
     BOOLEAN, ERROR_INVALID_HANDLE, ERROR_IO_PENDING, STATUS_CANCELLED,

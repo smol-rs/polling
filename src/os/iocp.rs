@@ -1,6 +1,6 @@
 //! Functionality that is only availale for IOCP-based platforms.
 
-use crate::sys::{IoStatusBlock, Packet, PacketInner};
+use crate::sys::{Completion, CompletionHandle, IoStatusBlock, Packet, PacketInner};
 
 use super::__private::PollerSealed;
 use crate::{Event, PollMode, Poller};
@@ -23,6 +23,28 @@ impl CompletionPacket {
     /// Get the event associated with this packet.
     pub fn event(&self) -> &Event {
         self.0.as_ref().event()
+    }
+
+    /// Get a pointer to the underlying I/O status block.
+    ///
+    /// This pointer can be used as an `OVERLAPPED` block in Windows APIs. Calling this function
+    /// marks the block as "in use". Trying to call this function again before the operation is
+    /// indicated as complete by the poller will result in a panic.
+    pub fn as_ptr(&mut self) -> *mut () {
+        if !self.0.as_ref().get().try_lock() {
+            panic!("completion packet is already in use");
+        }
+
+        self.0.as_ref().get_ref() as *const _ as *const () as *mut ()
+    }
+
+    /// Cancel the in flight operation.
+    ///
+    /// # Safety
+    ///
+    /// The packet must be in flight and the operation must be cancelled already.
+    pub unsafe fn cancel(&mut self) {
+        self.0.as_ref().get().unlock();
     }
 }
 
