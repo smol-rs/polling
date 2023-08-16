@@ -411,6 +411,17 @@ impl Poller {
     /// [`modify()`][`Poller::modify()`] again after an event is delivered if we're interested in
     /// the next event of the same kind.
     ///
+    /// It is possible to register interest in the same file descriptor or socket using multiple
+    /// separate [`Poller`] instances. When the event is delivered, one or more [`Poller`]s are
+    /// notified with that event. The exact number of [`Poller`]s notified depends on the
+    /// underlying platform. When registering multiple sources into one event, the user should
+    /// be careful to accommodate for events lost to other pollers.
+    ///
+    /// One may also register one source into other, non-`polling` event loops, like GLib's
+    /// context. While the plumbing will vary from platform to platform, in general the [`Poller`]
+    /// will act as if the source was registered with another [`Poller`], with the same caveats
+    /// as above.
+    ///
     /// # Safety
     ///
     /// The source must be [`delete()`]d from this `Poller` before it is dropped.
