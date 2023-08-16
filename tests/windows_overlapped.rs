@@ -5,10 +5,11 @@
 use polling::os::iocp::CompletionPacket;
 use polling::{Event, Events, Poller};
 
-use std::os::windows::io::AsRawHandle;
-use std::{fs, io};
+use std::io;
+use std::os::windows::ffi::OsStrExt;
+use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
 
-use windows_sys::Win32::{Storage::FileSystem as wfs, System::IO as wio};
+use windows_sys::Win32::{Foundation as wf, Storage::FileSystem as wfs, System::IO as wio};
 
 #[test]
 fn win32_file_io() {
@@ -23,16 +24,35 @@ fn win32_file_io() {
     // Open a file for writing.
     let dir = tempfile::tempdir().unwrap();
     let file_path = dir.path().join("test.txt");
-    let file = fs::OpenOptions::new()
-        .create(true)
-        .write(true)
-        .open(&file_path)
-        .unwrap();
+    let fname = file_path
+        .as_os_str()
+        .encode_wide()
+        .chain(Some(0))
+        .collect::<Vec<_>>();
+    let file_handle = unsafe {
+        let raw_handle = wfs::CreateFileW(
+            fname.as_ptr(),
+            wf::GENERIC_WRITE,
+            0,
+            std::ptr::null_mut(),
+            wfs::CREATE_ALWAYS,
+            wfs::FILE_FLAG_OVERLAPPED,
+            0,
+        );
+
+        if raw_handle == wf::INVALID_HANDLE_VALUE {
+            panic!("CreateFileW failed: {}", io::Error::last_os_error());
+        }
+
+        OwnedHandle::from_raw_handle(raw_handle as _)
+    };
 
     // Associate this file with the poller.
     unsafe {
         let poller_handle = poller.as_raw_handle();
-        if wio::CreateIoCompletionPort(file.as_raw_handle() as _, poller_handle as _, 0, 0) == 0 {
+        if wio::CreateIoCompletionPort(file_handle.as_raw_handle() as _, poller_handle as _, 1, 0)
+            == 0
+        {
             panic!(
                 "CreateIoCompletionPort failed: {}",
                 io::Error::last_os_error()
@@ -43,17 +63,18 @@ fn win32_file_io() {
     // Repeatedly write to the pipe.
     let input_text = "Now is the time for all good men to come to the aid of their party";
     let mut len = input_text.len();
-    let mut bytes_written_or_read = Box::new(0u32);
     while len > 0 {
         // Begin the write.
+        let ptr = write_packet.as_ptr() as *mut _; 
         unsafe {
             if wfs::WriteFile(
-                file.as_raw_handle() as _,
+                file_handle.as_raw_handle() as _,
                 input_text.as_ptr() as _,
                 len as _,
-                bytes_written_or_read.as_mut() as *mut _,
-                write_packet.as_ptr().cast(),
+                std::ptr::null_mut(),
+                ptr,
             ) == 0
+                && wf::GetLastError() != wf::ERROR_IO_PENDING
             {
                 panic!("WriteFile failed: {}", io::Error::last_os_error());
             }
@@ -72,17 +93,36 @@ fn win32_file_io() {
         }
 
         // Decrement the length by the number of bytes written.
-        len -= *bytes_written_or_read as usize;
+        let bytes_written = input_text.len();
+        len -= bytes_written;
     }
 
     // Close the file and re-open it for reading.
-    drop(file);
-    let file = fs::OpenOptions::new().read(true).open(&file_path).unwrap();
+    drop(file_handle);
+    let file_handle = unsafe {
+        let raw_handle = wfs::CreateFileW(
+            fname.as_ptr(),
+            wf::GENERIC_READ,
+            0,
+            std::ptr::null_mut(),
+            wfs::OPEN_EXISTING,
+            wfs::FILE_FLAG_OVERLAPPED,
+            0,
+        );
+
+        if raw_handle == wf::INVALID_HANDLE_VALUE {
+            panic!("CreateFileW failed: {}", io::Error::last_os_error());
+        }
+
+        OwnedHandle::from_raw_handle(raw_handle as _)
+    };
 
     // Associate this file with the poller.
     unsafe {
         let poller_handle = poller.as_raw_handle();
-        if wio::CreateIoCompletionPort(file.as_raw_handle() as _, poller_handle as _, 0, 0) == 0 {
+        if wio::CreateIoCompletionPort(file_handle.as_raw_handle() as _, poller_handle as _, 2, 0)
+            == 0
+        {
             panic!(
                 "CreateIoCompletionPort failed: {}",
                 io::Error::last_os_error()
@@ -98,14 +138,16 @@ fn win32_file_io() {
 
     while bytes_received < input_text.len() {
         // Begin the read.
+        let ptr = read_packet.as_ptr().cast();
         unsafe {
             if wfs::ReadFile(
-                file.as_raw_handle() as _,
+                file_handle.as_raw_handle() as _,
                 buffer_cursor.as_mut_ptr() as _,
                 len as _,
-                bytes_written_or_read.as_mut() as *mut _,
-                read_packet.as_ptr().cast(),
+                std::ptr::null_mut(),
+                ptr,
             ) == 0
+                && wf::GetLastError() != wf::ERROR_IO_PENDING
             {
                 panic!("ReadFile failed: {}", io::Error::last_os_error());
             }
@@ -124,9 +166,10 @@ fn win32_file_io() {
         }
 
         // Increment the cursor and decrement the length by the number of bytes read.
-        buffer_cursor = &mut buffer_cursor[*bytes_written_or_read as usize..];
-        len -= *bytes_written_or_read as usize;
-        bytes_received += *bytes_written_or_read as usize;
+        let bytes_read = input_text.len();
+        buffer_cursor = &mut buffer_cursor[bytes_read..];
+        len -= bytes_read;
+        bytes_received += bytes_read;
     }
 
     assert_eq!(bytes_received, input_text.len());
