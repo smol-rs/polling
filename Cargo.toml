@@ -51,3 +51,6 @@ fastrand = "2.0.0"
 
 [target.'cfg(any(unix, target_os = "fuchsia", target_os = "vxworks"))'.dev_dependencies]
 libc = "0.2"
+
+[target.'cfg(windows)'.dev_dependencies]
+miow = "0.6"

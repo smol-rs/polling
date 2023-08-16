@@ -30,7 +30,7 @@ impl CompletionPacket {
     /// This pointer can be used as an `OVERLAPPED` block in Windows APIs. Calling this function
     /// marks the block as "in use". Trying to call this function again before the operation is
     /// indicated as complete by the poller will result in a panic.
-    pub fn as_ptr(&mut self) -> *mut () {
+    pub fn as_ptr(&self) -> *mut () {
         if !self.0.as_ref().get().try_lock() {
             panic!("completion packet is already in use");
         }
