@@ -5,16 +5,13 @@
 use polling::os::iocp::CompletionPacket;
 use polling::{Event, Events, Poller};
 
-use std::io;
 use std::os::windows::io::AsRawHandle;
+use std::{fs, io};
 
 use windows_sys::Win32::{Storage::FileSystem as wfs, System::IO as wio};
 
 #[test]
-fn anonymous_pipe() {
-    // Create an anonymous pipe through miow.
-    let (read, write) = miow::pipe::anonymous(1024).unwrap();
-
+fn win32_file_io() {
     // Create two completion packets: one for reading, one for writing.
     let read_packet = CompletionPacket::new(Event::readable(1));
     let write_packet = CompletionPacket::new(Event::writable(2));
@@ -23,16 +20,19 @@ fn anonymous_pipe() {
     let poller = Poller::new().unwrap();
     let mut events = Events::new();
 
-    // Associate this pipe with the poller.
+    // Open a file for writing.
+    let dir = tempfile::tempdir().unwrap();
+    let file_path = dir.path().join("test.txt");
+    let file = fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .open(&file_path)
+        .unwrap();
+
+    // Associate this file with the poller.
     unsafe {
         let poller_handle = poller.as_raw_handle();
-        if wio::CreateIoCompletionPort(read.as_raw_handle() as _, poller_handle as _, 0, 0) == 0 {
-            panic!(
-                "CreateIoCompletionPort failed: {}",
-                io::Error::last_os_error()
-            );
-        }
-        if wio::CreateIoCompletionPort(write.as_raw_handle() as _, poller_handle as _, 0, 0) == 0 {
+        if wio::CreateIoCompletionPort(file.as_raw_handle() as _, poller_handle as _, 0, 0) == 0 {
             panic!(
                 "CreateIoCompletionPort failed: {}",
                 io::Error::last_os_error()
@@ -48,7 +48,7 @@ fn anonymous_pipe() {
         // Begin the write.
         unsafe {
             if wfs::WriteFile(
-                write.as_raw_handle() as _,
+                file.as_raw_handle() as _,
                 input_text.as_ptr() as _,
                 len as _,
                 bytes_written_or_read.as_mut() as *mut _,
@@ -75,6 +75,21 @@ fn anonymous_pipe() {
         len -= *bytes_written_or_read as usize;
     }
 
+    // Close the file and re-open it for reading.
+    drop(file);
+    let file = fs::OpenOptions::new().read(true).open(&file_path).unwrap();
+
+    // Associate this file with the poller.
+    unsafe {
+        let poller_handle = poller.as_raw_handle();
+        if wio::CreateIoCompletionPort(file.as_raw_handle() as _, poller_handle as _, 0, 0) == 0 {
+            panic!(
+                "CreateIoCompletionPort failed: {}",
+                io::Error::last_os_error()
+            );
+        }
+    }
+
     // Repeatedly read from the pipe.
     let mut buffer = vec![0u8; 1024];
     let mut buffer_cursor = &mut *buffer;
@@ -85,7 +100,7 @@ fn anonymous_pipe() {
         // Begin the read.
         unsafe {
             if wfs::ReadFile(
-                read.as_raw_handle() as _,
+                file.as_raw_handle() as _,
                 buffer_cursor.as_mut_ptr() as _,
                 len as _,
                 bytes_written_or_read.as_mut() as *mut _,
