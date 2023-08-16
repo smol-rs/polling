@@ -32,7 +32,7 @@ fn win32_file_io() {
     let file_handle = unsafe {
         let raw_handle = wfs::CreateFileW(
             fname.as_ptr(),
-            wf::GENERIC_WRITE,
+            wf::GENERIC_WRITE | wf::GENERIC_READ,
             0,
             std::ptr::null_mut(),
             wfs::CREATE_ALWAYS,
@@ -65,7 +65,7 @@ fn win32_file_io() {
     let mut len = input_text.len();
     while len > 0 {
         // Begin the write.
-        let ptr = write_packet.as_ptr() as *mut _; 
+        let ptr = write_packet.as_ptr() as *mut _;
         unsafe {
             if wfs::WriteFile(
                 file_handle.as_raw_handle() as _,
@@ -83,7 +83,9 @@ fn win32_file_io() {
         // Wait for the overlapped operation to complete.
         'waiter: loop {
             events.clear();
+            println!("Starting wait...");
             poller.wait(&mut events, None).unwrap();
+            println!("Got events");
 
             for event in events.iter() {
                 if event.writable && event.key == 2 {
@@ -102,7 +104,7 @@ fn win32_file_io() {
     let file_handle = unsafe {
         let raw_handle = wfs::CreateFileW(
             fname.as_ptr(),
-            wf::GENERIC_READ,
+            wf::GENERIC_READ | wf::GENERIC_WRITE,
             0,
             std::ptr::null_mut(),
             wfs::OPEN_EXISTING,

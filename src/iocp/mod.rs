@@ -929,7 +929,7 @@ impl PacketUnwrapped {
                 // The poller was notified.
                 return Ok(FeedEventResult::Notified);
             }
-            PacketInnerProj::Waitable { handle } => {                
+            PacketInnerProj::Waitable { handle } => {
                 let mut handle = lock!(handle.lock());
                 let event = handle.interest;
 
