@@ -81,7 +81,7 @@ impl AfdPollMask {
     pub(crate) const CONNECT_FAIL: AfdPollMask = AfdPollMask(0x100);
 
     /// Creates an empty mask.
-    pub(crate) fn empty() -> AfdPollMask {
+    pub(crate) const fn empty() -> AfdPollMask {
         AfdPollMask(0)
     }
 

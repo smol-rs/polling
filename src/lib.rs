@@ -186,7 +186,7 @@ impl Event {
     /// All kinds of events (readable and writable).
     ///
     /// Equivalent to: `Event { key, readable: true, writable: true }`
-    pub fn all(key: usize) -> Event {
+    pub const fn all(key: usize) -> Event {
         Event {
             key,
             readable: true,
@@ -198,7 +198,7 @@ impl Event {
     /// Only the readable event.
     ///
     /// Equivalent to: `Event { key, readable: true, writable: false }`
-    pub fn readable(key: usize) -> Event {
+    pub const fn readable(key: usize) -> Event {
         Event {
             key,
             readable: true,
@@ -210,7 +210,7 @@ impl Event {
     /// Only the writable event.
     ///
     /// Equivalent to: `Event { key, readable: false, writable: true }`
-    pub fn writable(key: usize) -> Event {
+    pub const fn writable(key: usize) -> Event {
         Event {
             key,
             readable: false,
@@ -222,7 +222,7 @@ impl Event {
     /// No events.
     ///
     /// Equivalent to: `Event { key, readable: false, writable: false }`
-    pub fn none(key: usize) -> Event {
+    pub const fn none(key: usize) -> Event {
         Event {
             key,
             readable: false,

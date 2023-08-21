@@ -398,7 +398,7 @@ pub struct EventExtra {
 impl EventExtra {
     /// Creates an empty set of extra information.
     #[inline]
-    pub fn empty() -> Self {
+    pub const fn empty() -> Self {
         Self {
             flags: PollFlags::empty(),
         }
