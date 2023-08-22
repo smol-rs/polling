@@ -337,7 +337,7 @@ pub struct EventExtra {
 impl EventExtra {
     /// Create an empty version of the data.
     #[inline]
-    pub fn empty() -> EventExtra {
+    pub const fn empty() -> EventExtra {
         EventExtra {
             flags: epoll::EventFlags::empty(),
         }

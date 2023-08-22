@@ -221,7 +221,7 @@ pub struct EventExtra {
 impl EventExtra {
     /// Create a new, empty version of this struct.
     #[inline]
-    pub fn empty() -> EventExtra {
+    pub const fn empty() -> EventExtra {
         EventExtra {
             flags: PollFlags::empty(),
         }
