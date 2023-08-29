@@ -135,11 +135,7 @@ impl<T: Filter + ?Sized> Filter for &T {}
 /// No matter what `PollMode` is specified, this filter will always be
 /// oneshot-only.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct Signal(pub c_int);
-
-/// Alias for `libc::c_int`.
-#[allow(non_camel_case_types)]
-pub type c_int = i32;
+pub struct Signal(pub std::os::raw::c_int);
 
 unsafe impl FilterSealed for Signal {
     #[inline(always)]
