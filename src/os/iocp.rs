@@ -1,6 +1,6 @@
 //! Functionality that is only availale for IOCP-based platforms.
 
-pub use crate::sys::CompletionPacket;
+use crate::sys::{Completion, CompletionHandle, IoStatusBlock, Packet, PacketInner};
 
 use super::__private::PollerSealed;
 use crate::{Event, PollMode, Poller};
@@ -8,6 +8,45 @@ use crate::{Event, PollMode, Poller};
 use std::io;
 use std::os::windows::io::{AsRawHandle, RawHandle};
 use std::os::windows::prelude::{AsHandle, BorrowedHandle};
+use std::sync::Arc;
+
+/// A packet used to wake up the poller with an event.
+#[derive(Debug, Clone)]
+pub struct CompletionPacket(pub(crate) Packet);
+
+impl CompletionPacket {
+    /// Create a new completion packet with a custom event.
+    pub fn new(event: Event) -> Self {
+        Self(Arc::pin(IoStatusBlock::from(PacketInner::Custom { event })))
+    }
+
+    /// Get the event associated with this packet.
+    pub fn event(&self) -> &Event {
+        self.0.as_ref().event()
+    }
+
+    /// Get a pointer to the underlying I/O status block.
+    ///
+    /// This pointer can be used as an `OVERLAPPED` block in Windows APIs. Calling this function
+    /// marks the block as "in use". Trying to call this function again before the operation is
+    /// indicated as complete by the poller will result in a panic.
+    pub fn as_ptr(&self) -> *mut () {
+        if !self.0.as_ref().get().try_lock() {
+            panic!("completion packet is already in use");
+        }
+
+        self.0.as_ref().get_ref() as *const _ as *const () as *mut ()
+    }
+
+    /// Cancel the in flight operation.
+    ///
+    /// # Safety
+    ///
+    /// The packet must be in flight and the operation must be cancelled already.
+    pub unsafe fn cancel(&mut self) {
+        self.0.as_ref().get().unlock();
+    }
+}
 
 /// Extension trait for the [`Poller`] type that provides functionality specific to IOCP-based
 /// platforms.
