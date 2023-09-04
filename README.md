@@ -1,6 +1,6 @@
 # polling
 
-[![Build](https://github.com/smol-rs/polling/workflows/Build%20and%20test/badge.svg)](
+[![Build](https://github.com/smol-rs/polling/actions/workflows/ci.yml/badge.svg)](
 https://github.com/smol-rs/polling/actions)
 [![License](https://img.shields.io/badge/license-Apache--2.0_OR_MIT-blue.svg)](
 https://github.com/smol-rs/polling)
@@ -61,8 +61,8 @@ loop {
 
 Licensed under either of
 
- * Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE) or http://www.apache.org/licenses/LICENSE-2.0)
- * MIT license ([LICENSE-MIT](LICENSE-MIT) or http://opensource.org/licenses/MIT)
+ * Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE) or https://www.apache.org/licenses/LICENSE-2.0)
+ * MIT license ([LICENSE-MIT](LICENSE-MIT) or https://opensource.org/license/mit/)
 
 at your option.
 
