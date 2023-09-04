@@ -17,10 +17,6 @@ exclude = ["/.*"]
 [package.metadata.docs.rs]
 rustdoc-args = ["--cfg", "docsrs"]
 
-[features]
-default = ["std"]
-std = []
-
 [dependencies]
 cfg-if = "1"
 tracing = { version = "0.1.37", default-features = false }

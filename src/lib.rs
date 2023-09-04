@@ -53,8 +53,6 @@
 //! # std::io::Result::Ok(())
 //! ```
 
-#![cfg(feature = "std")]
-#![cfg_attr(not(feature = "std"), no_std)]
 #![warn(missing_docs, missing_debug_implementations, rust_2018_idioms)]
 #![allow(clippy::useless_conversion, clippy::unnecessary_cast, unused_unsafe)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
