@@ -37,7 +37,7 @@ pub trait PollerKqueueExt<F: Filter>: PollerSealed {
     /// let poller = Poller::new().unwrap();
     ///
     /// // Register the SIGINT signal.
-    /// poller.add_filter(Signal(libc::SIGINT), 0, PollMode::Oneshot).unwrap();
+    /// poller.add_filter(Signal(rustix::process::Signal::Int as _), 0, PollMode::Oneshot).unwrap();
     ///
     /// // Wait for the signal.
     /// let mut events = Events::new();
@@ -60,10 +60,10 @@ pub trait PollerKqueueExt<F: Filter>: PollerSealed {
     /// let poller = Poller::new().unwrap();
     ///
     /// // Register the SIGINT signal.
-    /// poller.add_filter(Signal(libc::SIGINT), 0, PollMode::Oneshot).unwrap();
+    /// poller.add_filter(Signal(rustix::process::Signal::Int as _), 0, PollMode::Oneshot).unwrap();
     ///
     /// // Re-register with a different key.
-    /// poller.modify_filter(Signal(libc::SIGINT), 1, PollMode::Oneshot).unwrap();
+    /// poller.modify_filter(Signal(rustix::process::Signal::Int as _), 1, PollMode::Oneshot).unwrap();
     ///
     /// // Wait for the signal.
     /// let mut events = Events::new();
@@ -86,10 +86,10 @@ pub trait PollerKqueueExt<F: Filter>: PollerSealed {
     /// let poller = Poller::new().unwrap();
     ///
     /// // Register the SIGINT signal.
-    /// poller.add_filter(Signal(libc::SIGINT), 0, PollMode::Oneshot).unwrap();
+    /// poller.add_filter(Signal(rustix::process::Signal::Int as _), 0, PollMode::Oneshot).unwrap();
     ///
     /// // Remove the filter.
-    /// poller.delete_filter(Signal(libc::SIGINT)).unwrap();
+    /// poller.delete_filter(Signal(rustix::process::Signal::Int as _)).unwrap();
     /// ```
     fn delete_filter(&self, filter: F) -> io::Result<()>;
 }
