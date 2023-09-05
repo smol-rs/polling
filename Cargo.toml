@@ -2,9 +2,9 @@
 name = "polling"
 # When publishing a new version:
 # - Update CHANGELOG.md
-# - Create "v2.x.y" git tag
-version = "2.8.0"
-authors = ["Stjepan Glavina <stjepang@gmail.com>"]
+# - Create "v3.x.y" git tag
+version = "3.0.0"
+authors = ["Stjepan Glavina <stjepang@gmail.com>", "John Nunley <dev@notgull.net>"]
 edition = "2018"
 rust-version = "1.63"
 description = "Portable interface to epoll, kqueue, event ports, and IOCP"
