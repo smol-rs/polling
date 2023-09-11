@@ -181,52 +181,46 @@ pub enum PollMode {
 }
 
 impl Event {
-    /// All kinds of events (readable and writable).
-    ///
-    /// Equivalent to: `Event { key, readable: true, writable: true }`
-    pub const fn all(key: usize) -> Event {
+    /// Create a new event.
+    pub const fn new(key: usize, readable: bool, writable: bool) -> Event {
         Event {
             key,
-            readable: true,
-            writable: true,
+            readable,
+            writable,
             extra: sys::EventExtra::empty(),
         }
+    }
+
+    /// All kinds of events (readable and writable).
+    ///
+    /// Equivalent to: `Event::new(key, true, true)`
+    #[inline]
+    pub const fn all(key: usize) -> Event {
+        Event::new(key, true, true)
     }
 
     /// Only the readable event.
     ///
-    /// Equivalent to: `Event { key, readable: true, writable: false }`
+    /// Equivalent to: `Event::new(key, true, false)`
+    #[inline]
     pub const fn readable(key: usize) -> Event {
-        Event {
-            key,
-            readable: true,
-            writable: false,
-            extra: sys::EventExtra::empty(),
-        }
+        Event::new(key, true, false)
     }
 
     /// Only the writable event.
     ///
-    /// Equivalent to: `Event { key, readable: false, writable: true }`
+    /// Equivalent to: `Event::new(key, false, true)`
+    #[inline]
     pub const fn writable(key: usize) -> Event {
-        Event {
-            key,
-            readable: false,
-            writable: true,
-            extra: sys::EventExtra::empty(),
-        }
+        Event::new(key, false, true)
     }
 
     /// No events.
     ///
-    /// Equivalent to: `Event { key, readable: false, writable: false }`
+    /// Equivalent to: `Event::new(key, false, false)`
+    #[inline]
     pub const fn none(key: usize) -> Event {
-        Event {
-            key,
-            readable: false,
-            writable: false,
-            extra: sys::EventExtra::empty(),
-        }
+        Event::new(key, false, false)
     }
 
     /// Add interruption events to this interest.
