@@ -30,8 +30,9 @@ pub struct Poller {
 }
 
 /// Identifier for a source.
+#[doc(hidden)]
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
-pub(crate) enum SourceId {
+pub enum SourceId {
     /// Registered file descriptor.
     Fd(RawFd),
 

@@ -1,7 +1,5 @@
 //! Functionality that is only available for `kqueue`-based platforms.
 
-#![allow(private_interfaces)]
-
 use crate::sys::{mode_to_flags, SourceId};
 use crate::{PollMode, Poller};
 
