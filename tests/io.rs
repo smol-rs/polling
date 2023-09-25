@@ -41,14 +41,24 @@ fn basic_io() {
 
 #[test]
 fn insert_twice() {
+    #[cfg(unix)]
+    use std::os::unix::io::AsRawFd;
+    #[cfg(windows)]
+    use std::os::windows::io::AsRawSocket;
+
     let (read, mut write) = tcp_pair().unwrap();
     let read = Arc::new(read);
 
     let poller = Poller::new().unwrap();
     unsafe {
-        poller.add(&read, Event::readable(1)).unwrap();
+        #[cfg(unix)]
+        let read = read.as_raw_fd();
+        #[cfg(windows)]
+        let read = read.as_raw_socket();
+
+        poller.add(read, Event::readable(1)).unwrap();
         assert_eq!(
-            poller.add(&read, Event::readable(1)).unwrap_err().kind(),
+            poller.add(read, Event::readable(1)).unwrap_err().kind(),
             io::ErrorKind::AlreadyExists
         );
     }
