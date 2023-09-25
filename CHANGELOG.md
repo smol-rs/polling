@@ -1,3 +1,7 @@
+# Version 3.1.0
+
+- Add an `Event::new()` constructor to simplify creating `Event`s. (#149)
+
 # Version 3.0.0
 
 - Replace `libc` in all backends with the `rustix` crate (#108).
