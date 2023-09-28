@@ -1,6 +1,6 @@
 //! Functionality that is only available for `kqueue`-based platforms.
 
-use crate::sys::mode_to_flags;
+use crate::sys::{mode_to_flags, SourceId};
 use crate::{PollMode, Poller};
 
 use std::io;
@@ -98,10 +98,13 @@ impl<F: Filter> PollerKqueueExt<F> for Poller {
     #[inline(always)]
     fn add_filter(&self, filter: F, key: usize, mode: PollMode) -> io::Result<()> {
         // No difference between adding and modifying in kqueue.
+        self.poller.add_source(filter.source_id())?;
         self.modify_filter(filter, key, mode)
     }
 
     fn modify_filter(&self, filter: F, key: usize, mode: PollMode) -> io::Result<()> {
+        self.poller.has_source(filter.source_id())?;
+
         // Convert the filter into a kevent.
         let event = filter.filter(kqueue::EventFlags::ADD | mode_to_flags(mode), key);
 
@@ -114,7 +117,9 @@ impl<F: Filter> PollerKqueueExt<F> for Poller {
         let event = filter.filter(kqueue::EventFlags::DELETE, 0);
 
         // Delete the filter.
-        self.poller.submit_changes([event])
+        self.poller.submit_changes([event])?;
+
+        self.poller.remove_source(filter.source_id())
     }
 }
 
@@ -125,6 +130,11 @@ unsafe impl<T: FilterSealed + ?Sized> FilterSealed for &T {
     #[inline(always)]
     fn filter(&self, flags: kqueue::EventFlags, key: usize) -> kqueue::Event {
         (**self).filter(flags, key)
+    }
+
+    #[inline(always)]
+    fn source_id(&self) -> SourceId {
+        (**self).source_id()
     }
 }
 
@@ -148,6 +158,11 @@ unsafe impl FilterSealed for Signal {
             flags | kqueue::EventFlags::RECEIPT,
             key as _,
         )
+    }
+
+    #[inline(always)]
+    fn source_id(&self) -> SourceId {
+        SourceId::Signal(self.0)
     }
 }
 
@@ -207,6 +222,11 @@ unsafe impl FilterSealed for Process<'_> {
             key as _,
         )
     }
+
+    #[inline(always)]
+    fn source_id(&self) -> SourceId {
+        SourceId::Pid(rustix::process::Pid::from_child(self.child))
+    }
 }
 
 impl Filter for Process<'_> {}
@@ -234,11 +254,17 @@ unsafe impl FilterSealed for Timer {
             key as _,
         )
     }
+
+    #[inline(always)]
+    fn source_id(&self) -> SourceId {
+        SourceId::Timer(self.id)
+    }
 }
 
 impl Filter for Timer {}
 
 mod __private {
+    use crate::sys::SourceId;
     use rustix::event::kqueue;
 
     #[doc(hidden)]
@@ -247,5 +273,8 @@ mod __private {
         ///
         /// This filter's flags must have `EV_RECEIPT`.
         fn filter(&self, flags: kqueue::EventFlags, key: usize) -> kqueue::Event;
+
+        /// Get the source ID for this source.
+        fn source_id(&self) -> SourceId;
     }
 }

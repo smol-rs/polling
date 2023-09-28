@@ -1,7 +1,9 @@
 //! Bindings to kqueue (macOS, iOS, tvOS, watchOS, FreeBSD, NetBSD, OpenBSD, DragonFly BSD).
 
+use std::collections::HashSet;
 use std::io;
 use std::os::unix::io::{AsFd, AsRawFd, BorrowedFd, OwnedFd, RawFd};
+use std::sync::RwLock;
 use std::time::Duration;
 
 use rustix::event::kqueue;
@@ -15,11 +17,33 @@ pub struct Poller {
     /// File descriptor for the kqueue instance.
     kqueue_fd: OwnedFd,
 
+    /// List of sources currently registered in this poller.
+    ///
+    /// This is used to make sure the same source is not registered twice.
+    sources: RwLock<HashSet<SourceId>>,
+
     /// Notification pipe for waking up the poller.
     ///
     /// On platforms that support `EVFILT_USER`, this uses that to wake up the poller. Otherwise, it
     /// uses a pipe.
     notify: notify::Notify,
+}
+
+/// Identifier for a source.
+#[doc(hidden)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+pub enum SourceId {
+    /// Registered file descriptor.
+    Fd(RawFd),
+
+    /// Signal.
+    Signal(std::os::raw::c_int),
+
+    /// Process ID.
+    Pid(rustix::process::Pid),
+
+    /// Timer ID.
+    Timer(usize),
 }
 
 impl Poller {
@@ -31,6 +55,7 @@ impl Poller {
 
         let poller = Poller {
             kqueue_fd,
+            sources: RwLock::new(HashSet::new()),
             notify: notify::Notify::new()?,
         };
 
@@ -60,6 +85,8 @@ impl Poller {
     ///
     /// The file descriptor must be valid and it must last until it is deleted.
     pub unsafe fn add(&self, fd: RawFd, ev: Event, mode: PollMode) -> io::Result<()> {
+        self.add_source(SourceId::Fd(fd))?;
+
         // File descriptors don't need to be added explicitly, so just modify the interest.
         self.modify(BorrowedFd::borrow_raw(fd), ev, mode)
     }
@@ -78,6 +105,8 @@ impl Poller {
             None
         };
         let _enter = span.as_ref().map(|s| s.enter());
+
+        self.has_source(SourceId::Fd(fd.as_raw_fd()))?;
 
         let mode_flags = mode_to_flags(mode);
 
@@ -143,10 +172,57 @@ impl Poller {
         Ok(())
     }
 
+    /// Add a source to the sources set.
+    #[inline]
+    pub(crate) fn add_source(&self, source: SourceId) -> io::Result<()> {
+        if self
+            .sources
+            .write()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(source)
+        {
+            Ok(())
+        } else {
+            Err(io::Error::from(io::ErrorKind::AlreadyExists))
+        }
+    }
+
+    /// Tell if a source is currently inside the set.
+    #[inline]
+    pub(crate) fn has_source(&self, source: SourceId) -> io::Result<()> {
+        if self
+            .sources
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .contains(&source)
+        {
+            Ok(())
+        } else {
+            Err(io::Error::from(io::ErrorKind::NotFound))
+        }
+    }
+
+    /// Remove a source from the sources set.
+    #[inline]
+    pub(crate) fn remove_source(&self, source: SourceId) -> io::Result<()> {
+        if self
+            .sources
+            .write()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&source)
+        {
+            Ok(())
+        } else {
+            Err(io::Error::from(io::ErrorKind::NotFound))
+        }
+    }
+
     /// Deletes a file descriptor.
     pub fn delete(&self, fd: BorrowedFd<'_>) -> io::Result<()> {
         // Simply delete interest in the file descriptor.
-        self.modify(fd, Event::none(0), PollMode::Oneshot)
+        self.modify(fd, Event::none(0), PollMode::Oneshot)?;
+
+        self.remove_source(SourceId::Fd(fd.as_raw_fd()))
     }
 
     /// Waits for I/O events with an optional timeout.
