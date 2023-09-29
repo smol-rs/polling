@@ -530,7 +530,7 @@ mod notify {
     use rustix::fd::{AsFd, AsRawFd, BorrowedFd, OwnedFd, RawFd};
     use rustix::fs::{fcntl_getfl, fcntl_setfl, OFlags};
     use rustix::io::{fcntl_getfd, fcntl_setfd, read, write, FdFlags};
-    use rustix::pipe::{pipe};
+    use rustix::pipe::pipe;
 
     /// A notification pipe.
     ///
