@@ -439,7 +439,7 @@ fn cvt_mode_as_remove(mode: PollMode) -> io::Result<bool> {
     }
 }
 
-#[cfg(not(any(target_os = "espidf", target_os = "haiku")))]
+#[cfg(not(target_os = "espidf"))]
 mod notify {
     use std::io;
 
@@ -447,7 +447,9 @@ mod notify {
     use rustix::fd::{AsFd, AsRawFd, BorrowedFd, OwnedFd, RawFd};
     use rustix::fs::{fcntl_getfl, fcntl_setfl, OFlags};
     use rustix::io::{fcntl_getfd, fcntl_setfd, read, write, FdFlags};
-    use rustix::pipe::{pipe, pipe_with, PipeFlags};
+    use rustix::pipe::pipe;
+    #[cfg(not(target_os = "haiku"))]
+    use rustix::pipe::{pipe_with, PipeFlags};
 
     /// A notification pipe.
     ///
@@ -468,7 +470,13 @@ mod notify {
     impl Notify {
         /// Creates a new notification pipe.
         pub(super) fn new() -> io::Result<Self> {
-            let (read_pipe, write_pipe) = pipe_with(PipeFlags::CLOEXEC).or_else(|_| {
+            #[cfg(not(target_os = "haiku"))]
+            let pipe_with = pipe_with(PipeFlags::CLOEXEC).ok();
+
+            #[cfg(target_os = "haiku")]
+            let pipe_with = None;
+
+            let (read_pipe, write_pipe) = pipe_with.unwrap_or_else(|| {
                 let (read_pipe, write_pipe) = pipe()?;
                 fcntl_setfd(&read_pipe, fcntl_getfd(&read_pipe)? | FdFlags::CLOEXEC)?;
                 fcntl_setfd(&write_pipe, fcntl_getfd(&write_pipe)? | FdFlags::CLOEXEC)?;
@@ -490,86 +498,6 @@ mod notify {
         }
 
         /// Provides the poll flags to be used when registering the read half of the botify pipe with the `Poller`.
-        pub(super) fn poll_flags(&self) -> PollFlags {
-            PollFlags::RDNORM
-        }
-
-        /// Notifies the `Poller` instance via the write half of the notify pipe.
-        pub(super) fn notify(&self) -> Result<(), io::Error> {
-            write(&self.write_pipe, &[0; 1])?;
-
-            Ok(())
-        }
-
-        /// Pops a notification (if any) from the pipe.
-        pub(super) fn pop_notification(&self) -> Result<(), io::Error> {
-            read(&self.read_pipe, &mut [0; 1])?;
-
-            Ok(())
-        }
-
-        /// Pops all notifications from the pipe.
-        pub(super) fn pop_all_notifications(&self) -> Result<(), io::Error> {
-            while read(&self.read_pipe, &mut [0; 64]).is_ok() {}
-
-            Ok(())
-        }
-
-        /// Whether this raw file descriptor is associated with this notifier.
-        pub(super) fn has_fd(&self, fd: RawFd) -> bool {
-            self.read_pipe.as_raw_fd() == fd || self.write_pipe.as_raw_fd() == fd
-        }
-    }
-}
-
-#[cfg(target_os = "haiku")]
-mod notify {
-    use std::io;
-
-    use rustix::event::PollFlags;
-    use rustix::fd::{AsFd, AsRawFd, BorrowedFd, OwnedFd, RawFd};
-    use rustix::fs::{fcntl_getfl, fcntl_setfl, OFlags};
-    use rustix::io::{fcntl_getfd, fcntl_setfd, read, write, FdFlags};
-    use rustix::pipe::pipe;
-
-    /// A notification pipe.
-    ///
-    /// This implementation uses a pipe to send notifications.
-    #[derive(Debug)]
-    pub(super) struct Notify {
-        /// The file descriptor of the read half of the notify pipe. This is also stored as the first
-        /// file descriptor in `fds.poll_fds`.
-        read_pipe: OwnedFd,
-        /// The file descriptor of the write half of the notify pipe.
-        ///
-        /// Data is written to this to wake up the current instance of `Poller::wait`, which can occur when the
-        /// user notifies it (in which case `Poller::notified` would have been set) or when an operation needs
-        /// to occur (in which case `Poller::waiting_operations` would have been incremented).
-        write_pipe: OwnedFd,
-    }
-
-    impl Notify {
-        /// Creates a new notification pipe.
-        pub(super) fn new() -> io::Result<Self> {
-            let (read_pipe, write_pipe) = pipe()?;
-            fcntl_setfd(&read_pipe, fcntl_getfd(&read_pipe)? | FdFlags::CLOEXEC)?;
-            fcntl_setfd(&write_pipe, fcntl_getfd(&write_pipe)? | FdFlags::CLOEXEC)?;
-
-            // Put the reading side into non-blocking mode.
-            fcntl_setfl(&read_pipe, fcntl_getfl(&read_pipe)? | OFlags::NONBLOCK)?;
-
-            Ok(Self {
-                read_pipe,
-                write_pipe,
-            })
-        }
-
-        /// Provides the file handle of the read half of the notify pipe that needs to be registered by the `Poller`.
-        pub(super) fn fd(&self) -> BorrowedFd<'_> {
-            self.read_pipe.as_fd()
-        }
-
-        /// Provides the poll flags to be used when registering the read half of the notify pipe with the `Poller`.
         pub(super) fn poll_flags(&self) -> PollFlags {
             PollFlags::RDNORM
         }
