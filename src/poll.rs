@@ -569,7 +569,7 @@ mod notify {
             self.read_pipe.as_fd()
         }
 
-        /// Provides the poll flags to be used when registering the read half of the botify pipe with the `Poller`.
+        /// Provides the poll flags to be used when registering the read half of the notify pipe with the `Poller`.
         pub(super) fn poll_flags(&self) -> PollFlags {
             PollFlags::RDNORM
         }
