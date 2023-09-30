@@ -68,6 +68,9 @@ jobs:
       - name: Check selected Tier 3 targets
         if: startsWith(matrix.rust, 'nightly') && matrix.os == 'ubuntu-latest'
         run: cargo check -Z build-std --target=riscv32imc-esp-espidf
+      - name: Check haiku
+        if: startsWith(matrix.rust, 'nightly') && matrix.os == 'ubuntu-latest'
+        run: cargo check -Z build-std --target x86_64-unknown-haiku
 
   cross:
     runs-on: ${{ matrix.os }}
