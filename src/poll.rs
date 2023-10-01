@@ -471,11 +471,17 @@ mod notify {
         /// Creates a new notification pipe.
         pub(super) fn new() -> io::Result<Self> {
             #[cfg(not(target_os = "haiku"))]
-            let pipe_with = pipe_with(PipeFlags::CLOEXEC).ok();
+            let (read_pipe, write_pipe) = pipe_with(PipeFlags::CLOEXEC).or_else(|_| {
+                let (read_pipe, write_pipe) = pipe()?;
+                fcntl_setfd(&read_pipe, fcntl_getfd(&read_pipe)? | FdFlags::CLOEXEC)?;
+                fcntl_setfd(&write_pipe, fcntl_getfd(&write_pipe)? | FdFlags::CLOEXEC)?;
+                io::Result::Ok((read_pipe, write_pipe))
+            })?;
 
             #[cfg(target_os = "haiku")]
             let pipe_with = None;
 
+            #[cfg(target_os = "haiku")]
             let (read_pipe, write_pipe) = pipe_with.unwrap_or_else(|| {
                 let (read_pipe, write_pipe) = pipe()?;
                 fcntl_setfd(&read_pipe, fcntl_getfd(&read_pipe)? | FdFlags::CLOEXEC)?;
