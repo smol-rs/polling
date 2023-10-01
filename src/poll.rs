@@ -446,10 +446,14 @@ mod notify {
     use rustix::event::PollFlags;
     use rustix::fd::{AsFd, AsRawFd, BorrowedFd, OwnedFd, RawFd};
     use rustix::fs::{fcntl_getfl, fcntl_setfl, OFlags};
-    use rustix::io::{fcntl_getfd, fcntl_setfd, read, write, FdFlags};
-    use rustix::pipe::{pipe,PipeFlags};
+    #[cfg(target_os = "haiku")]
+    use rustix::io::{fcntl_getfd, fcntl_setfd, FdFlags};
+    use rustix::io::{read, write};
+    #[cfg(target_os = "haiku")]
+    use rustix::pipe::pipe;
     #[cfg(not(target_os = "haiku"))]
     use rustix::pipe::pipe_with;
+    use rustix::pipe::PipeFlags;
 
     /// A notification pipe.
     ///
