@@ -446,14 +446,10 @@ mod notify {
     use rustix::event::PollFlags;
     use rustix::fd::{AsFd, AsRawFd, BorrowedFd, OwnedFd, RawFd};
     use rustix::fs::{fcntl_getfl, fcntl_setfl, OFlags};
-    #[cfg(target_os = "haiku")]
-    use rustix::io::{fcntl_getfd, fcntl_setfd, FdFlags};
-    use rustix::io::{read, write};
-    #[cfg(target_os = "haiku")]
-    use rustix::pipe::pipe;
+    use rustix::io::{fcntl_getfd, fcntl_setfd, read, write, FdFlags};
     #[cfg(not(target_os = "haiku"))]
     use rustix::pipe::pipe_with;
-    use rustix::pipe::PipeFlags;
+    use rustix::pipe::{pipe, PipeFlags};
 
     /// A notification pipe.
     ///
@@ -474,18 +470,18 @@ mod notify {
     impl Notify {
         /// Creates a new notification pipe.
         pub(super) fn new() -> io::Result<Self> {
-            #[cfg(not(target_os = "haiku"))]
-            let pipe_init = pipe_with;
-
-            #[cfg(target_os = "haiku")]
-            let pipe_init = |_| {
+            let fallback_pipe = |_| {
                 let (read_pipe, write_pipe) = pipe()?;
                 fcntl_setfd(&read_pipe, fcntl_getfd(&read_pipe)? | FdFlags::CLOEXEC)?;
                 fcntl_setfd(&write_pipe, fcntl_getfd(&write_pipe)? | FdFlags::CLOEXEC)?;
                 io::Result::Ok((read_pipe, write_pipe))
             };
 
-            let (read_pipe, write_pipe) = pipe_init(PipeFlags::CLOEXEC)?;
+            #[cfg(not(target_os = "haiku"))]
+            let (read_pipe, write_pipe) = pipe_with(PipeFlags::CLOEXEC).or_else(fallback_pipe)?;
+
+            #[cfg(target_os = "haiku")]
+            let (read_pipe, write_pipe) = fallback_pipe(PipeFlags::CLOEXEC)?;
 
             // Put the reading side into non-blocking mode.
             fcntl_setfl(&read_pipe, fcntl_getfl(&read_pipe)? | OFlags::NONBLOCK)?;
