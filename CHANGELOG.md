@@ -1,3 +1,10 @@
+# Version 3.2.0
+
+- The `kqueue` backend previously allowed the following operations that other backends forbid. Now these operations result in an error: (#153)
+  - Inserting a source that was already inserted.
+  - Modifying/deleting a source that was not already inserted.
+- Add support for Haiku OS. (#154)
+
 # Version 3.1.0
 
 - Add an `Event::new()` constructor to simplify creating `Event`s. (#149)
