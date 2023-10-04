@@ -71,7 +71,6 @@ use std::num::NonZeroUsize;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::time::Duration;
-use std::usize;
 
 use cfg_if::cfg_if;
 
@@ -121,7 +120,7 @@ cfg_if! {
 pub mod os;
 
 /// Key associated with notifications.
-const NOTIFY_KEY: usize = std::usize::MAX;
+const NOTIFY_KEY: usize = usize::MAX;
 
 /// Indicates that a file descriptor or socket can read or write without blocking.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -135,6 +134,9 @@ pub struct Event {
     /// System-specific event data.
     extra: sys::EventExtra,
 }
+
+unsafe impl Send for Event {}
+unsafe impl Sync for Event {}
 
 /// The mode in which the poller waits for I/O events.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
