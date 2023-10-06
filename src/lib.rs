@@ -135,9 +135,6 @@ pub struct Event {
     extra: sys::EventExtra,
 }
 
-unsafe impl Send for Event {}
-unsafe impl Sync for Event {}
-
 /// The mode in which the poller waits for I/O events.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[non_exhaustive]
