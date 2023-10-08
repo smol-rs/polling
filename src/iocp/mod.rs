@@ -46,7 +46,6 @@ use pin_project_lite::pin_project;
 
 use std::cell::UnsafeCell;
 use std::collections::hash_map::{Entry, HashMap};
-use std::convert::TryFrom;
 use std::ffi::c_void;
 use std::fmt;
 use std::io;
