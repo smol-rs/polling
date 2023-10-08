@@ -1,7 +1,6 @@
 //! Bindings to poll (VxWorks, Fuchsia, other Unix systems).
 
 use std::collections::HashMap;
-use std::convert::TryInto;
 use std::io;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Condvar, Mutex};

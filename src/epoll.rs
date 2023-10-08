@@ -1,6 +1,5 @@
 //! Bindings to epoll (Linux, Android).
 
-use std::convert::TryInto;
 use std::io;
 use std::os::unix::io::{AsFd, AsRawFd, BorrowedFd, RawFd};
 use std::time::Duration;

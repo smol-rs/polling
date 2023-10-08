@@ -2,7 +2,6 @@
 
 use super::dur2timeout;
 
-use std::convert::TryInto;
 use std::fmt;
 use std::io;
 use std::marker::PhantomData;
