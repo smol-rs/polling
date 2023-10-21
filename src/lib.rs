@@ -656,6 +656,7 @@ impl Poller {
                 if let Err(e) = self.poller.wait(&mut events.events, timeout) {
                     // If the wait was interrupted by a signal, clear events and try again.
                     if e.kind() == io::ErrorKind::Interrupted {
+                        events.clear();
                         continue;
                     } else {
                         return Err(e);
