@@ -651,14 +651,23 @@ impl Poller {
         let _enter = span.enter();
 
         if let Ok(_lock) = self.lock.try_lock() {
-            // Wait for I/O events.
-            self.poller.wait(&mut events.events, timeout)?;
+            loop {
+                // Wait for I/O events.
+                if let Err(e) = self.poller.wait(&mut events.events, timeout) {
+                    // If the wait was interrupted by a signal, clear events and try again.
+                    if e.kind() == io::ErrorKind::Interrupted {
+                        continue;
+                    } else {
+                        return Err(e);
+                    }
+                }
 
-            // Clear the notification, if any.
-            self.notified.swap(false, Ordering::SeqCst);
+                // Clear the notification, if any.
+                self.notified.swap(false, Ordering::SeqCst);
 
-            // Indicate number of events.
-            Ok(events.len())
+                // Indicate number of events.
+                return Ok(events.len());
+            }
         } else {
             tracing::trace!("wait: skipping because another thread is already waiting on I/O");
             Ok(0)
