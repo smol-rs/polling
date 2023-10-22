@@ -70,7 +70,7 @@ use std::marker::PhantomData;
 use std::num::NonZeroUsize;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use cfg_if::cfg_if;
 
@@ -646,12 +646,18 @@ impl Poller {
     /// poller.delete(&socket)?;
     /// # std::io::Result::Ok(())
     /// ```
-    pub fn wait(&self, events: &mut Events, timeout: Option<Duration>) -> io::Result<usize> {
+    pub fn wait(&self, events: &mut Events, mut timeout: Option<Duration>) -> io::Result<usize> {
         let span = tracing::trace_span!("Poller::wait", ?timeout);
         let _enter = span.enter();
 
         if let Ok(_lock) = self.lock.try_lock() {
+            let deadline = timeout.and_then(|timeout| Instant::now().checked_add(timeout));
+
             loop {
+                // Figure out how long to wait for.
+                let timeout =
+                    deadline.map(|deadline| deadline.saturating_duration_since(Instant::now()));
+
                 // Wait for I/O events.
                 if let Err(e) = self.poller.wait(&mut events.events, timeout) {
                     // If the wait was interrupted by a signal, clear events and try again.
