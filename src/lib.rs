@@ -646,7 +646,7 @@ impl Poller {
     /// poller.delete(&socket)?;
     /// # std::io::Result::Ok(())
     /// ```
-    pub fn wait(&self, events: &mut Events, mut timeout: Option<Duration>) -> io::Result<usize> {
+    pub fn wait(&self, events: &mut Events, timeout: Option<Duration>) -> io::Result<usize> {
         let span = tracing::trace_span!("Poller::wait", ?timeout);
         let _enter = span.enter();
 
