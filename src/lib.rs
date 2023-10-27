@@ -70,7 +70,7 @@ use std::marker::PhantomData;
 use std::num::NonZeroUsize;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use cfg_if::cfg_if;
 
@@ -651,14 +651,30 @@ impl Poller {
         let _enter = span.enter();
 
         if let Ok(_lock) = self.lock.try_lock() {
-            // Wait for I/O events.
-            self.poller.wait(&mut events.events, timeout)?;
+            let deadline = timeout.and_then(|timeout| Instant::now().checked_add(timeout));
 
-            // Clear the notification, if any.
-            self.notified.swap(false, Ordering::SeqCst);
+            loop {
+                // Figure out how long to wait for.
+                let timeout =
+                    deadline.map(|deadline| deadline.saturating_duration_since(Instant::now()));
 
-            // Indicate number of events.
-            Ok(events.len())
+                // Wait for I/O events.
+                if let Err(e) = self.poller.wait(&mut events.events, timeout) {
+                    // If the wait was interrupted by a signal, clear events and try again.
+                    if e.kind() == io::ErrorKind::Interrupted {
+                        events.clear();
+                        continue;
+                    } else {
+                        return Err(e);
+                    }
+                }
+
+                // Clear the notification, if any.
+                self.notified.swap(false, Ordering::SeqCst);
+
+                // Indicate number of events.
+                return Ok(events.len());
+            }
         } else {
             tracing::trace!("wait: skipping because another thread is already waiting on I/O");
             Ok(0)
