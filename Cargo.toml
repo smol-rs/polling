@@ -3,7 +3,7 @@ name = "polling"
 # When publishing a new version:
 # - Update CHANGELOG.md
 # - Create "v3.x.y" git tag
-version = "3.2.0"
+version = "3.3.0"
 authors = ["Stjepan Glavina <stjepang@gmail.com>", "John Nunley <dev@notgull.net>"]
 edition = "2021"
 rust-version = "1.63"

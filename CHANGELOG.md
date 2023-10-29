@@ -1,3 +1,8 @@
+# Version 3.3.0
+
+- Automatically restarts polling when `ErrorKind::Interrupted` is returned, rather than relying on the user to handle it. (#164)
+- Fix bad link in documentation for `Poller::wait()`. (#163)
+
 # Version 3.2.0
 
 - The `kqueue` backend previously allowed the following operations that other backends forbid. Now these operations result in an error: (#153)
