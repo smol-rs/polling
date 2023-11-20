@@ -29,7 +29,7 @@ concurrent-queue = "2.2.0"
 pin-project-lite = "0.2.9"
 
 [target.'cfg(windows)'.dependencies.windows-sys]
-version = "0.48"
+version = "0.52"
 features = [
     "Win32_Foundation",
     "Win32_Networking_WinSock",
