@@ -31,6 +31,8 @@ pin-project-lite = "0.2.9"
 [target.'cfg(windows)'.dependencies.windows-sys]
 version = "0.52"
 features = [
+    "Wdk_Foundation",
+    "Wdk_Storage_FileSystem",
     "Win32_Foundation",
     "Win32_Networking_WinSock",
     "Win32_Security",
