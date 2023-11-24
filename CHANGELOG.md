@@ -1,3 +1,7 @@
+# Version 3.3.1
+
+- Bump `windows-sys` to v0.52.0. (#169)
+
 # Version 3.3.0
 
 - Automatically restarts polling when `ErrorKind::Interrupted` is returned, rather than relying on the user to handle it. (#164)
