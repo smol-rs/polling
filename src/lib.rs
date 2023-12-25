@@ -349,13 +349,15 @@ impl Event {
 }
 
 /// Waits for I/O events.
-pub struct Poller {
+pub struct Poller<'a> {
     poller: sys::Poller,
     lock: Mutex<()>,
     notified: AtomicBool,
+    // Being contravariant over 'a requires borrowed file descriptors outlive the `Poller`
+    _marker: PhantomData<fn(&'a ())>,
 }
 
-impl Poller {
+impl<'a> Poller<'a> {
     /// Creates a new poller.
     ///
     /// # Examples
@@ -366,11 +368,12 @@ impl Poller {
     /// let poller = Poller::new()?;
     /// # std::io::Result::Ok(())
     /// ```
-    pub fn new() -> io::Result<Poller> {
+    pub fn new() -> io::Result<Poller<'a>> {
         Ok(Poller {
             poller: sys::Poller::new()?,
             lock: Mutex::new(()),
             notified: AtomicBool::new(false),
+            _marker: PhantomData,
         })
     }
 
@@ -476,6 +479,22 @@ impl Poller {
             ));
         }
         self.poller.add(source.raw(), interest, mode)
+    }
+
+    /// Adds a file descriptor or socket to the poller safely.
+    ///
+    /// This is identical to the `add()` function, but ensures safety
+    /// by requiring the descriptor to always outlive the `Poller`.
+    ///
+    /// # Errors
+    ///
+    /// If the operating system does not support the specified mode, this function
+    /// will return an error.
+    pub fn add_outlives<T: AsSource>(&self, source: &'a T, interest: Event) -> io::Result<()> {
+        // SAFETY: Lifetime parameter ensures AsSource will live at least as long as the Poller
+        // It is unsound for AsSource to reference  descriptors it doesn't own,
+        // so assume reference from `source.as_fd()` will be valid until self is dropped
+        unsafe { self.add(source.as_fd().as_raw_fd(), interest) }
     }
 
     /// Modifies the interest in a file descriptor or socket.
@@ -915,13 +934,13 @@ mod raw_fd_impl {
     use crate::Poller;
     use std::os::unix::io::{AsFd, AsRawFd, BorrowedFd, RawFd};
 
-    impl AsRawFd for Poller {
+    impl AsRawFd for Poller<'_> {
         fn as_raw_fd(&self) -> RawFd {
             self.poller.as_raw_fd()
         }
     }
 
-    impl AsFd for Poller {
+    impl AsFd for Poller<'_> {
         fn as_fd(&self) -> BorrowedFd<'_> {
             self.poller.as_fd()
         }
@@ -947,7 +966,7 @@ mod raw_handle_impl {
     }
 }
 
-impl fmt::Debug for Poller {
+impl fmt::Debug for Poller<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.poller.fmt(f)
     }
@@ -1026,8 +1045,8 @@ fn _assert_send_and_sync() {
     fn assert_send<T: Send>() {}
     fn assert_sync<T: Sync>() {}
 
-    assert_send::<Poller>();
-    assert_sync::<Poller>();
+    assert_send::<Poller<'_>>();
+    assert_sync::<Poller<'_>>();
 
     assert_send::<Event>();
     assert_sync::<Event>();

@@ -22,5 +22,5 @@ mod __private {
     #[doc(hidden)]
     pub trait PollerSealed {}
 
-    impl PollerSealed for crate::Poller {}
+    impl PollerSealed for crate::Poller<'_> {}
 }
