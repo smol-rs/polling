@@ -1152,7 +1152,7 @@ enum WaitableStatus {
     Idle,
 
     /// We are waiting on this handle to become signaled.
-    Waiting(WaitHandle),
+    Waiting(#[allow(dead_code)] WaitHandle),
 
     /// This handle has been cancelled.
     Cancelled,
