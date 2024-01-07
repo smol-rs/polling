@@ -127,21 +127,14 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
-        # When updating this, the reminder to update the minimum supported
-        # Rust version in Cargo.toml.
-        rust: ['1.63']
     steps:
       - uses: actions/checkout@v4
-      - name: Install Rust
-        # --no-self-update is necessary because the windows environment cannot self-update rustup.exe.
-        run: rustup update ${{ matrix.rust }} --no-self-update && rustup default ${{ matrix.rust }}
-      - run: cargo build
-      - name: Install Other Targets
+      - name: Install cargo-hack
+        uses: taiki-e/install-action@cargo-hack
+      - run: cargo hack build --no-dev-deps --rust-version
+      - run: cargo hack build --no-dev-deps --rust-version --target x86_64-unknown-freebsd
         if: startsWith(matrix.os, 'ubuntu')
-        run: rustup target add x86_64-unknown-freebsd x86_64-unknown-netbsd
-      - run: cargo build --target x86_64-unknown-freebsd
-        if: startsWith(matrix.os, 'ubuntu')
-      - run: cargo build --target x86_64-unknown-netbsd
+      - run: cargo hack build --no-dev-deps --rust-version --target x86_64-unknown-netbsd
         if: startsWith(matrix.os, 'ubuntu')
 
   clippy:
