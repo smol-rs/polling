@@ -74,8 +74,8 @@ jobs:
         run: cargo check -Z build-std --target x86_64-unknown-haiku
       - name: Clone async-io
         run: git clone https://github.com/smol-rs/async-io.git
-      - name: Add patch section
-        run: echo '[patch.crates-io]' >> async-io/Cargo.toml
+        # The async-io Cargo.toml already has a patch section at the bottom, so we
+        # can just add this.
       - name: Patch polling
         run: echo 'polling = { path = ".." }' >> async-io/Cargo.toml
       - name: Test async-io
