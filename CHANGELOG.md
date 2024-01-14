@@ -1,3 +1,8 @@
+# Version 3.3.2
+
+- When AFD fails to initialize, the resulting error now references
+  the underlying system error. (#174)
+
 # Version 3.3.1
 
 - Bump `windows-sys` to v0.52.0. (#169)
