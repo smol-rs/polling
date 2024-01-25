@@ -371,6 +371,12 @@ impl EventExtra {
     pub fn is_pri(&self) -> bool {
         false
     }
+
+    #[inline]
+    pub fn is_connect_failed(&self) -> bool {
+        unimplemented!("is connect failed is not supported on kqueue");
+    }
+
 }
 
 pub(crate) fn mode_to_flags(mode: PollMode) -> kqueue::EventFlags {
