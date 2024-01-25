@@ -365,6 +365,11 @@ impl EventExtra {
     pub fn is_pri(&self) -> bool {
         self.flags.contains(epoll::EventFlags::PRI)
     }
+
+    #[inline]
+    pub fn is_connect_failed(&self) -> bool {
+        self.flags.contains(epoll::EventFlags::ERR) && self.flags.contains(epoll::EventFlags::HUP)
+    }
 }
 
 /// The notifier for Linux.
