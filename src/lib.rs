@@ -333,10 +333,10 @@ impl Event {
     }
 
     /// Tell if this event is the result of a connect failure.
-    /// 
+    ///
     /// This indicates a tcp connection has failed, it corresponds to the `EPOLLERR` along with `EPOLLHUP` event in linux
     /// and `CONNECT_FAILED` event in windows IOCP.
-    /// 
+    ///
 
     #[inline]
     pub fn is_connect_failed(&self) -> bool {
