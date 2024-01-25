@@ -332,6 +332,14 @@ impl Event {
         self.extra.is_pri()
     }
 
+    /// Tell if this event is the result of a connect failure.
+    /// 
+    /// This indicates that a non-blocking connect operation has failed. 
+    #[inline]
+    pub fn is_connect_failed(&self) -> bool {
+        self.extra.is_connect_failed()
+    }
+
     /// Remove any extra information from this event.
     #[inline]
     pub fn clear_extra(&mut self) {

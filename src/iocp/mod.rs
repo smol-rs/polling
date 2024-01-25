@@ -681,6 +681,12 @@ impl EventExtra {
     pub fn set_pri(&mut self, active: bool) {
         self.flags.set(AfdPollMask::RECEIVE_EXPEDITED, active);
     }
+
+    /// Check if TCP connect failed.
+    #[inline]
+    pub fn is_connect_failed(&self) -> bool {
+        self.flags.intersects(AfdPollMask::CONNECT_FAIL)
+    }
 }
 
 /// A packet used to wake up the poller with an event.
