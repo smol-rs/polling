@@ -426,6 +426,11 @@ impl EventExtra {
     pub fn is_pri(&self) -> bool {
         self.flags.contains(PollFlags::PRI)
     }
+
+    #[inline]
+    pub fn is_connect_failed(&self) -> Option<bool> {
+        Some(self.flags.contains(PollFlags::ERR) || self.flags.contains(PollFlags::HUP))
+    }
 }
 
 fn cvt_mode_as_remove(mode: PollMode) -> io::Result<bool> {
