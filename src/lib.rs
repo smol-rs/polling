@@ -373,7 +373,7 @@ impl Event {
     ///     println!("event: {:?}", event);
     ///     if event
     ///         .is_connect_failed()
-    ///         .expect("is connect failed does not support on this platform")
+    ///         .unwrap_or_default()
     ///     {
     ///         println!("connect failed");
     ///     }
