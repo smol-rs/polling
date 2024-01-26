@@ -19,9 +19,12 @@ fn main() -> io::Result<()> {
     poller.wait(&mut events, None)?;
 
     let event = events.iter().next();
-    let Some(event) = event else {
-        println!("no event");
-        return Ok(());
+    let event = match event {
+        Some(event) => event,
+        None => {
+            println!("no event");
+            return Ok(());
+        },
     };
 
     println!("event: {:?}", event);
