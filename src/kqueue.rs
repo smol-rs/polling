@@ -373,8 +373,8 @@ impl EventExtra {
     }
 
     #[inline]
-    pub fn is_connect_failed(&self) -> bool {
-        unimplemented!("is connect failed is not supported on kqueue");
+    pub fn is_connect_failed(&self) -> Option<bool> {
+        None
     }
 }
 

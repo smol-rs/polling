@@ -25,7 +25,10 @@ fn main() -> io::Result<()> {
     };
 
     println!("event: {:?}", event);
-    if event.is_connect_failed() {
+    if event
+        .is_connect_failed()
+        .expect("is connect failed does not support on this platform")
+    {
         println!("connect failed");
     }
 
