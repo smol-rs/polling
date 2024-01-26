@@ -361,7 +361,7 @@ impl Event {
     ///     poller.wait(&mut events, None)?;
     ///
     ///     let event = events.iter().next();
-    /// 
+    ///
     ///     let event = match event {
     ///         Some(event) => event,
     ///         None => {

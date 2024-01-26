@@ -24,7 +24,7 @@ fn main() -> io::Result<()> {
         None => {
             println!("no event");
             return Ok(());
-        },
+        }
     };
 
     println!("event: {:?}", event);
