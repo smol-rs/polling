@@ -27,22 +27,16 @@ mod example {
 
         println!("Press Ctrl+C to exit...");
 
-        loop {
-            // Wait for events.
-            poller.wait(&mut events, None).unwrap();
+        // Wait for events.
+        poller.wait(&mut events, None).unwrap();
 
-            // Process events.
-            for ev in events.iter() {
-                match ev.key {
-                    1 => {
-                        println!("SIGINT received");
-                        return;
-                    }
-                    _ => unreachable!(),
-                }
+        // Process events.
+        let ev = events.iter().next().unwrap();
+        match ev.key {
+            1 => {
+                println!("SIGINT received");
             }
-
-            events.clear();
+            _ => unreachable!(),
         }
     }
 }
