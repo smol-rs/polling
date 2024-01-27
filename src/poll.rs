@@ -571,13 +571,20 @@ mod notify {
             // (1) is not a problem for us, as we want the eventfd() file descriptor to be in a non-blocking mode anyway
             // (2) is also not a problem, as long as we don't try to read the counter value in an endless loop when we detect being notified
 
-            #[cfg(not(target_os = "espidf"))]
-            let flags = EventfdFlags::NONBLOCK;
-
-            #[cfg(target_os = "espidf")]
             let flags = EventfdFlags::empty();
-
-            let event_fd = eventfd(0, flags)?;
+            let event_fd = eventfd(0, flags).map_err(|err| {
+                match err {
+                    rustix::io::Errno::PERM => {
+                        // EPERM can happen if the eventfd isn't initialized yet.
+                        // Tell the user to call esp_vfs_eventfd_register.
+                        io::Error::new(
+                            io::ErrorKind::PermissionDenied,
+                            "failed to initialize eventfd for polling, try calling `esp_vfs_eventfd_register`"
+                        )
+                    },
+                    err => io::Error::from(err),
+                }
+            })?;
 
             Ok(Self { event_fd })
         }
