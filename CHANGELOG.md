@@ -1,3 +1,9 @@
+# Version 3.3.3
+
+- On ESP-IDF, there is an EPERM error when initializing the `Poller` without
+  first having initialized the ESP-IDF eventfd subsystem. Now, when this happens
+  the error will mention the need to call "esp_vfs_eventfd_register" first. (#186)
+
 # Version 3.3.2
 
 - When AFD fails to initialize, the resulting error now references
