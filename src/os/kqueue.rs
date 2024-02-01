@@ -173,7 +173,7 @@ impl Filter for Signal {}
 #[derive(Debug)]
 pub struct Process<'a> {
     /// The process ID to monitor.
-    pid: std::os::raw::c_int,
+    pid: rustix::process::Pid,
 
     /// The operation to monitor.
     ops: ProcessOps,
@@ -205,9 +205,7 @@ impl<'a> Process<'a> {
     /// registration into the poller.
     pub unsafe fn new(child: &'a Child, ops: ProcessOps) -> Self {
         Self {
-            pid: rustix::process::Pid::from_child(child)
-                .as_raw_nonzero()
-                .get(),
+            pid: rustix::process::Pid::from_child(child),
             ops,
             _lt: PhantomData,
         }
@@ -220,7 +218,7 @@ impl<'a> Process<'a> {
     /// The PID must be tied to an actual child process.
     pub unsafe fn from_pid(pid: std::num::NonZeroI32, ops: ProcessOps) -> Self {
         Self {
-            pid: pid.get(),
+            pid: unsafe { rustix::process::Pid::from_raw_unchecked(pid.get()) },
             ops,
             _lt: PhantomData,
         }
@@ -239,7 +237,7 @@ unsafe impl FilterSealed for Process<'_> {
         kqueue::Event::new(
             kqueue::EventFilter::Proc {
                 // SAFETY: We know that the PID is nonzero.
-                pid: unsafe { rustix::process::Pid::from_raw_unchecked(self.pid) },
+                pid: self.pid,
                 flags: events,
             },
             flags | kqueue::EventFlags::RECEIPT,
@@ -250,7 +248,7 @@ unsafe impl FilterSealed for Process<'_> {
     #[inline(always)]
     fn source_id(&self) -> SourceId {
         // SAFETY: We know that the PID is nonzero
-        SourceId::Pid(unsafe { rustix::process::Pid::from_raw_unchecked(self.pid) })
+        SourceId::Pid(self.pid)
     }
 }
 
