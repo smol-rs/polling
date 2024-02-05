@@ -369,9 +369,15 @@ impl EventExtra {
     #[inline]
     pub fn is_connect_failed(&self) -> Option<bool> {
         Some(
-            self.flags.contains(epoll::EventFlags::ERR) && self.flags.contains(epoll::EventFlags::HUP),
+            self.flags.contains(epoll::EventFlags::ERR | epoll::EventFlags::HUP) 
         )
     }
+
+    #[inline]
+    pub fn is_out_with_hup(&self) -> bool {
+        self.flags.contains(epoll::EventFlags::OUT | epoll::EventFlags::HUP)
+    }
+
 }
 
 /// The notifier for Linux.

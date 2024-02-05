@@ -391,6 +391,13 @@ impl Event {
         self.extra.is_connect_failed()
     }
 
+    /// a linux specific function, this event happens when calling wait for epoll while the file descriptor is not connected for TCP
+    #[cfg(target_os = "linux")]
+    #[inline]
+    pub fn is_out_with_hup(&self) -> bool {
+        self.extra.is_out_with_hup()
+    }
+    
     /// Remove any extra information from this event.
     #[inline]
     pub fn clear_extra(&mut self) {
