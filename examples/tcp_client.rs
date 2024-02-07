@@ -86,10 +86,11 @@ fn main() -> io::Result<()> {
 
 #[cfg(target_os = "windows")]
 fn main() -> io::Result<()> {
+    use polling::Event;
     use std::{io::Write, time::Duration};
 
     std::thread::spawn(|| {
-        let listener = net::TcpListener::bind("0.0.0.0:8080").unwrap();
+        let listener = std::net::TcpListener::bind("0.0.0.0:8080").unwrap();
         println!("Listening on {}", listener.local_addr().unwrap());
         for stream in listener.incoming() {
             let mut stream = match stream {
@@ -102,7 +103,7 @@ fn main() -> io::Result<()> {
         }
     });
     std::thread::sleep(Duration::from_millis(100));
-    let socket = socket2::Socket::new(socket2::Domain::IPV4, Type::STREAM, None)?;
+    let socket = socket2::Socket::new(socket2::Domain::IPV4, socket2::Type::STREAM, None)?;
     let poller = polling::Poller::new()?;
     unsafe {
         poller.add(&socket, Event::new(0, true, true))?;
@@ -110,7 +111,7 @@ fn main() -> io::Result<()> {
 
     socket.set_nonblocking(true)?;
 
-    let addr = net::SocketAddr::new("127.0.0.1".parse().unwrap(), 8080);
+    let addr = std::net::SocketAddr::new("127.0.0.1".parse().unwrap(), 8080);
     let err = socket.connect(&addr.into()).unwrap_err();
 
     assert_eq!(err.kind(), io::ErrorKind::WouldBlock);
@@ -129,8 +130,8 @@ fn main() -> io::Result<()> {
     // // ========================================================================
     // // the below is example of a bad socket
     println!("testing bad socket");
-    let bad_socket = socket2::Socket::new(socket2::Domain::IPV4, Type::STREAM, None)?;
-    let addr = net::SocketAddr::new("127.0.0.1".parse().unwrap(), 12345);
+    let bad_socket = socket2::Socket::new(socket2::Domain::IPV4, socket2::Type::STREAM, None)?;
+    let addr = std::net::SocketAddr::new("127.0.0.1".parse().unwrap(), 12345);
     bad_socket.set_nonblocking(true)?;
     bad_socket.connect(&addr.into()).unwrap_err();
 
