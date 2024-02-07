@@ -392,8 +392,7 @@ impl Event {
     ///   
     ///       Ok(())
     ///   }
-    /// # Returns
-    ///
+    /// ```  
     /// Returns `Some(true)` if the connection has failed, `Some(false)` if there is an error,
     /// or `None` if the platform does not support detecting this condition.
     #[inline]
