@@ -151,7 +151,7 @@ fn main() -> io::Result<()> {
     Ok(())
 }
 
-#[cfg(not(any(target_os = "linux", target_os = "windows")))]
+#[cfg(target_os = "macos")]
 fn main() {
     println!("This example is not yet supported on this platform.");
 }
