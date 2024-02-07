@@ -334,70 +334,73 @@ impl Event {
 
     /// Tells if this event is the result of a connection failure.
     ///
-    /// This function checks if a TCP connection has failed. It corresponds to the `EPOLLERR`  or `EPOLLHUP` event in Linux
+    /// This function checks if an error exist,particularlly useful in detecting if TCP connection failed. It corresponds to the `EPOLLERR` event in Linux
     /// and `CONNECT_FAILED` event in Windows IOCP.
+    ///
+    /// note: in epoll, a tcp connection failure is indicated by EPOLLERR + EPOLLHUP, though just EPOLLERR is enough to indicate a connection failure.
+    /// EPOLLHUP may happen when we haven't event called `connect` on the socket, but it is still a valid event to check for.
     ///
     /// # Examples
     ///
     /// ```
-    /// use std::{io, net};
-    /// // Assuming polling and socket2 are included as dependencies in Cargo.toml
-    /// use polling::Event;
-    /// use socket2::Type;
-    ///
-    /// fn main() -> io::Result<()> {
-    ///     let socket = socket2::Socket::new(socket2::Domain::IPV4, Type::STREAM, None)?;
-    ///     let poller = polling::Poller::new()?;
-    ///     unsafe {
-    ///         poller.add(&socket, Event::new(0, true, true))?;
-    ///     }
-    ///     let addr = net::SocketAddr::new(net::Ipv4Addr::LOCALHOST.into(), 8080);
-    ///     socket.set_nonblocking(true)?;
-    ///     let _ = socket.connect(&addr.into());
-    ///
-    ///     let mut events = polling::Events::new();
-    ///
-    ///     events.clear();
-    ///     poller.wait(&mut events, None)?;
-    ///
-    ///     let event = events.iter().next();
-    ///
-    ///     let event = match event {
-    ///         Some(event) => event,
-    ///         None => {
-    ///             println!("no event");
-    ///             return Ok(());
-    ///         },
-    ///     };
-    ///
-    ///     println!("event: {:?}", event);
-    ///     if event
-    ///         .is_connect_failed()
-    ///         .unwrap_or_default()
-    ///     {
-    ///         println!("connect failed");
-    ///     }
-    ///
-    ///     Ok(())
-    /// }
-    /// ```
-    ///
+    ///   #[cfg(target_os = "linux")]
+    ///   fn main() -> io::Result<()> {
+    ///       use std::{io::Write, time::Duration};
+    ///   
+    ///       std::thread::spawn(|| {
+    ///           let listener = net::TcpListener::bind("0.0.0.0:8080").unwrap();
+    ///           println!("Listening on {}", listener.local_addr().unwrap());
+    ///           for stream in listener.incoming() {
+    ///               let mut stream = stream.unwrap();
+    ///               stream.write(b"Hello, world!\n").unwrap();
+    ///           }
+    ///       });
+    ///       std::thread::sleep(Duration::from_millis(100));
+    ///       let socket = socket2::Socket::new(socket2::Domain::IPV4, Type::STREAM, None)?;
+    ///       let poller = polling::Poller::new()?;
+    ///       unsafe {
+    ///           poller.add(&socket, Event::new(0, true, true))?;
+    ///       }
+    ///   
+    ///       socket.set_nonblocking(true)?;
+    ///   
+    ///       let mut events = polling::Events::new();
+    ///       poller.wait(&mut events, Some(Duration::from_secs(3)))?;
+    ///   
+    ///       let event = events.iter().next().expect("no event");
+    ///   
+    ///       assert!(event.is_interrupt());
+    ///   
+    ///       let addr = net::SocketAddr::new("127.0.0.1".parse().unwrap(), 8080);
+    ///       let err = socket.connect(&addr.into()).unwrap_err();
+    ///       
+    ///       // EINPROGRESS
+    ///       assert_eq!(115, err.raw_os_error().expect("No OS error"));
+    ///   
+    ///       poller.modify(&socket, Event::writable(0)).expect("modify failed");
+    ///       events.clear();
+    ///       poller.wait(&mut events, Some(Duration::from_secs(3)))?;
+    ///   
+    ///       let event = events.iter().next().expect("no event");
+    ///   
+    ///       assert!(event.writable);
+    ///       assert!(!event.is_interrupt());
+    ///       assert!(!event.is_err().unwrap());
+    ///   
+    ///       println!("event: {:?}", event);
+    ///       println!("socket is now writable");
+    ///   
+    ///       Ok(())
+    ///   }
     /// # Returns
     ///
-    /// Returns `Some(true)` if the connection has failed, `Some(false)` if the connection has not failed,
+    /// Returns `Some(true)` if the connection has failed, `Some(false)` if there is an error,
     /// or `None` if the platform does not support detecting this condition.
     #[inline]
-    pub fn is_connect_failed(&self) -> Option<bool> {
-        self.extra.is_connect_failed()
+    pub fn is_err(&self) -> Option<bool> {
+        self.extra.is_err()
     }
 
-    /// a linux specific function, this event happens when calling wait for epoll while the file descriptor is not connected for TCP
-    #[cfg(target_os = "linux")]
-    #[inline]
-    pub fn is_out_with_hup(&self) -> bool {
-        self.extra.is_out_with_hup()
-    }
-    
     /// Remove any extra information from this event.
     #[inline]
     pub fn clear_extra(&mut self) {

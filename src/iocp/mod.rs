@@ -684,7 +684,7 @@ impl EventExtra {
 
     /// Check if TCP connect failed.
     #[inline]
-    pub fn is_connect_failed(&self) -> Option<bool> {
+    pub fn is_err(&self) -> Option<bool> {
         Some(self.flags.intersects(AfdPollMask::CONNECT_FAIL))
     }
 }
