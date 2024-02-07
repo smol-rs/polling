@@ -93,7 +93,7 @@ fn main() -> io::Result<()> {
         for stream in listener.incoming() {
             let mut stream = match stream {
                 Ok(stream) => stream,
-                Err(e) => {
+                Err(_) => {
                     continue;
                 }
             };
