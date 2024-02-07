@@ -85,8 +85,8 @@ fn main() -> std::io::Result<()> {
 #[cfg(target_os = "windows")]
 fn main() -> std::io::Result<()> {
     use polling::Event;
-    use std::{io::Write, time::Duration};
     use std::io;
+    use std::{io::Write, time::Duration};
 
     std::thread::spawn(|| {
         let listener = std::net::TcpListener::bind("0.0.0.0:8080").unwrap();
