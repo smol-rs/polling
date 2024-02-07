@@ -151,7 +151,7 @@ fn main() -> io::Result<()> {
     Ok(())
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "android"))]
 fn main() {
     println!("This example is not yet supported on this platform.");
 }
