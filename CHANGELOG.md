@@ -1,3 +1,11 @@
+# Version 3.4.0
+
+- Add the ability to identify whether socket connection has failed. (#185)
+- On BSD, add the ability to wait on a process by its PID. Previously, it was
+  only possible to wait on a process by a `Child` object. (#180)
+- On ESP-IDF, annotate `eventfd` initialization failures with a message
+  indicating the source of those failures. (#186)
+
 # Version 3.3.2
 
 - When AFD fails to initialize, the resulting error now references
