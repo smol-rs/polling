@@ -343,10 +343,9 @@ impl Event {
     /// # Examples
     ///
     /// ```
-    ///use std::io;
     ///
     ///#[cfg(target_os = "linux")]
-    ///fn main() -> io::Result<()> {
+    ///fn main() -> std::io::Result<()> {
     ///    use std::net;
     ///    use std::{io::Write, time::Duration};
     ///
