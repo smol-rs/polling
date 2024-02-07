@@ -1,11 +1,12 @@
-use std::{io, net};
-
-use polling::Event;
-use socket2::Type;
+use std::io;
 
 #[cfg(target_os = "linux")]
 fn main() -> io::Result<()> {
+    use std::net;
     use std::{io::Write, time::Duration};
+
+    use polling::Event;
+    use socket2::Type;
 
     std::thread::spawn(|| {
         let listener = net::TcpListener::bind("0.0.0.0:8080").unwrap();
@@ -147,7 +148,6 @@ fn main() -> io::Result<()> {
 
     Ok(())
 }
-
 
 #[cfg(not(any(target_os = "linux", target_os = "windows")))]
 fn main() {
