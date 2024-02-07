@@ -1,8 +1,5 @@
-#![cfg(any(target_os = "linux", target_os = "windows"))]
-use std::io;
-
 #[cfg(target_os = "linux")]
-fn main() -> io::Result<()> {
+fn main() -> std::io::Result<()> {
     use std::net;
     use std::{io::Write, time::Duration};
 
@@ -86,7 +83,7 @@ fn main() -> io::Result<()> {
 }
 
 #[cfg(target_os = "windows")]
-fn main() -> io::Result<()> {
+fn main() -> std::io::Result<()> {
     use polling::Event;
     use std::{io::Write, time::Duration};
 
@@ -151,7 +148,7 @@ fn main() -> io::Result<()> {
     Ok(())
 }
 
-#[cfg(any(target_os = "macos", target_os = "android"))]
+#[cfg(not(any(target_os = "linux", target_os = "windows")))]
 fn main() {
     println!("This example is not yet supported on this platform.");
 }
