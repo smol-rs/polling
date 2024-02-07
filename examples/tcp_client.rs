@@ -51,6 +51,34 @@ fn main() -> io::Result<()> {
 
     println!("event: {:?}", event);
     println!("socket is now writable");
+    // ========================================================================
+    // the below is example of a bad socket
+    println!("testing bad socket");
+    let bad_socket = socket2::Socket::new(socket2::Domain::IPV4, Type::STREAM, None)?;
+    let addr = net::SocketAddr::new("127.0.0.1".parse().unwrap(), 12345);
+    bad_socket.set_nonblocking(true)?;
+
+    unsafe {
+        poller.add(&bad_socket, Event::writable(0))?;
+    }
+
+    events.clear();
+    poller.wait(&mut events, Some(Duration::from_secs(3)))?;
+
+    let err = bad_socket.connect(&addr.into()).unwrap_err();
+    assert_eq!(115, err.raw_os_error().expect("No OS error"));
+
+    poller
+        .modify(&bad_socket, Event::writable(0))
+        .expect("modify failed");
+
+    events.clear();
+    poller.wait(&mut events, Some(Duration::from_secs(3)))?;
+
+    let event = events.iter().next().expect("no event");
+
+    assert!(event.is_err().unwrap());
+    println!("bad socket is now in error state");
 
     Ok(())
 }
