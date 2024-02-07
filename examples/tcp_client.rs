@@ -12,7 +12,7 @@ fn main() -> io::Result<()> {
         println!("Listening on {}", listener.local_addr().unwrap());
         for stream in listener.incoming() {
             let mut stream = stream.unwrap();
-            stream.write(b"Hello, world!\n").unwrap();
+            stream.write_all(b"Hello, world!\n").unwrap();
         }
     });
     std::thread::sleep(Duration::from_millis(100));
