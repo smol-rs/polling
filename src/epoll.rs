@@ -418,20 +418,22 @@ impl Notifier {
     /// Create a new notifier.
     fn new() -> io::Result<Self> {
         // Skip eventfd for testing if necessary.
-        #[cfg(all(not(polling_test_epoll_pipe), not(target_os = "redox")))]
+        #[cfg(not(target_os = "redox"))]
         {
-            // Try to create an eventfd.
-            match eventfd(0, EventfdFlags::CLOEXEC | EventfdFlags::NONBLOCK) {
-                Ok(fd) => {
-                    tracing::trace!("created eventfd for notifier");
-                    return Ok(Notifier::EventFd(fd));
-                }
+            if !cfg!(polling_test_epoll_pipe) {
+                // Try to create an eventfd.
+                match eventfd(0, EventfdFlags::CLOEXEC | EventfdFlags::NONBLOCK) {
+                    Ok(fd) => {
+                        tracing::trace!("created eventfd for notifier");
+                        return Ok(Notifier::EventFd(fd));
+                    }
 
-                Err(err) => {
-                    tracing::warn!(
-                        "eventfd() failed with error ({}), falling back to pipe",
-                        err
-                    );
+                    Err(err) => {
+                        tracing::warn!(
+                            "eventfd() failed with error ({}), falling back to pipe",
+                            err
+                        );
+                    }
                 }
             }
         }
