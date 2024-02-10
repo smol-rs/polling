@@ -4,15 +4,19 @@ use std::io;
 use std::os::unix::io::{AsFd, AsRawFd, BorrowedFd, RawFd};
 use std::time::Duration;
 
-use rustix::event::{epoll, eventfd, EventfdFlags};
-use rustix::fd::OwnedFd;
-use rustix::fs::{fcntl_getfl, fcntl_setfl, OFlags};
-use rustix::io::{fcntl_getfd, fcntl_setfd, read, write, FdFlags};
-use rustix::pipe::{pipe, pipe_with, PipeFlags};
+#[cfg(not(target_os = "redox"))]
+use rustix::event::{eventfd, EventfdFlags};
+#[cfg(not(target_os = "redox"))]
 use rustix::time::{
     timerfd_create, timerfd_settime, Itimerspec, TimerfdClockId, TimerfdFlags, TimerfdTimerFlags,
     Timespec,
 };
+
+use rustix::event::epoll;
+use rustix::fd::OwnedFd;
+use rustix::fs::{fcntl_getfl, fcntl_setfl, OFlags};
+use rustix::io::{fcntl_getfd, fcntl_setfd, read, write, FdFlags};
+use rustix::pipe::{pipe, pipe_with, PipeFlags};
 
 use crate::{Event, PollMode};
 
@@ -26,6 +30,9 @@ pub struct Poller {
     notifier: Notifier,
 
     /// File descriptor for the timerfd that produces timeouts.
+    ///
+    /// Redox does not support timerfd.
+    #[cfg(not(target_os = "redox"))]
     timer_fd: Option<OwnedFd>,
 }
 
@@ -39,6 +46,7 @@ impl Poller {
 
         // Set up notifier and timerfd.
         let notifier = Notifier::new()?;
+        #[cfg(not(target_os = "redox"))]
         let timer_fd = timerfd_create(
             TimerfdClockId::Monotonic,
             TimerfdFlags::CLOEXEC | TimerfdFlags::NONBLOCK,
@@ -48,10 +56,12 @@ impl Poller {
         let poller = Poller {
             epoll_fd,
             notifier,
+            #[cfg(not(target_os = "redox"))]
             timer_fd,
         };
 
         unsafe {
+            #[cfg(not(target_os = "redox"))]
             if let Some(ref timer_fd) = poller.timer_fd {
                 poller.add(
                     timer_fd.as_raw_fd(),
@@ -70,7 +80,6 @@ impl Poller {
         tracing::trace!(
             epoll_fd = ?poller.epoll_fd.as_raw_fd(),
             notifier = ?poller.notifier,
-            timer_fd = ?poller.timer_fd,
             "new",
         );
         Ok(poller)
@@ -155,6 +164,7 @@ impl Poller {
         );
         let _enter = span.enter();
 
+        #[cfg(not(target_os = "redox"))]
         if let Some(ref timer_fd) = self.timer_fd {
             // Configure the timeout using timerfd.
             let new_val = Itimerspec {
@@ -181,8 +191,13 @@ impl Poller {
             )?;
         }
 
+        #[cfg(not(target_os = "redox"))]
+        let timer_fd = &self.timer_fd;
+        #[cfg(target_os = "redox")]
+        let timer_fd: Option<core::convert::Infallible> = None;
+
         // Timeout in milliseconds for epoll.
-        let timeout_ms = match (&self.timer_fd, timeout) {
+        let timeout_ms = match (timer_fd, timeout) {
             (_, Some(t)) if t == Duration::from_secs(0) => 0,
             (None, Some(t)) => {
                 // Round up to a whole millisecond.
@@ -245,10 +260,10 @@ impl Drop for Poller {
             "drop",
             epoll_fd = ?self.epoll_fd.as_raw_fd(),
             notifier = ?self.notifier,
-            timer_fd = ?self.timer_fd
         );
         let _enter = span.enter();
 
+        #[cfg(not(target_os = "redox"))]
         if let Some(timer_fd) = self.timer_fd.take() {
             let _ = self.delete(timer_fd.as_fd());
         }
@@ -257,6 +272,7 @@ impl Drop for Poller {
 }
 
 /// `timespec` value that equals zero.
+#[cfg(not(target_os = "redox"))]
 const TS_ZERO: Timespec = unsafe { std::mem::transmute([0u8; std::mem::size_of::<Timespec>()]) };
 
 /// Get the EPOLL flags for the interest.
@@ -385,6 +401,7 @@ impl EventExtra {
 #[derive(Debug)]
 enum Notifier {
     /// The primary notifier, using eventfd.
+    #[cfg(not(target_os = "redox"))]
     EventFd(OwnedFd),
 
     /// The fallback notifier, using a pipe.
@@ -401,7 +418,8 @@ impl Notifier {
     /// Create a new notifier.
     fn new() -> io::Result<Self> {
         // Skip eventfd for testing if necessary.
-        if !cfg!(polling_test_epoll_pipe) {
+        #[cfg(all(not(polling_test_epoll_pipe), not(target_os = "redox")))]
+        {
             // Try to create an eventfd.
             match eventfd(0, EventfdFlags::CLOEXEC | EventfdFlags::NONBLOCK) {
                 Ok(fd) => {
@@ -435,6 +453,7 @@ impl Notifier {
     /// The file descriptor to register in the poller.
     fn as_fd(&self) -> BorrowedFd<'_> {
         match self {
+            #[cfg(not(target_os = "redox"))]
             Notifier::EventFd(fd) => fd.as_fd(),
             Notifier::Pipe {
                 read_pipe: read, ..
@@ -445,6 +464,7 @@ impl Notifier {
     /// Notify the poller.
     fn notify(&self) {
         match self {
+            #[cfg(not(target_os = "redox"))]
             Self::EventFd(fd) => {
                 let buf: [u8; 8] = 1u64.to_ne_bytes();
                 let _ = write(fd, &buf);
@@ -459,6 +479,7 @@ impl Notifier {
     /// Clear the notification.
     fn clear(&self) {
         match self {
+            #[cfg(not(target_os = "redox"))]
             Self::EventFd(fd) => {
                 let mut buf = [0u8; 8];
                 let _ = read(fd, &mut buf);
