@@ -117,6 +117,10 @@ jobs:
       run: |
         rustup target add x86_64-unknown-illumos
         cargo build --target x86_64-unknown-illumos
+    - name: Redox
+      run: |
+        rustup target add x86_64-unknown-redox
+        cargo check --target x86_64-unknown-redox
 
   wine:
     runs-on: ubuntu-22.04
