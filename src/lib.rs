@@ -334,6 +334,66 @@ impl Event {
 
     /// Tells if this event is the result of a connection failure.
     ///
+    /// This function checks if a TCP connection has failed. It corresponds to the `EPOLLERR`  or `EPOLLHUP` event in Linux
+    /// and `CONNECT_FAILED` event in Windows IOCP.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::{io, net};
+    /// // Assuming polling and socket2 are included as dependencies in Cargo.toml
+    /// use polling::Event;
+    /// use socket2::Type;
+    ///
+    /// fn main() -> io::Result<()> {
+    ///     let socket = socket2::Socket::new(socket2::Domain::IPV4, Type::STREAM, None)?;
+    ///     let poller = polling::Poller::new()?;
+    ///     unsafe {
+    ///         poller.add(&socket, Event::new(0, true, true))?;
+    ///     }
+    ///     let addr = net::SocketAddr::new(net::Ipv4Addr::LOCALHOST.into(), 8080);
+    ///     socket.set_nonblocking(true)?;
+    ///     let _ = socket.connect(&addr.into());
+    ///
+    ///     let mut events = polling::Events::new();
+    ///
+    ///     events.clear();
+    ///     poller.wait(&mut events, None)?;
+    ///
+    ///     let event = events.iter().next();
+    ///
+    ///     let event = match event {
+    ///         Some(event) => event,
+    ///         None => {
+    ///             println!("no event");
+    ///             return Ok(());
+    ///         },
+    ///     };
+    ///
+    ///     println!("event: {:?}", event);
+    ///     if event
+    ///         .is_connect_failed()
+    ///         .unwrap_or_default()
+    ///     {
+    ///         println!("connect failed");
+    ///     }
+    ///
+    ///     Ok(())
+    /// }
+    /// ```
+    ///
+    /// # Returns
+    ///
+    /// Returns `Some(true)` if the connection has failed, `Some(false)` if the connection has not failed,
+    /// or `None` if the platform does not support detecting this condition.
+    #[inline]
+    #[deprecated]
+    pub fn is_connect_failed(&self) -> Option<bool> {
+        self.extra.is_connect_failed()
+    }
+
+    /// Tells if this event is the result of a connection failure.
+    ///
     /// This function checks if an error exist,particularlly useful in detecting if TCP connection failed. It corresponds to the `EPOLLERR` event in Linux
     /// and `CONNECT_FAILED` event in Windows IOCP.
     ///
