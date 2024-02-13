@@ -1,7 +1,7 @@
 //! Portable interface to epoll, kqueue, event ports, and IOCP.
 //!
 //! Supported platforms:
-//! - [epoll](https://en.wikipedia.org/wiki/Epoll): Linux, Android
+//! - [epoll](https://en.wikipedia.org/wiki/Epoll): Linux, Android, RedoxOS
 //! - [kqueue](https://en.wikipedia.org/wiki/Kqueue): macOS, iOS, tvOS, watchOS, FreeBSD, NetBSD, OpenBSD,
 //!   DragonFly BSD
 //! - [event ports](https://illumos.org/man/port_create): illumos, Solaris
@@ -80,7 +80,11 @@ cfg_if! {
     if #[cfg(polling_test_poll_backend)] {
         mod poll;
         use poll as sys;
-    } else if #[cfg(any(target_os = "linux", target_os = "android"))] {
+    } else if #[cfg(any(
+        target_os = "linux",
+        target_os = "android",
+        target_os = "redox"
+    ))] {
         mod epoll;
         use epoll as sys;
     } else if #[cfg(any(

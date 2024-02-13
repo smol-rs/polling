@@ -20,6 +20,7 @@ pub mod iocp;
 
 mod __private {
     #[doc(hidden)]
+    #[allow(dead_code)]
     pub trait PollerSealed {}
 
     impl PollerSealed for crate::Poller {}
