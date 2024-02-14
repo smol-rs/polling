@@ -507,7 +507,7 @@ impl Poller {
     /// poller.delete(&source)?;
     /// # std::io::Result::Ok(())
     /// ```
-    pub unsafe fn add(&self, source: impl AsRawSource, interest: Event) -> io::Result<()> {
+    pub fn add(&self, source: impl AsSource, interest: Event) -> io::Result<()> {
         self.add_with_mode(source, interest, PollMode::Oneshot)
     }
 
@@ -526,9 +526,9 @@ impl Poller {
     ///
     /// If the operating system does not support the specified mode, this function
     /// will return an error.
-    pub unsafe fn add_with_mode(
+    pub fn add_with_mode(
         &self,
-        source: impl AsRawSource,
+        source: impl AsSource,
         interest: Event,
         mode: PollMode,
     ) -> io::Result<()> {
@@ -538,7 +538,7 @@ impl Poller {
                 "the key is not allowed to be `usize::MAX`",
             ));
         }
-        self.poller.add(source.raw(), interest, mode)
+        self.poller.add(source.as_fd(), interest, mode)
     }
 
     /// Modifies the interest in a file descriptor or socket.
