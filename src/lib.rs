@@ -391,7 +391,7 @@ impl Event {
     /// Returns `Some(true)` if the connection has failed, `Some(false)` if the connection has not failed,
     /// or `None` if the platform does not support detecting this condition.
     #[inline]
-    #[deprecated]
+    #[deprecated(since = "3.4.0", note = "use `is_err` in combination of is_hub instead, see documentation for `is_err`")]
     pub fn is_connect_failed(&self) -> Option<bool> {
         self.extra.is_connect_failed()
     }
