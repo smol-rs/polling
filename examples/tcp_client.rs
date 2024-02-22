@@ -28,7 +28,7 @@ fn main() -> io::Result<()> {
     };
 
     println!("event: {:?}", event);
-    if event.is_connect_failed().unwrap_or_default() {
+    if event.is_err().unwrap_or(false){
         println!("connect failed");
     }
 
