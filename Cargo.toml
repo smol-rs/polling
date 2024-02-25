@@ -21,8 +21,10 @@ rustdoc-args = ["--cfg", "docsrs"]
 cfg-if = "1"
 tracing = { version = "0.1.37", default-features = false }
 
-[target.'cfg(any(unix, target_os = "fuchsia", target_os = "vxworks"))'.dependencies]
-rustix = { version = "0.38.31", features = ["event", "fs", "pipe", "process", "std", "time"], default-features = false }
+[target.'cfg(any(unix, target_os = "fuchsia", target_os = "vxworks"))'.dependencies.rustix]
+version = "0.38.31"
+features = ["event", "fs", "pipe", "process", "std", "time"]
+default-features = false
 
 [target.'cfg(windows)'.dependencies]
 concurrent-queue = "2.2.0"
@@ -42,6 +44,9 @@ features = [
     "Win32_System_Threading",
     "Win32_System_WindowsProgramming",
 ]
+
+[target.'cfg(target_os = "hermit")'.dependencies.hermit-abi]
+version = "0.3.8"
 
 [dev-dependencies]
 easy-parallel = "3.1.0"
