@@ -485,22 +485,14 @@ mod syscall {
     pub(super) fn read(fd: BorrowedFd<'_>, bytes: &mut [u8]) -> io::Result<usize> {
         let count = unsafe { hermit_abi::read(fd.as_raw_fd(), bytes.as_mut_ptr(), bytes.len()) };
 
-        if count == -1 {
-            Err(io::Error::last_os_error())
-        } else {
-            Ok(count as usize)
-        }
+        cvt(count)
     }
 
     /// Write some bytes.
     pub(super) fn write(fd: BorrowedFd<'_>, bytes: &[u8]) -> io::Result<usize> {
         let count = unsafe { hermit_abi::write(fd.as_raw_fd(), bytes.as_ptr(), bytes.len()) };
 
-        if count == -1 {
-            Err(io::Error::last_os_error())
-        } else {
-            Ok(count as usize)
-        }
+        cvt(count)
     }
 
     /// Safe wrapper around the `poll` system call.
@@ -513,11 +505,7 @@ mod syscall {
             )
         };
 
-        if call == -1 {
-            Err(io::Error::last_os_error())
-        } else {
-            Ok(call as usize)
-        }
+        cvt(call as isize)
     }
 
     /// Safe wrapper around `pollfd`.
@@ -616,6 +604,16 @@ mod syscall {
     impl EventfdFlags {
         pub(super) fn empty() -> Self {
             Self
+        }
+    }
+
+    /// Convert a number to an actual result.
+    #[inline]
+    fn cvt(len: isize) -> io::Result<usize> {
+        if len == -1 {
+            Err(io::Error::last_os_error())
+        } else {
+            Ok(len as usize)
         }
     }
 }
