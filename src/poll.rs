@@ -475,7 +475,9 @@ mod syscall {
         let fd = unsafe { hermit_abi::eventfd(count, 0) };
 
         if fd == -1 {
-            Err(io::Error::last_os_error())
+            Err(io::Error::from_raw_os_error(unsafe {
+                hermit_abi::get_errno()
+            }))
         } else {
             Ok(unsafe { OwnedFd::from_raw_fd(fd) })
         }
@@ -611,7 +613,9 @@ mod syscall {
     #[inline]
     fn cvt(len: isize) -> io::Result<usize> {
         if len == -1 {
-            Err(io::Error::last_os_error())
+            Err(io::Error::from_raw_os_error(unsafe {
+                hermit_abi::get_errno()
+            }))
         } else {
             Ok(len as usize)
         }
