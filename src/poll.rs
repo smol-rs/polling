@@ -474,7 +474,7 @@ mod syscall {
     pub(super) fn eventfd(count: u64, _flags: EventfdFlags) -> io::Result<OwnedFd> {
         let fd = unsafe { hermit_abi::eventfd(count, 0) };
 
-        if fd == -1 {
+        if fd < 0 {
             Err(io::Error::from_raw_os_error(unsafe {
                 hermit_abi::get_errno()
             }))
@@ -612,7 +612,7 @@ mod syscall {
     /// Convert a number to an actual result.
     #[inline]
     fn cvt(len: isize) -> io::Result<usize> {
-        if len == -1 {
+        if len < 0 {
             Err(io::Error::from_raw_os_error(unsafe {
                 hermit_abi::get_errno()
             }))
