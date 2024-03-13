@@ -296,11 +296,3 @@ impl<T: CompletionHandle> Drop for OverlappedEntry<T> {
         drop(unsafe { self.packet() });
     }
 }
-
-struct CallOnDrop<F: FnMut()>(F);
-
-impl<F: FnMut()> Drop for CallOnDrop<F> {
-    fn drop(&mut self) {
-        (self.0)();
-    }
-}
