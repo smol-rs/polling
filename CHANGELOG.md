@@ -1,3 +1,7 @@
+# Version 3.5.0
+
+- Use the `epoll` backend when RedoxOS is enabled. (#190)
+
 # Version 3.4.0
 
 - Add the ability to identify whether socket connection has failed. (#185)

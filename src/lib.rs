@@ -404,7 +404,9 @@ impl Event {
     /// This function checks if an error exist,particularlly useful in detecting if TCP connection failed. It corresponds to the `EPOLLERR` event in Linux
     /// and `CONNECT_FAILED` event in Windows IOCP.
     ///
-    /// note: in epoll, a tcp connection failure is indicated by EPOLLERR + EPOLLHUP, though just EPOLLERR is enough to indicate a connection failure.
+    /// ## Caveats
+    ///
+    /// In `epoll`, a TCP connection failure is indicated by `EPOLLERR` + `EPOLLHUP`, though just `EPOLLERR` is enough to indicate a connection failure.
     /// EPOLLHUP may happen when we haven't event called `connect` on the socket, but it is still a valid event to check for.
     ///
     /// Returns `Some(true)` if the connection has failed, `Some(false)` if there is an error,
