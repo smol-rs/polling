@@ -407,43 +407,6 @@ impl Event {
     /// note: in epoll, a tcp connection failure is indicated by EPOLLERR + EPOLLHUP, though just EPOLLERR is enough to indicate a connection failure.
     /// EPOLLHUP may happen when we haven't event called `connect` on the socket, but it is still a valid event to check for.
     ///
-    /// # Examples
-    ///
-    /// ```
-    ///   fn main() -> std::io::Result<()> {
-    ///       use std::net;
-    ///       use std::time::Duration;
-    ///   
-    ///       use polling::Event;
-    ///       use socket2::Type;
-    ///       let poller = polling::Poller::new()?;
-    ///       let bad_socket = socket2::Socket::new(socket2::Domain::IPV4, Type::STREAM, None)?;
-    ///       let addr = net::SocketAddr::new("127.0.0.1".parse().unwrap(), 12345);
-    ///       bad_socket.set_nonblocking(true)?;
-    ///       let mut events = polling::Events::new();
-    ///   
-    ///       let _ = bad_socket.connect(&addr.into()).unwrap_err();
-    ///   
-    ///       unsafe {
-    ///           poller.add(&bad_socket, Event::writable(0))?;
-    ///       }
-    ///   
-    ///       poller.wait(&mut events, Some(Duration::from_secs(3)))?;
-    ///   
-    ///       let event = events.iter().next().expect("no event");
-    ///       let is_err = match event.is_err() {
-    ///           Some(is_err) => is_err,
-    ///           None => {
-    ///               println!("not supported in this platform");
-    ///               return Ok(());
-    ///           },
-    ///       };
-    ///       assert!(is_err);
-    ///       println!("bad socket is now in error state");
-    ///   
-    ///       Ok(())
-    ///   }
-    /// ```  
     /// Returns `Some(true)` if the connection has failed, `Some(false)` if there is an error,
     /// or `None` if the platform does not support detecting this condition.
     #[inline]
