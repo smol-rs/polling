@@ -5,7 +5,7 @@
 //! - [kqueue](https://en.wikipedia.org/wiki/Kqueue): macOS, iOS, tvOS, watchOS, FreeBSD, NetBSD, OpenBSD,
 //!   DragonFly BSD
 //! - [event ports](https://illumos.org/man/port_create): illumos, Solaris
-//! - [poll](https://en.wikipedia.org/wiki/Poll_(Unix)): VxWorks, Fuchsia, other Unix systems
+//! - [poll](https://en.wikipedia.org/wiki/Poll_(Unix)): VxWorks, Fuchsia, HermitOS, other Unix systems
 //! - [IOCP](https://learn.microsoft.com/en-us/windows/win32/fileio/i-o-completion-ports): Windows, Wine (version 7.13+)
 //!
 //! By default, polling is done in oneshot mode, which means interest in I/O events needs to
@@ -107,6 +107,7 @@ cfg_if! {
         use kqueue as sys;
     } else if #[cfg(any(
         target_os = "vxworks",
+        target_os = "hermit",
         target_os = "fuchsia",
         target_os = "horizon",
         unix,
@@ -1038,8 +1039,11 @@ impl fmt::Debug for Poller {
 }
 
 cfg_if! {
-    if #[cfg(unix)] {
+    if #[cfg(any(unix, target_os = "hermit"))] {
+        #[cfg(unix)]
         use std::os::unix::io::{AsRawFd, RawFd, AsFd, BorrowedFd};
+        #[cfg(target_os = "hermit")]
+        use std::os::hermit::io::{AsRawFd, RawFd, AsFd, BorrowedFd};
 
         /// A resource with a raw file descriptor.
         pub trait AsRawSource {
