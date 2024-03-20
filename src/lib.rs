@@ -393,7 +393,7 @@ impl Event {
     #[inline]
     #[deprecated(
         since = "3.4.0",
-        note = "use `is_err` in combination of is_hub instead, see documentation for `is_err`"
+        note = "use `is_err` in combination of is_hup instead, see documentation for `is_err`"
     )]
     pub fn is_connect_failed(&self) -> Option<bool> {
         self.extra.is_connect_failed()
