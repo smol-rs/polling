@@ -682,9 +682,15 @@ impl EventExtra {
         self.flags.set(AfdPollMask::RECEIVE_EXPEDITED, active);
     }
 
-    /// Check if TCP connect failed.
+    /// Check if TCP connect failed. Deprecated.
     #[inline]
     pub fn is_connect_failed(&self) -> Option<bool> {
+        Some(self.flags.intersects(AfdPollMask::CONNECT_FAIL))
+    }
+
+    /// Check if TCP connect failed.
+    #[inline]
+    pub fn is_err(&self) -> Option<bool> {
         Some(self.flags.intersects(AfdPollMask::CONNECT_FAIL))
     }
 }

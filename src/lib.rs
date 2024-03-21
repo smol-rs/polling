@@ -392,8 +392,29 @@ impl Event {
     /// Returns `Some(true)` if the connection has failed, `Some(false)` if the connection has not failed,
     /// or `None` if the platform does not support detecting this condition.
     #[inline]
+    #[deprecated(
+        since = "3.4.0",
+        note = "use `is_err` in combination of is_hup instead, see documentation for `is_err`"
+    )]
     pub fn is_connect_failed(&self) -> Option<bool> {
         self.extra.is_connect_failed()
+    }
+
+    /// Tells if this event is the result of a connection failure.
+    ///
+    /// This function checks if an error exist,particularlly useful in detecting if TCP connection failed. It corresponds to the `EPOLLERR` event in Linux
+    /// and `CONNECT_FAILED` event in Windows IOCP.
+    ///
+    /// ## Caveats
+    ///
+    /// In `epoll`, a TCP connection failure is indicated by `EPOLLERR` + `EPOLLHUP`, though just `EPOLLERR` is enough to indicate a connection failure.
+    /// EPOLLHUP may happen when we haven't event called `connect` on the socket, but it is still a valid event to check for.
+    ///
+    /// Returns `Some(true)` if the connection has failed, `Some(false)` if there is an error,
+    /// or `None` if the platform does not support detecting this condition.
+    #[inline]
+    pub fn is_err(&self) -> Option<bool> {
+        self.extra.is_err()
     }
 
     /// Remove any extra information from this event.

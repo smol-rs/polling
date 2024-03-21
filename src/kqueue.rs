@@ -376,6 +376,11 @@ impl EventExtra {
     pub fn is_connect_failed(&self) -> Option<bool> {
         None
     }
+
+    #[inline]
+    pub fn is_err(&self) -> Option<bool> {
+        None
+    }
 }
 
 pub(crate) fn mode_to_flags(mode: PollMode) -> kqueue::EventFlags {
