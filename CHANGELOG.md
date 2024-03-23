@@ -1,3 +1,9 @@
+# Version 3.6.0
+
+- Add an `is_err` method to `Event` to tell when an error has occurred. (#189)
+- Deprecate the `is_connect_failed` function. (#189)
+- Add support for HermitOS to `polling`. (#194)
+
 # Version 3.5.0
 
 - Use the `epoll` backend when RedoxOS is enabled. (#190)
