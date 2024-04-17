@@ -222,7 +222,28 @@ impl Poller {
                 if self.notified.swap(false, Ordering::SeqCst) {
                     // `notify` will have sent a notification in case we were polling. We weren't,
                     // so remove it.
-                    return self.notify.pop_notification();
+
+                    // Pipes on Vita do not guarantee that after `write` call succeeds, the
+                    // data becomes immediately available for reading on the other side of the pipe.
+                    // To ensure that the notification is not lost, the read side of the pipe is temporarily
+                    // switched to blocking for a single `read` call.
+                    #[cfg(target_os = "vita")]
+                    rustix::fs::fcntl_setfl(
+                        &self.notify.read_pipe,
+                        rustix::fs::fcntl_getfl(&self.notify.read_pipe)?
+                            & !rustix::fs::OFlags::NONBLOCK,
+                    )?;
+
+                    let notification = self.notify.pop_notification();
+
+                    #[cfg(target_os = "vita")]
+                    rustix::fs::fcntl_setfl(
+                        &self.notify.read_pipe,
+                        rustix::fs::fcntl_getfl(&self.notify.read_pipe)?
+                            | rustix::fs::OFlags::NONBLOCK,
+                    )?;
+
+                    return notification;
                 } else if self.waiting_operations.load(Ordering::SeqCst) == 0 {
                     break;
                 }
@@ -646,7 +667,7 @@ mod notify {
     pub(super) struct Notify {
         /// The file descriptor of the read half of the notify pipe. This is also stored as the first
         /// file descriptor in `fds.poll_fds`.
-        read_pipe: OwnedFd,
+        pub(super) read_pipe: OwnedFd,
         /// The file descriptor of the write half of the notify pipe.
         ///
         /// Data is written to this to wake up the current instance of `Poller::wait`, which can occur when the

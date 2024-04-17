@@ -4,7 +4,10 @@ name = "polling"
 # - Update CHANGELOG.md
 # - Create "v3.x.y" git tag
 version = "3.6.0"
-authors = ["Stjepan Glavina <stjepang@gmail.com>", "John Nunley <dev@notgull.net>"]
+authors = [
+    "Stjepan Glavina <stjepang@gmail.com>",
+    "John Nunley <dev@notgull.net>",
+]
 edition = "2021"
 rust-version = "1.63"
 description = "Portable interface to epoll, kqueue, event ports, and IOCP"
@@ -55,4 +58,6 @@ socket2 = "0.5.5"
 
 [target.'cfg(unix)'.dev-dependencies]
 libc = "0.2"
+
+[target.'cfg(all(unix, not(target_os="vita")))'.dev-dependencies]
 signal-hook = "0.3.17"
