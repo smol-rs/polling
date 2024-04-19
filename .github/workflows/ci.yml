@@ -81,6 +81,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest]
+        rust: [nightly, stable]
     steps:
     - uses: actions/checkout@v4
     - name: Install Rust
