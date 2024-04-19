@@ -90,7 +90,7 @@ jobs:
       uses: taiki-e/install-action@cross
     - name: Add rust-src
       if: startsWith(matrix.rust, 'nightly')
-      run: rustup component add rust-src
+      run: rustup +nightly component add rust-src
     # We don't test BSDs, since we already test them in Cirrus.
     - name: Android
       if: startsWith(matrix.os, 'ubuntu')
