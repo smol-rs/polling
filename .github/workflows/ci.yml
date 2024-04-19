@@ -122,14 +122,13 @@ jobs:
         cargo check --target x86_64-unknown-redox
     - name: HermitOS
       if: startsWith(matrix.rust, 'nightly') && matrix.os == 'ubuntu-latest'
-      run: |
-        cargo -Zbuild-std check --target x86_64-unknown-hermit
+      run: cargo +nightly check -Z build-std --target x86_64-unknown-hermit
     - name: Check haiku
       if: startsWith(matrix.rust, 'nightly') && matrix.os == 'ubuntu-latest'
-      run: cargo check -Z build-std --target x86_64-unknown-haiku
+      run: cargo +nightly check -Z build-std --target x86_64-unknown-haiku
     - name: Check vita
       if: startsWith(matrix.rust, 'nightly') && matrix.os == 'ubuntu-latest'
-      run: cargo check -Z build-std --target armv7-sony-vita-newlibeabihf
+      run: cargo +nightly check -Z build-std --target armv7-sony-vita-newlibeabihf
 
   wine:
     runs-on: ubuntu-22.04
