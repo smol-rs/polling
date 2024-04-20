@@ -1,3 +1,7 @@
+# Version 3.7.0
+
+- Add support for the PS Vita as a platform. (#160)
+
 # Version 3.6.0
 
 - Add an `is_err` method to `Event` to tell when an error has occurred. (#189)
