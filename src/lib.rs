@@ -402,7 +402,7 @@ impl Event {
 
     /// Tells if this event is the result of a connection failure.
     ///
-    /// This function checks if an error exist,particularlly useful in detecting if TCP connection failed. It corresponds to the `EPOLLERR` event in Linux
+    /// This function checks if an error exist, particularly useful in detecting if TCP connection failed. It corresponds to the `EPOLLERR` event in Linux
     /// and `CONNECT_FAILED` event in Windows IOCP.
     ///
     /// ## Caveats
