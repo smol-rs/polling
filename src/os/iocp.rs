@@ -1,4 +1,4 @@
-//! Functionality that is only availale for IOCP-based platforms.
+//! Functionality that is only available for IOCP-based platforms.
 
 pub use crate::sys::CompletionPacket;
 

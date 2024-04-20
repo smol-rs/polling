@@ -685,7 +685,7 @@ mod notify {
             self.read_pipe.as_fd()
         }
 
-        /// Provides the poll flags to be used when registering the read half of the botify pipe with the `Poller`.
+        /// Provides the poll flags to be used when registering the read half of the notify pipe with the `Poller`.
         pub(super) fn poll_flags(&self) -> PollFlags {
             PollFlags::RDNORM
         }
@@ -747,7 +747,7 @@ mod notify {
 
     /// A notification pipe.
     ///
-    /// This implementation uses ther `eventfd` syscall to send notifications.
+    /// This implementation uses the `eventfd` syscall to send notifications.
     #[derive(Debug)]
     pub(super) struct Notify {
         /// The file descriptor of the eventfd object. This is also stored as the first
