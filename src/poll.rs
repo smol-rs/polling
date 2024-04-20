@@ -709,13 +709,15 @@ mod notify {
                 rustix::fs::fcntl_getfl(&self.read_pipe)? & !rustix::fs::OFlags::NONBLOCK,
             )?;
 
-            read(&self.read_pipe, &mut [0; 1])?;
+            let result = read(&self.read_pipe, &mut [0; 1]);
 
             #[cfg(target_os = "vita")]
             rustix::fs::fcntl_setfl(
                 &self.read_pipe,
                 rustix::fs::fcntl_getfl(&self.read_pipe)? | rustix::fs::OFlags::NONBLOCK,
             )?;
+
+            result?;
 
             Ok(())
         }
