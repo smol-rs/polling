@@ -85,12 +85,12 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     - name: Install Rust
-      run: rustup update ${{ matrix.rust }}
+      run: rustup update ${{ matrix.rust }} && rustup default ${{ matrix.rust }}
     - name: Install cross
       uses: taiki-e/install-action@cross
     - name: Add rust-src
       if: startsWith(matrix.rust, 'nightly')
-      run: rustup +nightly component add rust-src
+      run: rustup component add rust-src
     # We don't test BSDs, since we already test them in Cirrus.
     - name: Android
       if: startsWith(matrix.os, 'ubuntu')
@@ -122,13 +122,13 @@ jobs:
         cargo check --target x86_64-unknown-redox
     - name: HermitOS
       if: startsWith(matrix.rust, 'nightly') && matrix.os == 'ubuntu-latest'
-      run: cargo +nightly check -Z build-std --target x86_64-unknown-hermit
+      run: cargo check -Z build-std --target x86_64-unknown-hermit
     - name: Check haiku
       if: startsWith(matrix.rust, 'nightly') && matrix.os == 'ubuntu-latest'
-      run: cargo +nightly check -Z build-std --target x86_64-unknown-haiku
+      run: cargo check -Z build-std --target x86_64-unknown-haiku
     - name: Check vita
       if: startsWith(matrix.rust, 'nightly') && matrix.os == 'ubuntu-latest'
-      run: cargo +nightly check -Z build-std --target armv7-sony-vita-newlibeabihf
+      run: cargo check -Z build-std --target armv7-sony-vita-newlibeabihf
 
   wine:
     runs-on: ubuntu-22.04
