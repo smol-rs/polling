@@ -635,7 +635,7 @@ mod notify {
     use rustix::fd::{AsFd, AsRawFd, BorrowedFd, OwnedFd, RawFd};
     use rustix::fs::{fcntl_getfl, fcntl_setfl, OFlags};
     use rustix::io::{fcntl_getfd, fcntl_setfd, read, write, FdFlags};
-    #[cfg(not(target_os = "haiku"))]
+    #[cfg(not(any(target_os = "haiku", target_os = "nto")))]
     use rustix::pipe::pipe_with;
     use rustix::pipe::{pipe, PipeFlags};
 
@@ -665,10 +665,10 @@ mod notify {
                 io::Result::Ok((read_pipe, write_pipe))
             };
 
-            #[cfg(not(target_os = "haiku"))]
+            #[cfg(not(any(target_os = "haiku", target_os = "nto")))]
             let (read_pipe, write_pipe) = pipe_with(PipeFlags::CLOEXEC).or_else(fallback_pipe)?;
 
-            #[cfg(target_os = "haiku")]
+            #[cfg(any(target_os = "haiku", target_os = "nto"))]
             let (read_pipe, write_pipe) = fallback_pipe(PipeFlags::CLOEXEC)?;
 
             // Put the reading side into non-blocking mode.
