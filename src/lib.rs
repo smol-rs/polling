@@ -410,7 +410,7 @@ impl Event {
     /// In `epoll`, a TCP connection failure is indicated by `EPOLLERR` + `EPOLLHUP`, though just `EPOLLERR` is enough to indicate a connection failure.
     /// EPOLLHUP may happen when we haven't event called `connect` on the socket, but it is still a valid event to check for.
     ///
-    /// Returns `Some(true)` if the connection has failed, `Some(false)` if there is an error,
+    /// Returns `Some(true)` if the connection has failed, `Some(false)` if there is no error,
     /// or `None` if the platform does not support detecting this condition.
     #[inline]
     pub fn is_err(&self) -> Option<bool> {
