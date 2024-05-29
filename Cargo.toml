@@ -17,6 +17,9 @@ exclude = ["/.*"]
 [package.metadata.docs.rs]
 rustdoc-args = ["--cfg", "docsrs"]
 
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(docsrs)', 'cfg(polling_test_poll_backend)', 'cfg(polling_test_epoll_pipe)'] }
+
 [dependencies]
 cfg-if = "1"
 tracing = { version = "0.1.37", default-features = false }
