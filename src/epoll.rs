@@ -201,7 +201,7 @@ impl Poller {
             (_, Some(t)) if t == Duration::from_secs(0) => 0,
             (None, Some(t)) => {
                 // Round up to a whole millisecond.
-                let mut ms = t.as_millis().try_into().unwrap_or(std::i32::MAX);
+                let mut ms = t.as_millis().try_into().unwrap_or(i32::MAX);
                 if Duration::from_millis(ms as u64) < t {
                     ms = ms.saturating_add(1);
                 }
