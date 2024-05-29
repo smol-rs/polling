@@ -18,7 +18,7 @@ exclude = ["/.*"]
 rustdoc-args = ["--cfg", "docsrs"]
 
 [lints.rust]
-unexpected_cfgs = { level = "warn", check-cfg = ['cfg(docsrs)', 'cfg(polling_test_poll_backend)', 'cfg(polling_test_epoll_pipe)'] }
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(polling_test_poll_backend)', 'cfg(polling_test_epoll_pipe)'] }
 
 [dependencies]
 cfg-if = "1"
