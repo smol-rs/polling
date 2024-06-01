@@ -1,3 +1,7 @@
+# Version 3.7.1
+
+- Fix a typo in `Event::is_err()`. (#204)
+
 # Version 3.7.0
 
 - Add support for the PS Vita as a platform. (#160)
