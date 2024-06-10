@@ -1,5 +1,8 @@
 //! Test registering one source into multiple pollers.
 
+// On Windows, a socket handle can be registered to only one IOCP at a time.
+#![cfg(not(all(windows, feature = "iocp-psn")))]
+
 use polling::{Event, Events, PollMode, Poller};
 
 use std::io::{self, prelude::*};
