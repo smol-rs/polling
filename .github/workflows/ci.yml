@@ -61,6 +61,8 @@ jobs:
           # the backend that uses pipes, and is not a public API.
           RUSTFLAGS: ${{ env.RUSTFLAGS }} --cfg polling_test_epoll_pipe
         if: startsWith(matrix.os, 'ubuntu')
+      - run: cargo test --features iocp-psn
+        if: startsWith(matrix.os, 'windows')
       - run: cargo hack build --feature-powerset --no-dev-deps
       # TODO: broken due to https://github.com/rust-lang/rust/pull/119026.
       # - name: Check selected Tier 3 targets
