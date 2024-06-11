@@ -1,3 +1,5 @@
+//! Safe wrapper around `NtAssociateWaitCompletionPacket` API series.
+
 use std::ffi::c_void;
 use std::io;
 use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle, RawHandle};
@@ -9,6 +11,7 @@ use windows_sys::Win32::Foundation::{
     STATUS_CANCELLED, STATUS_PENDING, STATUS_SUCCESS,
 };
 
+#[link(name = "ntdll")]
 extern "system" {
     fn NtCreateWaitCompletionPacket(
         WaitCompletionPacketHandle: *mut HANDLE,
@@ -33,6 +36,7 @@ extern "system" {
     ) -> NTSTATUS;
 }
 
+/// Wrapper of NT WaitCompletionPacket.
 #[derive(Debug)]
 pub struct WaitCompletionPacket {
     handle: OwnedHandle,
@@ -58,6 +62,8 @@ impl WaitCompletionPacket {
         Ok(Self { handle })
     }
 
+    /// Associate waitable object to IOCP. The parameter `info` is the
+    /// field `dwNumberOfBytesTransferred` in `OVERLAPPED_ENTRY`
     pub fn associate(
         &mut self,
         port: RawHandle,
@@ -80,6 +86,10 @@ impl WaitCompletionPacket {
         Ok(())
     }
 
+    /// Cancels the completion packet. The return value means:
+    /// - `Ok(true)`: cancellation is successful.
+    /// - `Ok(false)`: cancellation failed, the packet is still in use.
+    /// - `Err(e)`: other errors.
     pub fn cancel(&mut self) -> io::Result<bool> {
         let status = unsafe { NtCancelWaitCompletionPacket(self.handle.as_raw_handle() as _, 0) };
         match status {

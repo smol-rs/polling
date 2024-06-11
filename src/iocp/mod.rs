@@ -1,3 +1,8 @@
+//! Bindings to Windows I/O Completion Ports.
+//!
+//! There are two implementations. The `wepoll` one is classical and uses AFD subsystem.
+//! The `psn` one uses `ProcessSocketNotifications` and need Windows 10 21H1+.
+
 cfg_if::cfg_if! {
     if #[cfg(feature = "iocp-psn")] {
         mod psn;

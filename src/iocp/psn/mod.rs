@@ -1,3 +1,19 @@
+//! Bindings to Windows IOCP with `ProcessSocketNotifications` and
+//! `NtAssociateWaitCompletionPacket` support.
+//!
+//! `ProcessSocketNotifications` is a new Windows API after 21H1. It is much like kqueue,
+//! and support edge triggers. The implementation is easier to be adapted to the crate's API.
+//! However, there are some behaviors different from other platforms:
+//! - The `psn` poller distingushes "disabled" state and "removed" state. When the registration
+//!   disabled, the notifications won't be queued to the poller.
+//! - The edge trigger only triggers condition changes after it is enabled. You cannot expect
+//!   an event coming if you change the condition before registering the notification.
+//! - A socket can be registered to only one IOCP at a time.
+//!
+//! `NtAssociateWaitCompletionPacket` is an undocumented API and it's the back of thread pool
+//! APIs like `RegisterWaitForSingleObject`. We use it to avoid starting thread pools. It only
+//! supports `Oneshot` mode.
+
 mod wait;
 
 use std::collections::HashMap;
@@ -33,14 +49,18 @@ use crate::{Event, PollMode, NOTIFY_KEY};
 pub struct Poller {
     /// The I/O completion port.
     port: Arc<OwnedHandle>,
+    /// Attribute map.
     sources: RwLock<HashMap<usize, SourceAttr>>,
 }
 
+/// Attributes of added sources.
 #[derive(Debug)]
 pub(crate) enum SourceAttr {
-    Socket {
-        key: usize,
-    },
+    /// A socket with key.
+    Socket { key: usize },
+    /// A waitable object with key and [`WaitCompletionPacket`].
+    ///
+    /// [`WaitCompletionPacket`]: wait::WaitCompletionPacket
     Waitable {
         key: usize,
         packet: wait::WaitCompletionPacket,
@@ -139,6 +159,7 @@ impl Poller {
         }
     }
 
+    /// Add a new waitable to the poller.
     pub(crate) fn add_waitable(
         &self,
         handle: RawHandle,
@@ -180,6 +201,7 @@ impl Poller {
         )
     }
 
+    /// Update a waitable in the poller.
     pub(crate) fn modify_waitable(
         &self,
         waitable: RawHandle,
@@ -215,6 +237,7 @@ impl Poller {
         })
     }
 
+    /// Delete a waitable from the poller.
     pub(crate) fn remove_waitable(&self, waitable: RawHandle) -> io::Result<()> {
         tracing::trace!("remove: handle={:?}, waitable={:p}", self.port, waitable);
 
@@ -286,6 +309,7 @@ impl Poller {
             .ok_or_else(|| io::Error::from(io::ErrorKind::NotFound))
     }
 
+    /// Add or modify the registration.
     unsafe fn update_source(&self, mut reg: SOCK_NOTIFY_REGISTRATION) -> io::Result<()> {
         let res = unsafe {
             ProcessSocketNotifications(
@@ -353,6 +377,7 @@ impl Poller {
         self.post(CompletionPacket::new(Event::none(NOTIFY_KEY)))
     }
 
+    /// Push an IOCP packet into the queue.
     pub fn post(&self, packet: CompletionPacket) -> io::Result<()> {
         let span = tracing::trace_span!(
             "post",
