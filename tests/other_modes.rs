@@ -256,9 +256,6 @@ fn edge_oneshot_triggered() {
         .unwrap();
     assert!(events.is_empty());
 
-    // On Windows, the buffer should be cleared to trigger the edge.
-    reader.read_exact(&mut [0; 2]).unwrap();
-
     // If we modify to re-enable the notification, it should be delivered.
     poller
         .modify_with_mode(
@@ -267,10 +264,15 @@ fn edge_oneshot_triggered() {
             PollMode::EdgeOneshot,
         )
         .unwrap();
-    // On Windows, the notification won't be queued up.
-    // The condition must change while the registration is enabled.
+
     #[cfg(windows)]
-    writer.write_all(&data).unwrap();
+    {
+        // On Windows, the buffer should be cleared to trigger the edge.
+        reader.read_exact(&mut [0; 2]).unwrap();
+        // On Windows, the notification won't be queued up.
+        // The condition must change while the registration is enabled.
+        writer.write_all(&data).unwrap();
+    }
 
     events.clear();
     poller
