@@ -14,11 +14,11 @@ use wait::WaitCompletionPacket;
 use windows_sys::Win32::Foundation::{ERROR_SUCCESS, INVALID_HANDLE_VALUE, WAIT_TIMEOUT};
 use windows_sys::Win32::Networking::WinSock::{
     ProcessSocketNotifications, SOCK_NOTIFY_EVENT_ERR, SOCK_NOTIFY_EVENT_HANGUP,
-    SOCK_NOTIFY_EVENT_IN, SOCK_NOTIFY_EVENT_OUT, SOCK_NOTIFY_EVENT_REMOVE, SOCK_NOTIFY_OP_DISABLE,
-    SOCK_NOTIFY_OP_ENABLE, SOCK_NOTIFY_OP_REMOVE, SOCK_NOTIFY_REGISTER_EVENT_HANGUP,
-    SOCK_NOTIFY_REGISTER_EVENT_IN, SOCK_NOTIFY_REGISTER_EVENT_NONE, SOCK_NOTIFY_REGISTER_EVENT_OUT,
-    SOCK_NOTIFY_REGISTRATION, SOCK_NOTIFY_TRIGGER_EDGE, SOCK_NOTIFY_TRIGGER_LEVEL,
-    SOCK_NOTIFY_TRIGGER_ONESHOT, SOCK_NOTIFY_TRIGGER_PERSISTENT,
+    SOCK_NOTIFY_EVENT_IN, SOCK_NOTIFY_EVENT_OUT, SOCK_NOTIFY_OP_DISABLE, SOCK_NOTIFY_OP_ENABLE,
+    SOCK_NOTIFY_OP_REMOVE, SOCK_NOTIFY_REGISTER_EVENT_HANGUP, SOCK_NOTIFY_REGISTER_EVENT_IN,
+    SOCK_NOTIFY_REGISTER_EVENT_NONE, SOCK_NOTIFY_REGISTER_EVENT_OUT, SOCK_NOTIFY_REGISTRATION,
+    SOCK_NOTIFY_TRIGGER_EDGE, SOCK_NOTIFY_TRIGGER_LEVEL, SOCK_NOTIFY_TRIGGER_ONESHOT,
+    SOCK_NOTIFY_TRIGGER_PERSISTENT,
 };
 use windows_sys::Win32::System::Threading::INFINITE;
 use windows_sys::Win32::System::IO::{
@@ -407,18 +407,9 @@ impl Events {
 
     /// Iterates over I/O events.
     pub fn iter(&self) -> impl Iterator<Item = Event> + '_ {
-        self.list.iter().filter_map(|ev| {
-            let key = ev.lpCompletionKey;
-            // The post CompletionPacket.
-            if key == NOTIFY_KEY {
-                return None;
-            }
+        self.list.iter().map(|ev| {
             let events = ev.dwNumberOfBytesTransferred;
-            // Just ignore the remove event.
-            if events == SOCK_NOTIFY_EVENT_REMOVE {
-                return None;
-            }
-            Some(Event {
+            Event {
                 key: ev.lpCompletionKey,
                 readable: (events & SOCK_NOTIFY_EVENT_IN) != 0,
                 writable: (events & SOCK_NOTIFY_EVENT_OUT) != 0,
@@ -426,7 +417,7 @@ impl Events {
                     hup: (events & SOCK_NOTIFY_EVENT_HANGUP) != 0,
                     err: (events & SOCK_NOTIFY_EVENT_ERR) != 0,
                 },
-            })
+            }
         })
     }
 
