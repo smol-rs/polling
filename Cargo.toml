@@ -61,3 +61,7 @@ libc = "0.2"
 
 [target.'cfg(all(unix, not(target_os="vita")))'.dev-dependencies]
 signal-hook = "0.3.17"
+
+[features]
+default = []
+iocp-psn = []

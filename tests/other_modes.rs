@@ -120,7 +120,8 @@ fn edge_triggered() {
                     target_os = "freebsd",
                     target_os = "netbsd",
                     target_os = "openbsd",
-                    target_os = "dragonfly"
+                    target_os = "dragonfly",
+                    all(target_os = "windows", feature = "iocp-psn")
                 ),
                 not(polling_test_poll_backend)
             ))] {
@@ -154,6 +155,9 @@ fn edge_triggered() {
         .wait(&mut events, Some(Duration::from_secs(0)))
         .unwrap();
     assert!(events.is_empty());
+
+    // On Windows, the buffer should be cleared to trigger the edge.
+    reader.read_exact(&mut [0; 2]).unwrap();
 
     // If we write more data, a notification should be delivered.
     writer.write_all(&data).unwrap();
@@ -216,7 +220,8 @@ fn edge_oneshot_triggered() {
                     target_os = "freebsd",
                     target_os = "netbsd",
                     target_os = "openbsd",
-                    target_os = "dragonfly"
+                    target_os = "dragonfly",
+                    all(target_os = "windows", feature = "iocp-psn")
                 ),
                 not(polling_test_poll_backend)
             ))] {
@@ -259,6 +264,16 @@ fn edge_oneshot_triggered() {
             PollMode::EdgeOneshot,
         )
         .unwrap();
+
+    #[cfg(windows)]
+    {
+        // On Windows, the buffer should be cleared to trigger the edge.
+        reader.read_exact(&mut [0; 2]).unwrap();
+        // On Windows, the notification won't be queued up.
+        // The condition must change while the registration is enabled.
+        writer.write_all(&data).unwrap();
+    }
+
     events.clear();
     poller
         .wait(&mut events, Some(Duration::from_secs(0)))
