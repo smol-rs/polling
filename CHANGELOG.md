@@ -1,3 +1,7 @@
+# Version 3.7.2
+
+- Update `hermit-abi` to v0.4.0. (#209)
+
 # Version 3.7.1
 
 - Fix a typo in `Event::is_err()`. (#204)
