@@ -35,7 +35,7 @@ impl EventHandle {
             )
         };
 
-        if handle == 0 {
+        if handle.is_null() {
             Err(io::Error::last_os_error())
         } else {
             Ok(Self(handle as _))
