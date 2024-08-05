@@ -43,7 +43,6 @@ pub(super) struct AfdPollInfo {
     handles: [AfdPollHandleInfo; 1],
 }
 
-#[derive(Default)]
 #[repr(C)]
 struct AfdPollHandleInfo {
     /// The handle to poll.
@@ -54,6 +53,16 @@ struct AfdPollHandleInfo {
 
     /// The status of the poll.
     status: NTSTATUS,
+}
+
+impl Default for AfdPollHandleInfo {
+    fn default() -> Self {
+        Self {
+            handle: ptr::null_mut(),
+            events: Default::default(),
+            status: Default::default(),
+        }
+    }
 }
 
 impl AfdPollInfo {
@@ -288,7 +297,7 @@ impl NtdllImports {
             .get_or_init(|| unsafe {
                 let ntdll = GetModuleHandleW(NTDLL_NAME.as_ptr() as *const _);
 
-                if ntdll == 0 {
+                if ntdll.is_null() {
                     tracing::error!("Failed to load ntdll.dll");
                     return Err(io::Error::last_os_error());
                 }
@@ -320,7 +329,7 @@ impl<T> fmt::Debug for Afd<T> {
 
         impl fmt::Debug for WriteAsHex {
             fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                write!(f, "{:010x}", self.0)
+                write!(f, "{:010x}", self.0 as usize)
             }
         }
 
@@ -385,7 +394,7 @@ where
         };
         let mut device_attributes = OBJECT_ATTRIBUTES {
             Length: size_of::<OBJECT_ATTRIBUTES>() as u32,
-            RootDirectory: 0,
+            RootDirectory: ptr::null_mut(),
             ObjectName: &mut device_name,
             Attributes: 0,
             SecurityDescriptor: ptr::null_mut(),
@@ -468,7 +477,7 @@ where
         let result = unsafe {
             ntdll.NtDeviceIoControlFile(
                 self.handle,
-                0,
+                ptr::null_mut(),
                 ptr::null_mut(),
                 iosb.cast(),
                 iosb.cast(),
