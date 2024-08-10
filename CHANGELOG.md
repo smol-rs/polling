@@ -1,3 +1,7 @@
+# Version 3.7.3
+
+- Update to `windows-sys` v0.59. (#214)
+
 # Version 3.7.2
 
 - Update `hermit-abi` to v0.4.0. (#209)
