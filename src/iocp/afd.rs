@@ -568,7 +568,7 @@ impl<T> OnceCell<T> {
 }
 
 pin_project_lite::pin_project! {
-    /// An I/O status block paired with some auxillary data.
+    /// An I/O status block paired with some auxiliary data.
     #[repr(C)]
     pub(super) struct IoStatusBlock<T> {
         // The I/O status block.
@@ -577,7 +577,7 @@ pin_project_lite::pin_project! {
         // Whether or not the block is in use.
         in_use: AtomicBool,
 
-        // The auxillary data.
+        // The auxiliary data.
         #[pin]
         data: T,
 

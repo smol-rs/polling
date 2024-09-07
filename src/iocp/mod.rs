@@ -3,7 +3,7 @@
 //! I/O Completion Ports is a completion-based API rather than a polling-based API, like
 //! epoll or kqueue. Therefore, we have to adapt the IOCP API to the crate's API.
 //!
-//! WinSock is powered by the Auxillary Function Driver (AFD) subsystem, which can be
+//! WinSock is powered by the Auxiliary Function Driver (AFD) subsystem, which can be
 //! accessed directly by using unstable `ntdll` functions. AFD exposes features that are not
 //! available through the normal WinSock interface, such as IOCTL_AFD_POLL. This function is
 //! similar to the exposed `WSAPoll` method. However, once the targeted socket is "ready",
@@ -13,7 +13,7 @@
 //! to the one Windows expects. When a device is added to the `Poller`, an IOCTL_AFD_POLL
 //! operation is started and queued to the IOCP. To modify a currently registered device
 //! (e.g. with `modify()` or `delete()`), the ongoing POLL is cancelled and then restarted
-//! with new parameters. Whn the POLL eventually completes, the packet is posted to the IOCP.
+//! with new parameters. When the POLL eventually completes, the packet is posted to the IOCP.
 //! From here it's a simple matter of using `GetQueuedCompletionStatusEx` to read the packets
 //! from the IOCP and react accordingly. Notifying the poller is trivial, because we can
 //! simply post a packet to the IOCP to wake it up.
