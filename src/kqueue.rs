@@ -397,10 +397,7 @@ pub(crate) fn mode_to_flags(mode: PollMode) -> kqueue::EventFlags {
 #[cfg(any(
     target_os = "freebsd",
     target_os = "dragonfly",
-    target_os = "macos",
-    target_os = "ios",
-    target_os = "tvos",
-    target_os = "watchos",
+    target_vendor = "apple",
 ))]
 mod notify {
     use super::Poller;
@@ -480,10 +477,7 @@ mod notify {
 #[cfg(not(any(
     target_os = "freebsd",
     target_os = "dragonfly",
-    target_os = "macos",
-    target_os = "ios",
-    target_os = "tvos",
-    target_os = "watchos",
+    target_vendor = "apple",
 )))]
 mod notify {
     use super::Poller;

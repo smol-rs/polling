@@ -26,10 +26,7 @@ fn below_ms() -> io::Result<()> {
         any(
             target_os = "linux",
             target_os = "android",
-            target_os = "macos",
-            target_os = "ios",
-            target_os = "tvos",
-            target_os = "watchos",
+            target_vendor = "apple",
             target_os = "freebsd",
         ),
         not(polling_test_poll_backend)
@@ -64,10 +61,7 @@ fn above_ms() -> io::Result<()> {
             target_os = "android",
             target_os = "illumos",
             target_os = "solaris",
-            target_os = "macos",
-            target_os = "ios",
-            target_os = "tvos",
-            target_os = "watchos",
+            target_vendor = "apple",
             target_os = "freebsd",
         ),
         not(polling_test_poll_backend)
