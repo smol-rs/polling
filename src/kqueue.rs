@@ -1,4 +1,4 @@
-//! Bindings to kqueue (macOS, iOS, tvOS, watchOS, FreeBSD, NetBSD, OpenBSD, DragonFly BSD).
+//! Bindings to kqueue (macOS, iOS, tvOS, watchOS, visionOS, FreeBSD, NetBSD, OpenBSD, DragonFly BSD).
 
 use std::collections::HashSet;
 use std::io;

@@ -13,7 +13,7 @@ Portable interface to epoll, kqueue, event ports, and IOCP.
 
 Supported platforms:
 - [epoll](https://en.wikipedia.org/wiki/Epoll): Linux, Android, RedoxOS
-- [kqueue](https://en.wikipedia.org/wiki/Kqueue): macOS, iOS, tvOS, watchOS, FreeBSD, NetBSD, OpenBSD,
+- [kqueue](https://en.wikipedia.org/wiki/Kqueue): macOS, iOS, tvOS, watchOS, visionOS, FreeBSD, NetBSD, OpenBSD,
   DragonFly BSD
 - [event ports](https://illumos.org/man/port_create): illumos, Solaris
 - [poll](https://en.wikipedia.org/wiki/Poll_(Unix)): VxWorks, Fuchsia, HermitOS, other Unix systems
