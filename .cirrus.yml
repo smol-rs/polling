@@ -14,7 +14,7 @@ env:
 freebsd_task:
   name: test ($TARGET)
   freebsd_instance:
-    image_family: freebsd-13-3
+    image_family: freebsd-13-4
   matrix:
     - env:
         TARGET: x86_64-unknown-freebsd
@@ -34,7 +34,7 @@ netbsd_task:
   compute_engine_instance:
     image_project: pg-ci-images
     # https://github.com/anarazel/pg-vm-images/blob/main/packer/netbsd.pkrvars.hcl
-    image: family/pg-ci-netbsd-vanilla-9-3
+    image: family/pg-ci-netbsd-vanilla
     platform: netbsd
   env:
     TARGET: x86_64-unknown-netbsd
@@ -50,7 +50,7 @@ openbsd_task:
   compute_engine_instance:
     image_project: pg-ci-images
     # https://github.com/anarazel/pg-vm-images/blob/main/packer/openbsd.pkrvars.hcl
-    image: family/pg-ci-openbsd-vanilla-7-2
+    image: family/pg-ci-openbsd-vanilla
     platform: openbsd
   env:
     TARGET: x86_64-unknown-openbsd
