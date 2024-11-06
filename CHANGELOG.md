@@ -1,3 +1,8 @@
+# Version 3.7.4
+
+- Add support for visionOS. (#217)
+- Fix typos in documentation. (#216)
+
 # Version 3.7.3
 
 - Update to `windows-sys` v0.59. (#214)
