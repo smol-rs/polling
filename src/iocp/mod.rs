@@ -419,16 +419,18 @@ impl Poller {
     }
 
     /// Wait for events.
-    pub(super) fn wait(&self, events: &mut Events, timeout: Option<Duration>) -> io::Result<()> {
+    pub(super) fn wait_deadline(
+        &self,
+        events: &mut Events,
+        deadline: Option<Instant>,
+    ) -> io::Result<()> {
         let span = tracing::trace_span!(
             "wait",
             handle = ?self.port,
-            ?timeout,
+            ?deadline,
         );
         let _enter = span.enter();
 
-        // Make sure we have a consistent timeout.
-        let deadline = timeout.and_then(|timeout| Instant::now().checked_add(timeout));
         let mut notified = false;
         events.packets.clear();
 
@@ -479,8 +481,7 @@ impl Poller {
             }
 
             // Break if there was a notification or at least one event, or if deadline is reached.
-            let timeout_is_empty =
-                timeout.map_or(false, |t| t.as_secs() == 0 && t.subsec_nanos() == 0);
+            let timeout_is_empty = timeout.map_or(false, |t| t.is_zero());
             if notified || new_events > 0 || timeout_is_empty {
                 break;
             }
