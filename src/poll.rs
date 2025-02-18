@@ -201,16 +201,14 @@ impl Poller {
         })
     }
 
-    /// Waits for I/O events with an optional timeout.
-    pub fn wait(&self, events: &mut Events, timeout: Option<Duration>) -> io::Result<()> {
+    /// Waits for I/O events with an optional deadline.
+    pub fn wait_deadline(&self, events: &mut Events, deadline: Option<Instant>) -> io::Result<()> {
         let span = tracing::trace_span!(
             "wait",
             notify_read = ?self.notify.fd().as_raw_fd(),
-            ?timeout,
+            ?deadline,
         );
         let _enter = span.enter();
-
-        let deadline = timeout.and_then(|t| Instant::now().checked_add(t));
 
         events.inner.clear();
 
