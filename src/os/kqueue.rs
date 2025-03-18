@@ -153,7 +153,8 @@ unsafe impl FilterSealed for Signal {
     fn filter(&self, flags: kqueue::EventFlags, key: usize) -> kqueue::Event {
         kqueue::Event::new(
             kqueue::EventFilter::Signal {
-                signal: rustix::process::Signal::from_raw(self.0).expect("invalid signal number"),
+                signal: rustix::process::Signal::from_named_raw(self.0)
+                    .expect("invalid signal number"),
                 times: 0,
             },
             flags | kqueue::EventFlags::RECEIPT,
