@@ -17,7 +17,7 @@ mod example {
         let poller = Poller::new().unwrap();
 
         // Register SIGINT in the poller.
-        let sigint = Signal(rustix::process::Signal::Int as _);
+        let sigint = Signal(rustix::process::Signal::INT.as_raw());
         poller.add_filter(sigint, 1, PollMode::Oneshot).unwrap();
 
         let mut events = Events::new();

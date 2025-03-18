@@ -6,6 +6,7 @@ use std::os::unix::io::{AsFd, AsRawFd, BorrowedFd, OwnedFd, RawFd};
 use std::sync::RwLock;
 use std::time::Duration;
 
+use rustix::buffer::spare_capacity;
 use rustix::event::kqueue;
 use rustix::io::{fcntl_setfd, Errno, FdFlags};
 
@@ -151,7 +152,12 @@ impl Poller {
             let changelist = changelist.as_ref();
 
             unsafe {
-                kqueue::kevent(&self.kqueue_fd, changelist, &mut eventlist, None)?;
+                kqueue::kevent(
+                    &self.kqueue_fd,
+                    changelist,
+                    spare_capacity(&mut eventlist),
+                    None,
+                )?;
             }
         }
 
@@ -236,8 +242,14 @@ impl Poller {
 
         // Wait for I/O events.
         let changelist = [];
-        let eventlist = &mut events.list;
-        let res = unsafe { kqueue::kevent(&self.kqueue_fd, &changelist, eventlist, timeout)? };
+        let res = unsafe {
+            kqueue::kevent(
+                &self.kqueue_fd,
+                &changelist,
+                spare_capacity(&mut events.list),
+                timeout,
+            )?
+        };
 
         tracing::trace!(
             kqueue_fd = ?self.kqueue_fd.as_raw_fd(),
