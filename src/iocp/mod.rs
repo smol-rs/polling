@@ -430,7 +430,6 @@ impl Poller {
         // Make sure we have a consistent timeout.
         let deadline = timeout.and_then(|timeout| Instant::now().checked_add(timeout));
         let mut notified = false;
-        events.packets.clear();
 
         loop {
             let mut new_events = 0;
