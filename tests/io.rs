@@ -132,7 +132,7 @@ fn append_events() {
     }
 
     for (read, _write) in &pairs {
-        poller.delete(&read).unwrap();
+        poller.delete(read).unwrap();
     }
 }
 
