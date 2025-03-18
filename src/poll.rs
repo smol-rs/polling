@@ -212,8 +212,6 @@ impl Poller {
 
         let deadline = timeout.and_then(|t| Instant::now().checked_add(t));
 
-        events.inner.clear();
-
         let mut fds = self.fds.lock().unwrap();
 
         loop {
