@@ -230,22 +230,11 @@ impl Poller {
                 fds = self.operations_complete.wait(fds).unwrap();
             }
 
-            // Convert the timeout to milliseconds.
-            let timeout_ms = deadline
-                .map(|deadline| {
-                    let timeout = deadline.saturating_duration_since(Instant::now());
-
-                    // Round up to a whole millisecond.
-                    let mut ms = timeout.as_millis().try_into().unwrap_or(std::u64::MAX);
-                    if Duration::from_millis(ms) < timeout {
-                        ms = ms.saturating_add(1);
-                    }
-                    ms.try_into().unwrap_or(std::i32::MAX)
-                })
-                .unwrap_or(-1);
+            let timeout =
+                deadline.map(|deadline| deadline.saturating_duration_since(Instant::now()));
 
             // Perform the poll.
-            let num_events = poll(&mut fds.poll_fds, timeout_ms)?;
+            let num_events = poll(&mut fds.poll_fds, timeout)?;
             let notified = !fds.poll_fds[0].revents().is_empty();
             let num_fd_events = if notified { num_events - 1 } else { num_events };
             tracing::trace!(?num_events, ?notified, ?num_fd_events, "new events",);
@@ -454,14 +443,29 @@ fn cvt_mode_as_remove(mode: PollMode) -> io::Result<bool> {
 
 #[cfg(unix)]
 mod syscall {
-    pub(super) use rustix::event::{poll, PollFd, PollFlags};
+    pub(super) use rustix::event::{PollFd, PollFlags};
 
+    pub(super) use rustix::event::Timespec;
     #[cfg(target_os = "espidf")]
     pub(super) use rustix::event::{eventfd, EventfdFlags};
     #[cfg(target_os = "espidf")]
     pub(super) use rustix::fd::{AsFd, AsRawFd, BorrowedFd, OwnedFd, RawFd};
+    pub(super) use rustix::io::Errno;
     #[cfg(target_os = "espidf")]
     pub(super) use rustix::io::{read, write};
+    use std::io;
+    use std::time::Duration;
+
+    /// Safe wrapper around the `poll` system call.
+    pub(super) fn poll(fds: &mut [PollFd<'_>], timeout: Option<Duration>) -> io::Result<usize> {
+        // Timeout for `poll`.
+        let timeout = match timeout {
+            Some(timeout) => Some(Timespec::try_from(timeout).map_err(|_| Errno::INVAL)?),
+            None => None,
+        };
+
+        Ok(rustix::event::poll(fds, timeout.as_ref())?)
+    }
 }
 
 #[cfg(target_os = "hermit")]
@@ -472,6 +476,7 @@ mod syscall {
     use std::io;
     use std::marker::PhantomData;
     use std::ops::BitOr;
+    use std::time::Duration;
 
     pub(super) use std::os::hermit::io::{AsFd, AsRawFd, BorrowedFd, FromRawFd, OwnedFd, RawFd};
 
@@ -503,12 +508,25 @@ mod syscall {
     }
 
     /// Safe wrapper around the `poll` system call.
-    pub(super) fn poll(fds: &mut [PollFd<'_>], timeout: i32) -> io::Result<usize> {
+    pub(super) fn poll(fds: &mut [PollFd<'_>], timeout: Option<Duration>) -> io::Result<usize> {
+        let timeout_ms = match timeout {
+            Some(timeout) => {
+                // Round up to a whole millisecond.
+                let mut ms = timeout.as_millis().try_into().unwrap_or(std::u64::MAX);
+                if Duration::from_millis(ms) < timeout {
+                    ms = ms.saturating_add(1);
+                }
+                ms.try_into()
+                    .map_err(|_| io::Error::from(io::ErrorKind::InvalidInput))?
+            }
+            None => -1,
+        };
+
         let call = unsafe {
             hermit_abi::poll(
                 fds.as_mut_ptr() as *mut hermit_abi::pollfd,
                 fds.len(),
-                timeout,
+                timeout_ms,
             )
         };
 
