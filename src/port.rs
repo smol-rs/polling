@@ -4,6 +4,7 @@ use std::io;
 use std::os::unix::io::{AsFd, AsRawFd, BorrowedFd, RawFd};
 use std::time::Duration;
 
+use rustix::buffer::spare_capacity;
 use rustix::event::{port, PollFlags, Timespec};
 use rustix::fd::OwnedFd;
 use rustix::io::{fcntl_getfd, fcntl_setfd, Errno, FdFlags};
@@ -119,7 +120,12 @@ impl Poller {
         };
 
         // Wait for I/O events.
-        let res = port::getn(&self.port_fd, &mut events.list, 1, timeout.as_ref());
+        let res = port::getn(
+            &self.port_fd,
+            spare_capacity(&mut events.list),
+            1,
+            timeout.as_ref(),
+        );
         tracing::trace!(
             port_fd = ?self.port_fd,
             res = ?events.list.len(),
