@@ -7,7 +7,7 @@ use std::sync::RwLock;
 use std::time::Duration;
 
 use rustix::buffer::spare_capacity;
-use rustix::event::kqueue;
+use rustix::event::{kqueue, Timespec};
 use rustix::io::{fcntl_setfd, Errno, FdFlags};
 
 use crate::{Event, PollMode};
@@ -152,7 +152,7 @@ impl Poller {
             let changelist = changelist.as_ref();
 
             unsafe {
-                kqueue::kevent(
+                kqueue::kevent_timespec(
                     &self.kqueue_fd,
                     changelist,
                     spare_capacity(&mut eventlist),
@@ -240,14 +240,20 @@ impl Poller {
         );
         let _enter = span.enter();
 
+        // Timeout for kevent. In case of overflow, use no timeout.
+        let timeout = match timeout {
+            Some(t) => Timespec::try_from(t).ok(),
+            None => None,
+        };
+
         // Wait for I/O events.
         let changelist = [];
         let res = unsafe {
-            kqueue::kevent(
+            kqueue::kevent_timespec(
                 &self.kqueue_fd,
                 &changelist,
                 spare_capacity(&mut events.list),
-                timeout,
+                timeout.as_ref(),
             )?
         };
 
