@@ -7,7 +7,7 @@ use std::time::Duration;
 use rustix::buffer::spare_capacity;
 use rustix::event::{port, PollFlags, Timespec};
 use rustix::fd::OwnedFd;
-use rustix::io::{fcntl_getfd, fcntl_setfd, Errno, FdFlags};
+use rustix::io::{fcntl_getfd, fcntl_setfd, FdFlags};
 
 use crate::{Event, PollMode};
 
@@ -113,9 +113,9 @@ impl Poller {
         );
         let _enter = span.enter();
 
-        // Timeout for `port::getn`.
+        // Timeout for `port::getn`. In case of overflow, use no timeout.
         let timeout = match timeout {
-            Some(t) => Some(Timespec::try_from(t).map_err(|_| Errno::INVAL)?),
+            Some(t) => Timespec::try_from(t).ok(),
             None => None,
         };
 

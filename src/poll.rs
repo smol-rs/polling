@@ -456,9 +456,9 @@ mod syscall {
 
     /// Safe wrapper around the `poll` system call.
     pub(super) fn poll(fds: &mut [PollFd<'_>], timeout: Option<Duration>) -> io::Result<usize> {
-        // Timeout for `poll`.
+        // Timeout for `poll`. In case of overflow, use no timeout.
         let timeout = match timeout {
-            Some(timeout) => Some(Timespec::try_from(timeout).map_err(|_| Errno::INVAL)?),
+            Some(timeout) => Timespec::try_from(timeout).ok(),
             None => None,
         };
 
