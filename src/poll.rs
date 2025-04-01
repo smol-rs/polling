@@ -448,7 +448,6 @@ mod syscall {
     pub(super) use rustix::event::{eventfd, EventfdFlags};
     #[cfg(target_os = "espidf")]
     pub(super) use rustix::fd::{AsFd, AsRawFd, BorrowedFd, OwnedFd, RawFd};
-    pub(super) use rustix::io::Errno;
     #[cfg(target_os = "espidf")]
     pub(super) use rustix::io::{read, write};
     use std::io;
