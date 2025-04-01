@@ -15,7 +15,7 @@ use rustix::buffer::spare_capacity;
 use rustix::event::{epoll, Timespec};
 use rustix::fd::OwnedFd;
 use rustix::fs::{fcntl_getfl, fcntl_setfl, OFlags};
-use rustix::io::{fcntl_getfd, fcntl_setfd, read, write, Errno, FdFlags};
+use rustix::io::{fcntl_getfd, fcntl_setfd, read, write, FdFlags};
 use rustix::pipe::{pipe, pipe_with, PipeFlags};
 
 use crate::{Event, PollMode};
@@ -196,10 +196,10 @@ impl Poller {
         #[cfg(target_os = "redox")]
         let timer_fd: Option<core::convert::Infallible> = None;
 
-        // Timeout for epoll.
+        // Timeout for epoll. In case of overflow, use no timeout.
         let timeout = match (timer_fd, timeout) {
             (_, Some(t)) if t == Duration::from_secs(0) => Some(Timespec::default()),
-            (None, Some(t)) => Some(Timespec::try_from(t).map_err(|_| Errno::INVAL)?),
+            (None, Some(t)) => Timespec::try_from(t).ok(),
             _ => None,
         };
 
