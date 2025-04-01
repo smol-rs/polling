@@ -506,18 +506,20 @@ mod syscall {
 
     /// Safe wrapper around the `poll` system call.
     pub(super) fn poll(fds: &mut [PollFd<'_>], timeout: Option<Duration>) -> io::Result<usize> {
-        let timeout_ms = match timeout {
-            Some(timeout) => {
+        // Timeout in milliseconds for epoll. In case of overflow, use no timeout.
+        let mut timeout_ms = -1;
+        if let Some(t) = timeout {
+            if let Ok(ms) = i32::try_from(t.as_millis()) {
                 // Round up to a whole millisecond.
-                let mut ms = timeout.as_millis().try_into().unwrap_or(std::u64::MAX);
-                if Duration::from_millis(ms) < timeout {
-                    ms = ms.saturating_add(1);
+                if Duration::from_millis(ms as u64) < t {
+                    if let Some(ms) = ms.checked_add(1) {
+                        timeout_ms = ms;
+                    }
+                } else {
+                    timeout_ms = ms;
                 }
-                ms.try_into()
-                    .map_err(|_| io::Error::from(io::ErrorKind::InvalidInput))?
             }
-            None => -1,
-        };
+        }
 
         let call = unsafe {
             hermit_abi::poll(
