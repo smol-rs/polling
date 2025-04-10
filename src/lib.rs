@@ -963,6 +963,7 @@ impl fmt::Debug for Events {
     any(
         target_os = "linux",
         target_os = "android",
+        target_os = "redox",
         target_os = "illumos",
         target_os = "solaris",
         target_vendor = "apple",
@@ -978,6 +979,7 @@ impl fmt::Debug for Events {
     doc(cfg(any(
         target_os = "linux",
         target_os = "android",
+        target_os = "redox",
         target_os = "illumos",
         target_os = "solaris",
         target_vendor = "apple",
