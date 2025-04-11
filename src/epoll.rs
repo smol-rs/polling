@@ -9,10 +9,10 @@ use rustix::event::{eventfd, EventfdFlags};
 #[cfg(not(target_os = "redox"))]
 use rustix::time::{
     timerfd_create, timerfd_settime, Itimerspec, TimerfdClockId, TimerfdFlags, TimerfdTimerFlags,
-    Timespec,
 };
 
-use rustix::event::epoll;
+use rustix::buffer::spare_capacity;
+use rustix::event::{epoll, Timespec};
 use rustix::fd::OwnedFd;
 use rustix::fs::{fcntl_getfl, fcntl_setfl, OFlags};
 use rustix::io::{fcntl_getfd, fcntl_setfd, read, write, FdFlags};
@@ -196,22 +196,19 @@ impl Poller {
         #[cfg(target_os = "redox")]
         let timer_fd: Option<core::convert::Infallible> = None;
 
-        // Timeout in milliseconds for epoll.
-        let timeout_ms = match (timer_fd, timeout) {
-            (_, Some(t)) if t == Duration::from_secs(0) => 0,
-            (None, Some(t)) => {
-                // Round up to a whole millisecond.
-                let mut ms = t.as_millis().try_into().unwrap_or(i32::MAX);
-                if Duration::from_millis(ms as u64) < t {
-                    ms = ms.saturating_add(1);
-                }
-                ms
-            }
-            _ => -1,
+        // Timeout for epoll. In case of overflow, use no timeout.
+        let timeout = match (timer_fd, timeout) {
+            (_, Some(t)) if t == Duration::from_secs(0) => Some(Timespec::default()),
+            (None, Some(t)) => Timespec::try_from(t).ok(),
+            _ => None,
         };
 
         // Wait for I/O events.
-        epoll::wait(&self.epoll_fd, &mut events.list, timeout_ms)?;
+        epoll::wait(
+            &self.epoll_fd,
+            spare_capacity(&mut events.list),
+            timeout.as_ref(),
+        )?;
         tracing::trace!(
             epoll_fd = ?self.epoll_fd.as_raw_fd(),
             res = ?events.list.len(),
@@ -306,7 +303,7 @@ fn write_flags() -> epoll::EventFlags {
 
 /// A list of reported I/O events.
 pub struct Events {
-    list: epoll::EventVec,
+    list: Vec<epoll::Event>,
 }
 
 unsafe impl Send for Events {}
@@ -315,7 +312,7 @@ impl Events {
     /// Creates an empty list.
     pub fn with_capacity(cap: usize) -> Events {
         Events {
-            list: epoll::EventVec::with_capacity(cap),
+            list: Vec::with_capacity(cap),
         }
     }
 

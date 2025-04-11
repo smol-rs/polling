@@ -25,7 +25,7 @@ cfg-if = "1"
 tracing = { version = "0.1.37", default-features = false }
 
 [target.'cfg(any(unix, target_os = "fuchsia", target_os = "vxworks"))'.dependencies.rustix]
-version = "0.38.31"
+version = "1.0.5"
 features = ["event", "fs", "pipe", "process", "std", "time"]
 default-features = false
 

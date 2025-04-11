@@ -38,7 +38,7 @@ pub trait PollerKqueueExt<F: Filter>: PollerSealed {
     /// let poller = Poller::new().unwrap();
     ///
     /// // Register the SIGINT signal.
-    /// poller.add_filter(Signal(rustix::process::Signal::Int as _), 0, PollMode::Oneshot).unwrap();
+    /// poller.add_filter(Signal(rustix::process::Signal::INT.as_raw()), 0, PollMode::Oneshot).unwrap();
     ///
     /// // Wait for the signal.
     /// let mut events = Events::new();
@@ -61,10 +61,10 @@ pub trait PollerKqueueExt<F: Filter>: PollerSealed {
     /// let poller = Poller::new().unwrap();
     ///
     /// // Register the SIGINT signal.
-    /// poller.add_filter(Signal(rustix::process::Signal::Int as _), 0, PollMode::Oneshot).unwrap();
+    /// poller.add_filter(Signal(rustix::process::Signal::INT.as_raw()), 0, PollMode::Oneshot).unwrap();
     ///
     /// // Re-register with a different key.
-    /// poller.modify_filter(Signal(rustix::process::Signal::Int as _), 1, PollMode::Oneshot).unwrap();
+    /// poller.modify_filter(Signal(rustix::process::Signal::INT.as_raw()), 1, PollMode::Oneshot).unwrap();
     ///
     /// // Wait for the signal.
     /// let mut events = Events::new();
@@ -87,10 +87,10 @@ pub trait PollerKqueueExt<F: Filter>: PollerSealed {
     /// let poller = Poller::new().unwrap();
     ///
     /// // Register the SIGINT signal.
-    /// poller.add_filter(Signal(rustix::process::Signal::Int as _), 0, PollMode::Oneshot).unwrap();
+    /// poller.add_filter(Signal(rustix::process::Signal::INT.as_raw()), 0, PollMode::Oneshot).unwrap();
     ///
     /// // Remove the filter.
-    /// poller.delete_filter(Signal(rustix::process::Signal::Int as _)).unwrap();
+    /// poller.delete_filter(Signal(rustix::process::Signal::INT.as_raw())).unwrap();
     /// ```
     fn delete_filter(&self, filter: F) -> io::Result<()>;
 }
@@ -153,7 +153,8 @@ unsafe impl FilterSealed for Signal {
     fn filter(&self, flags: kqueue::EventFlags, key: usize) -> kqueue::Event {
         kqueue::Event::new(
             kqueue::EventFilter::Signal {
-                signal: rustix::process::Signal::from_raw(self.0).expect("invalid signal number"),
+                signal: rustix::process::Signal::from_named_raw(self.0)
+                    .expect("invalid signal number"),
                 times: 0,
             },
             flags | kqueue::EventFlags::RECEIPT,
