@@ -110,16 +110,21 @@ impl Poller {
 
         let mode_flags = mode_to_flags(mode);
 
-        let read_flags = if ev.readable {
+        let mut read_flags = if ev.readable {
             kqueue::EventFlags::ADD | mode_flags
         } else {
             kqueue::EventFlags::DELETE
         };
-        let write_flags = if ev.writable {
+        let mut write_flags = if ev.writable {
             kqueue::EventFlags::ADD | mode_flags
         } else {
             kqueue::EventFlags::DELETE
         };
+
+        if ev.extra.eof {
+            read_flags |= kqueue::EventFlags::EOF;
+            write_flags |= kqueue::EventFlags::EOF;
+        }
 
         // A list of changes for kqueue.
         let changelist = [
@@ -322,7 +327,9 @@ impl Events {
             writable: matches!(ev.filter(), kqueue::EventFilter::Write(..))
                 || (matches!(ev.filter(), kqueue::EventFilter::Read(..))
                     && (ev.flags().intersects(kqueue::EventFlags::EOF))),
-            extra: EventExtra,
+            extra: EventExtra {
+                eof: ev.flags().intersects(kqueue::EventFlags::EOF),
+            },
         })
     }
 
@@ -339,19 +346,21 @@ impl Events {
 
 /// Extra information associated with an event.
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub struct EventExtra;
+pub struct EventExtra {
+    eof: bool,
+}
 
 impl EventExtra {
     /// Create a new, empty version of this struct.
     #[inline]
     pub const fn empty() -> EventExtra {
-        EventExtra
+        EventExtra { eof: false }
     }
 
     /// Set the interrupt flag.
     #[inline]
-    pub fn set_hup(&mut self, _value: bool) {
-        // No-op.
+    pub fn set_hup(&mut self, value: bool) {
+        self.eof = value;
     }
 
     /// Set the priority flag.
@@ -363,7 +372,7 @@ impl EventExtra {
     /// Is the interrupt flag set?
     #[inline]
     pub fn is_hup(&self) -> bool {
-        false
+        self.eof
     }
 
     /// Is the priority flag set?
