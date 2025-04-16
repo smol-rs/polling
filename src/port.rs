@@ -2,7 +2,7 @@
 
 use std::io;
 use std::os::unix::io::{AsFd, AsRawFd, BorrowedFd, RawFd};
-use std::time::Duration;
+use std::time::Instant;
 
 use rustix::event::{port, PollFlags};
 use rustix::fd::OwnedFd;
@@ -103,14 +103,16 @@ impl Poller {
         Ok(())
     }
 
-    /// Waits for I/O events with an optional timeout.
-    pub fn wait(&self, events: &mut Events, timeout: Option<Duration>) -> io::Result<()> {
+    /// Waits for I/O events with an optional deadline.
+    pub fn wait_deadline(&self, events: &mut Events, deadline: Option<Instant>) -> io::Result<()> {
         let span = tracing::trace_span!(
             "wait",
             port_fd = ?self.port_fd.as_raw_fd(),
-            ?timeout,
+            ?deadline,
         );
         let _enter = span.enter();
+
+        let timeout = deadline.map(|deadline| deadline.saturating_duration_since(Instant::now()));
 
         // Wait for I/O events.
         let res = port::port_getn(&self.port_fd, &mut events.list, 1, timeout);
