@@ -296,10 +296,12 @@ impl AsFd for Poller {
 
 impl Drop for Poller {
     fn drop(&mut self) {
+        #[cfg(feature = "tracing_in_drop")]
         let span = tracing::trace_span!(
             "drop",
             kqueue_fd = ?self.kqueue_fd.as_raw_fd(),
         );
+        #[cfg(feature = "tracing_in_drop")]
         let _enter = span.enter();
 
         let _ = self.notify.deregister(self);

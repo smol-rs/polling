@@ -140,6 +140,11 @@ impl Poller {
         Ok(())
     }
 
+    fn delete_intern(&self, fd: BorrowedFd<'_>) -> io::Result<()> {
+        epoll::delete(&self.epoll_fd, fd)?;
+        Ok(())
+    }
+
     /// Deletes a file descriptor.
     pub fn delete(&self, fd: BorrowedFd<'_>) -> io::Result<()> {
         let span = tracing::trace_span!(
@@ -148,10 +153,7 @@ impl Poller {
             ?fd,
         );
         let _enter = span.enter();
-
-        epoll::delete(&self.epoll_fd, fd)?;
-
-        Ok(())
+        self.delete_intern(fd)
     }
 
     /// Waits for I/O events with an optional timeout.
@@ -253,18 +255,28 @@ impl AsFd for Poller {
 
 impl Drop for Poller {
     fn drop(&mut self) {
-        let span = tracing::trace_span!(
-            "drop",
-            epoll_fd = ?self.epoll_fd.as_raw_fd(),
-            notifier = ?self.notifier,
-        );
-        let _enter = span.enter();
-
-        #[cfg(not(target_os = "redox"))]
-        if let Some(timer_fd) = self.timer_fd.take() {
-            let _ = self.delete(timer_fd.as_fd());
+        #[cfg(feature = "tracing_in_drop")]
+        {
+            let span = tracing::trace_span!(
+                "drop",
+                epoll_fd = ?self.epoll_fd.as_raw_fd(),
+                notifier = ?self.notifier,
+            );
+            let _enter = span.enter();
+            #[cfg(not(target_os = "redox"))]
+            if let Some(timer_fd) = self.timer_fd.take() {
+                let _ = self.delete(timer_fd.as_fd());
+            }
+            let _ = self.delete(self.notifier.as_fd());
         }
-        let _ = self.delete(self.notifier.as_fd());
+        #[cfg(not(feature = "tracing_in_drop"))]
+        {
+            #[cfg(not(target_os = "redox"))]
+            if let Some(timer_fd) = self.timer_fd.take() {
+                let _ = self.delete_intern(timer_fd.as_fd());
+            }
+            let _ = self.delete_intern(self.notifier.as_fd());
+        }
     }
 }
 
