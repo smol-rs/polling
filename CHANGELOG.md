@@ -1,3 +1,8 @@
+# Version 3.8.0
+
+- Implement `AsRawFd` and `AsFd` for `Poller` on Redox OS. (#235)
+- Update `hermit-abi` to v0.5.0. (#229)
+
 # Version 3.7.4
 
 - Add support for visionOS. (#217)
