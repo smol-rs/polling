@@ -1,3 +1,10 @@
+# Version 3.8.0
+
+- Implement `AsRawFd` and `AsFd` for `Poller` on Redox OS. (#235)
+- Update `hermit-abi` to v0.5.0. (#229)
+- Update `rustix` to 1.0 (#230). This also fixed a bug in `wait` which (contradicting docs) cleared the events vector instead of appending to it.
+- Add support for QNX. (#201)
+
 # Version 3.7.4
 
 - Add support for visionOS. (#217)
