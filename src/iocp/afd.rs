@@ -197,6 +197,7 @@ macro_rules! define_ntdll_import {
                         let addr = match addr {
                             Some(addr) => addr,
                             None => {
+                                #[cfg(feature = "tracing")]
                                 tracing::error!("Failed to load ntdll function {}", NAME);
                                 return Err(io::Error::last_os_error());
                             },
@@ -298,6 +299,7 @@ impl NtdllImports {
                 let ntdll = GetModuleHandleW(NTDLL_NAME.as_ptr() as *const _);
 
                 if ntdll.is_null() {
+                    #[cfg(feature = "tracing")]
                     tracing::error!("Failed to load ntdll.dll");
                     return Err(io::Error::last_os_error());
                 }
