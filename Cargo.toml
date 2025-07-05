@@ -54,7 +54,7 @@ version = "0.5.0"
 [dev-dependencies]
 easy-parallel = "3.1.0"
 fastrand = "2.0.0"
-socket2 = "0.5.5"
+socket2 = "0.6.0"
 
 [target.'cfg(unix)'.dev-dependencies]
 libc = "0.2"
