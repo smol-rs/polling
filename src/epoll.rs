@@ -77,6 +77,7 @@ impl Poller {
             )?;
         }
 
+        #[cfg(feature = "tracing")]
         tracing::trace!(
             epoll_fd = ?poller.epoll_fd.as_raw_fd(),
             notifier = ?poller.notifier,
@@ -102,12 +103,14 @@ impl Poller {
     /// The `fd` must be a valid file descriptor. The usual condition of remaining registered in
     /// the `Poller` doesn't apply to `epoll`.
     pub unsafe fn add(&self, fd: RawFd, ev: Event, mode: PollMode) -> io::Result<()> {
+        #[cfg(feature = "tracing")]
         let span = tracing::trace_span!(
             "add",
             epoll_fd = ?self.epoll_fd.as_raw_fd(),
             ?fd,
             ?ev,
         );
+        #[cfg(feature = "tracing")]
         let _enter = span.enter();
 
         epoll::add(
@@ -122,12 +125,14 @@ impl Poller {
 
     /// Modifies an existing file descriptor.
     pub fn modify(&self, fd: BorrowedFd<'_>, ev: Event, mode: PollMode) -> io::Result<()> {
+        #[cfg(feature = "tracing")]
         let span = tracing::trace_span!(
             "modify",
             epoll_fd = ?self.epoll_fd.as_raw_fd(),
             ?fd,
             ?ev,
         );
+        #[cfg(feature = "tracing")]
         let _enter = span.enter();
 
         epoll::modify(
@@ -141,12 +146,15 @@ impl Poller {
     }
 
     /// Deletes a file descriptor.
+    #[cfg_attr(not(feature = "tracing"), inline(always))]
     pub fn delete(&self, fd: BorrowedFd<'_>) -> io::Result<()> {
+        #[cfg(feature = "tracing")]
         let span = tracing::trace_span!(
             "delete",
             epoll_fd = ?self.epoll_fd.as_raw_fd(),
             ?fd,
         );
+        #[cfg(feature = "tracing")]
         let _enter = span.enter();
 
         epoll::delete(&self.epoll_fd, fd)?;
@@ -157,11 +165,13 @@ impl Poller {
     /// Waits for I/O events with an optional timeout.
     #[allow(clippy::needless_update)]
     pub fn wait(&self, events: &mut Events, timeout: Option<Duration>) -> io::Result<()> {
+        #[cfg(feature = "tracing")]
         let span = tracing::trace_span!(
             "wait",
             epoll_fd = ?self.epoll_fd.as_raw_fd(),
             ?timeout,
         );
+        #[cfg(feature = "tracing")]
         let _enter = span.enter();
 
         #[cfg(not(target_os = "redox"))]
@@ -209,6 +219,7 @@ impl Poller {
             spare_capacity(&mut events.list),
             timeout.as_ref(),
         )?;
+        #[cfg(feature = "tracing")]
         tracing::trace!(
             epoll_fd = ?self.epoll_fd.as_raw_fd(),
             res = ?events.list.len(),
@@ -227,11 +238,13 @@ impl Poller {
 
     /// Sends a notification to wake up the current or next `wait()` call.
     pub fn notify(&self) -> io::Result<()> {
+        #[cfg(feature = "tracing")]
         let span = tracing::trace_span!(
             "notify",
             epoll_fd = ?self.epoll_fd.as_raw_fd(),
             notifier = ?self.notifier,
         );
+        #[cfg(feature = "tracing")]
         let _enter = span.enter();
 
         self.notifier.notify();
@@ -253,11 +266,13 @@ impl AsFd for Poller {
 
 impl Drop for Poller {
     fn drop(&mut self) {
+        #[cfg(feature = "tracing")]
         let span = tracing::trace_span!(
             "drop",
             epoll_fd = ?self.epoll_fd.as_raw_fd(),
             notifier = ?self.notifier,
         );
+        #[cfg(feature = "tracing")]
         let _enter = span.enter();
 
         #[cfg(not(target_os = "redox"))]
@@ -426,14 +441,16 @@ impl Notifier {
                 // Try to create an eventfd.
                 match eventfd(0, EventfdFlags::CLOEXEC | EventfdFlags::NONBLOCK) {
                     Ok(fd) => {
+                        #[cfg(feature = "tracing")]
                         tracing::trace!("created eventfd for notifier");
                         return Ok(Notifier::EventFd(fd));
                     }
 
-                    Err(err) => {
+                    Err(_err) => {
+                        #[cfg(feature = "tracing")]
                         tracing::warn!(
                             "eventfd() failed with error ({}), falling back to pipe",
-                            err
+                            _err
                         );
                     }
                 }

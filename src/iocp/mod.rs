@@ -136,6 +136,7 @@ impl Poller {
         })?;
 
         let port = IoCompletionPort::new(0)?;
+        #[cfg(feature = "tracing")]
         tracing::trace!(handle = ?port, "new");
 
         Ok(Poller {
@@ -175,12 +176,14 @@ impl Poller {
         interest: Event,
         mode: PollMode,
     ) -> io::Result<()> {
+        #[cfg(feature = "tracing")]
         let span = tracing::trace_span!(
             "add",
             handle = ?self.port,
             sock = ?socket,
             ev = ?interest,
         );
+        #[cfg(feature = "tracing")]
         let _enter = span.enter();
 
         // We don't support edge-triggered events.
@@ -238,12 +241,14 @@ impl Poller {
         interest: Event,
         mode: PollMode,
     ) -> io::Result<()> {
+        #[cfg(feature = "tracing")]
         let span = tracing::trace_span!(
             "modify",
             handle = ?self.port,
             sock = ?socket,
             ev = ?interest,
         );
+        #[cfg(feature = "tracing")]
         let _enter = span.enter();
 
         // We don't support edge-triggered events.
@@ -275,11 +280,13 @@ impl Poller {
 
     /// Delete a source from the poller.
     pub(super) fn delete(&self, socket: BorrowedSocket<'_>) -> io::Result<()> {
+        #[cfg(feature = "tracing")]
         let span = tracing::trace_span!(
             "remove",
             handle = ?self.port,
             sock = ?socket,
         );
+        #[cfg(feature = "tracing")]
         let _enter = span.enter();
 
         // Remove the source from our associative map.
@@ -307,6 +314,7 @@ impl Poller {
         interest: Event,
         mode: PollMode,
     ) -> io::Result<()> {
+        #[cfg(feature = "tracing")]
         tracing::trace!(
             "add_waitable: handle={:?}, waitable={:p}, ev={:?}",
             self.port,
@@ -363,6 +371,7 @@ impl Poller {
         interest: Event,
         mode: PollMode,
     ) -> io::Result<()> {
+        #[cfg(feature = "tracing")]
         tracing::trace!(
             "modify_waitable: handle={:?}, waitable={:p}, ev={:?}",
             self.port,
@@ -398,6 +407,7 @@ impl Poller {
 
     /// Delete a waitable from the poller.
     pub(super) fn remove_waitable(&self, waitable: RawHandle) -> io::Result<()> {
+        #[cfg(feature = "tracing")]
         tracing::trace!("remove: handle={:?}, waitable={:p}", self.port, waitable);
 
         // Get a reference to the source.
@@ -420,11 +430,13 @@ impl Poller {
 
     /// Wait for events.
     pub(super) fn wait(&self, events: &mut Events, timeout: Option<Duration>) -> io::Result<()> {
+        #[cfg(feature = "tracing")]
         let span = tracing::trace_span!(
             "wait",
             handle = ?self.port,
             ?timeout,
         );
+        #[cfg(feature = "tracing")]
         let _enter = span.enter();
 
         // Make sure we have a consistent timeout.
@@ -451,10 +463,11 @@ impl Poller {
             let timeout = deadline.map(|t| t.saturating_duration_since(Instant::now()));
 
             // Wait for I/O events.
-            let len = self.port.wait(&mut events.completions, timeout)?;
+            let _len = self.port.wait(&mut events.completions, timeout)?;
+            #[cfg(feature = "tracing")]
             tracing::trace!(
                 handle = ?self.port,
-                res = ?len,
+                res = ?_len,
                 "new events");
 
             // We are no longer polling.
@@ -484,6 +497,7 @@ impl Poller {
                 break;
             }
 
+            #[cfg(feature = "tracing")]
             tracing::trace!("wait: no events found, re-entering polling loop");
         }
 
@@ -860,8 +874,9 @@ impl PacketUnwrapped {
 
                         // Push this packet.
                         drop(handle);
-                        if let Err(e) = iocp.post(0, 0, packet) {
-                            tracing::error!("failed to post completion packet: {}", e);
+                        if let Err(_e) = iocp.post(0, 0, packet) {
+                            #[cfg(feature = "tracing")]
+                            tracing::error!("failed to post completion packet: {}", _e);
                         }
                     },
                     None,
