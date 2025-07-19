@@ -38,7 +38,7 @@ concurrent-queue = "2.2.0"
 pin-project-lite = "0.2.9"
 
 [target.'cfg(windows)'.dependencies.windows-sys]
-version = "0.59"
+version = "0.60"
 features = [
     "Wdk_Foundation",
     "Wdk_Storage_FileSystem",
