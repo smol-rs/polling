@@ -22,7 +22,11 @@ unexpected_cfgs = { level = "warn", check-cfg = ['cfg(polling_test_poll_backend)
 
 [dependencies]
 cfg-if = "1"
-tracing = { version = "0.1.37", default-features = false }
+
+[dependencies.tracing]
+version = "0.1.37"
+default-features = false
+optional = true
 
 [target.'cfg(any(unix, target_os = "fuchsia", target_os = "vxworks"))'.dependencies.rustix]
 version = "1.0.5"
