@@ -70,6 +70,7 @@ impl Poller {
     pub fn new() -> io::Result<Poller> {
         let notify = notify::Notify::new()?;
 
+        #[cfg(feature = "tracing")]
         tracing::trace!(?notify, "new");
 
         Ok(Self {
@@ -104,12 +105,14 @@ impl Poller {
             return Err(io::Error::from(io::ErrorKind::InvalidInput));
         }
 
+        #[cfg(feature = "tracing")]
         let span = tracing::trace_span!(
             "add",
             notify_read = ?self.notify.fd().as_raw_fd(),
             ?fd,
             ?ev,
         );
+        #[cfg(feature = "tracing")]
         let _enter = span.enter();
 
         self.modify_fds(|fds| {
@@ -143,12 +146,14 @@ impl Poller {
             return Err(io::Error::from(io::ErrorKind::InvalidInput));
         }
 
+        #[cfg(feature = "tracing")]
         let span = tracing::trace_span!(
             "modify",
             notify_read = ?self.notify.fd().as_raw_fd(),
             ?fd,
             ?ev,
         );
+        #[cfg(feature = "tracing")]
         let _enter = span.enter();
 
         self.modify_fds(|fds| {
@@ -177,11 +182,13 @@ impl Poller {
             return Err(io::Error::from(io::ErrorKind::InvalidInput));
         }
 
+        #[cfg(feature = "tracing")]
         let span = tracing::trace_span!(
             "delete",
             notify_read = ?self.notify.fd().as_raw_fd(),
             ?fd,
         );
+        #[cfg(feature = "tracing")]
         let _enter = span.enter();
 
         self.modify_fds(|fds| {
@@ -203,11 +210,13 @@ impl Poller {
 
     /// Waits for I/O events with an optional timeout.
     pub fn wait(&self, events: &mut Events, timeout: Option<Duration>) -> io::Result<()> {
+        #[cfg(feature = "tracing")]
         let span = tracing::trace_span!(
             "wait",
             notify_read = ?self.notify.fd().as_raw_fd(),
             ?timeout,
         );
+        #[cfg(feature = "tracing")]
         let _enter = span.enter();
 
         let deadline = timeout.and_then(|t| Instant::now().checked_add(t));
@@ -235,6 +244,7 @@ impl Poller {
             let num_events = poll(&mut fds.poll_fds, timeout)?;
             let notified = !fds.poll_fds[0].revents().is_empty();
             let num_fd_events = if notified { num_events - 1 } else { num_events };
+            #[cfg(feature = "tracing")]
             tracing::trace!(?num_events, ?notified, ?num_fd_events, "new events",);
 
             // Read all notifications.
@@ -288,10 +298,12 @@ impl Poller {
 
     /// Sends a notification to wake up the current or next `wait()` call.
     pub fn notify(&self) -> io::Result<()> {
+        #[cfg(feature = "tracing")]
         let span = tracing::trace_span!(
             "notify",
             notify_read = ?self.notify.fd().as_raw_fd(),
         );
+        #[cfg(feature = "tracing")]
         let _enter = span.enter();
 
         if !self.notified.swap(true, Ordering::SeqCst) {
