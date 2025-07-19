@@ -729,7 +729,7 @@ impl Poller {
     /// # std::io::Result::Ok(())
     /// ```
     pub fn wait(&self, events: &mut Events, timeout: Option<Duration>) -> io::Result<usize> {
-        self.wait_deadline(
+        self.wait_impl(
             events,
             timeout.and_then(|timeout| Instant::now().checked_add(timeout)),
         )
@@ -739,11 +739,11 @@ impl Poller {
     /// deadline.
     ///
     /// See [`wait()`][`Poller::wait()`] for more details.
-    pub fn wait_deadline(
-        &self,
-        events: &mut Events,
-        deadline: Option<Instant>,
-    ) -> io::Result<usize> {
+    pub fn wait_deadline(&self, events: &mut Events, deadline: Instant) -> io::Result<usize> {
+        self.wait_impl(events, Some(deadline))
+    }
+
+    fn wait_impl(&self, events: &mut Events, deadline: Option<Instant>) -> io::Result<usize> {
         let span = tracing::trace_span!("Poller::wait", ?deadline);
         let _enter = span.enter();
 
