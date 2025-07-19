@@ -60,8 +60,10 @@ jobs:
       - name: Install Rust
         # --no-self-update is necessary because the windows environment cannot self-update rustup.exe.
         run: rustup update ${{ matrix.rust }} --no-self-update && rustup default ${{ matrix.rust }}
-      - name: Install cargo-hack
-        uses: taiki-e/install-action@cargo-hack
+      - name: Install cargo-hack and cargo-minimal-versions
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-hack,cargo-minimal-versions
       - run: cargo build --all --all-features --all-targets
       - run: cargo test
       - run: cargo test
@@ -77,6 +79,7 @@ jobs:
           RUSTFLAGS: ${{ env.RUSTFLAGS }} --cfg polling_test_epoll_pipe
         if: startsWith(matrix.os, 'ubuntu')
       - run: cargo hack build --feature-powerset --no-dev-deps
+      - run: cargo minimal-versions build --all --all-features
       - name: Clone async-io
         run: git clone https://github.com/smol-rs/async-io.git
         # The async-io Cargo.toml already has a patch section at the bottom, so we
