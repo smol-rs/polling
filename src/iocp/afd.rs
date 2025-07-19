@@ -130,7 +130,7 @@ impl fmt::Debug for AfdPollMask {
                 }
 
                 first = false;
-                write!(f, "{}", name)?;
+                write!(f, "{name}")?;
             }
         }
 
@@ -190,6 +190,7 @@ macro_rules! define_ntdll_import {
         impl NtdllImports {
             unsafe fn load(ntdll: HMODULE) -> io::Result<Self> {
                 $(
+                    #[allow(clippy::missing_transmute_annotations)]
                     let $name = {
                         const NAME: &str = concat!(stringify!($name), "\0");
                         let addr = GetProcAddress(ntdll, NAME.as_ptr() as *const _);
@@ -461,7 +462,7 @@ where
             // Initialize the AFD poll info.
             (*poll_info).exclusive = false.into();
             (*poll_info).handle_count = 1;
-            (*poll_info).timeout = std::i64::MAX;
+            (*poll_info).timeout = i64::MAX;
             (*poll_info).handles[0].handle = base_socket as HANDLE;
             (*poll_info).handles[0].status = 0;
             (*poll_info).handles[0].events = afd_events;
