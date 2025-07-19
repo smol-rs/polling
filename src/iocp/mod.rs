@@ -138,6 +138,7 @@ impl Poller {
         tracing::trace!(handle = ?port, "new");
 
         Ok(Poller {
+            #[allow(clippy::arc_with_non_send_sync)]
             port: Arc::new(port),
             afd: Mutex::new(vec![]),
             sources: RwLock::new(HashMap::new()),
@@ -543,7 +544,7 @@ impl Poller {
             self.pending_updates.capacity().unwrap()
         } else {
             // Less of a concern if we're draining the queue prior to a poll operation.
-            std::usize::MAX
+            usize::MAX
         };
 
         self.pending_updates
@@ -593,6 +594,7 @@ impl Poller {
         }
 
         // No available handles, create a new AFD instance.
+        #[allow(clippy::arc_with_non_send_sync)]
         let afd = Arc::new(Afd::new()?);
 
         // Register the AFD instance with the I/O completion port.

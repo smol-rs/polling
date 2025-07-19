@@ -28,6 +28,11 @@ defaults:
 jobs:
   fmt:
     uses: smol-rs/.github/.github/workflows/fmt.yml@main
+  clippy:
+    uses: smol-rs/.github/.github/workflows/clippy.yml@main
+    with:
+      # macOS for kqueue, Windows for iocp, illumos for port, fuchsia for poll.
+      additional-targets: aarch64-apple-darwin x86_64-pc-windows-msvc x86_64-unknown-illumos x86_64-unknown-fuchsia
   security_audit:
     uses: smol-rs/.github/.github/workflows/security_audit.yml@main
     permissions:
@@ -165,11 +170,3 @@ jobs:
         if: startsWith(matrix.os, 'ubuntu')
       - run: cargo hack build --no-dev-deps --rust-version --target x86_64-unknown-netbsd
         if: startsWith(matrix.os, 'ubuntu')
-
-  clippy:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Install Rust
-        run: rustup update stable
-      - run: cargo clippy --all-features --all-targets

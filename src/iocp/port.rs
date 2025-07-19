@@ -65,7 +65,7 @@ pub(super) unsafe trait CompletionHandle: Deref + Sized {
     fn as_ptr(&self) -> *mut OVERLAPPED;
 }
 
-unsafe impl<'a, T: Completion> CompletionHandle for Pin<&'a T> {
+unsafe impl<T: Completion> CompletionHandle for Pin<&T> {
     type Completion = T;
 
     fn get(&self) -> Pin<&Self::Completion> {
