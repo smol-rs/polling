@@ -18,7 +18,7 @@ fn below_ms() -> io::Result<()> {
         let elapsed = now.elapsed();
 
         assert_eq!(n, 0);
-        assert!(elapsed >= dur, "{:?} < {:?}", elapsed, dur);
+        assert!(elapsed >= dur, "{elapsed:?} < {dur:?}");
         lowest = lowest.min(elapsed);
     }
 
@@ -51,7 +51,7 @@ fn above_ms() -> io::Result<()> {
         let elapsed = now.elapsed();
 
         assert_eq!(n, 0);
-        assert!(elapsed >= dur, "{:?} < {:?}", elapsed, dur);
+        assert!(elapsed >= dur, "{elapsed:?} < {dur:?}");
         lowest = lowest.min(elapsed);
     }
 
