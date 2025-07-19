@@ -18,14 +18,12 @@ fn level_triggered() {
 
     // Register the source into both pollers.
     let (mut reader, mut writer) = tcp_pair().unwrap();
-    unsafe {
-        poller1
-            .add_with_mode(&reader, Event::readable(1), PollMode::Level)
-            .unwrap();
-        poller2
-            .add_with_mode(&reader, Event::readable(2), PollMode::Level)
-            .unwrap();
-    }
+    poller1
+        .add_with_mode(&reader, Event::readable(1), PollMode::Level)
+        .unwrap();
+    poller2
+        .add_with_mode(&reader, Event::readable(2), PollMode::Level)
+        .unwrap();
 
     // Neither poller should have any events.
     assert_eq!(
@@ -139,14 +137,12 @@ fn edge_triggered() {
 
     // Register the source into both pollers.
     let (mut reader, mut writer) = tcp_pair().unwrap();
-    unsafe {
-        poller1
-            .add_with_mode(&reader, Event::readable(1), PollMode::Edge)
-            .unwrap();
-        poller2
-            .add_with_mode(&reader, Event::readable(2), PollMode::Edge)
-            .unwrap();
-    }
+    poller1
+        .add_with_mode(&reader, Event::readable(1), PollMode::Edge)
+        .unwrap();
+    poller2
+        .add_with_mode(&reader, Event::readable(2), PollMode::Edge)
+        .unwrap();
 
     // Neither poller should have any events.
     assert_eq!(
@@ -256,14 +252,12 @@ fn oneshot_triggered() {
 
     // Register the source into both pollers.
     let (mut reader, mut writer) = tcp_pair().unwrap();
-    unsafe {
-        poller1
-            .add_with_mode(&reader, Event::readable(1), PollMode::Oneshot)
-            .unwrap();
-        poller2
-            .add_with_mode(&reader, Event::readable(2), PollMode::Oneshot)
-            .unwrap();
-    }
+    poller1
+        .add_with_mode(&reader, Event::readable(1), PollMode::Oneshot)
+        .unwrap();
+    poller2
+        .add_with_mode(&reader, Event::readable(2), PollMode::Oneshot)
+        .unwrap();
 
     // Neither poller should have any events.
     assert_eq!(
