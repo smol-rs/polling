@@ -31,9 +31,7 @@ mod port;
 use afd::{base_socket, Afd, AfdPollInfo, AfdPollMask, HasAfdInfo, IoStatusBlock};
 use port::{IoCompletionPort, OverlappedEntry};
 
-use windows_sys::Win32::Foundation::{
-    BOOLEAN, ERROR_INVALID_HANDLE, ERROR_IO_PENDING, STATUS_CANCELLED,
-};
+use windows_sys::Win32::Foundation::{ERROR_INVALID_HANDLE, ERROR_IO_PENDING, STATUS_CANCELLED};
 use windows_sys::Win32::System::Threading::{
     RegisterWaitForSingleObject, UnregisterWait, INFINITE, WT_EXECUTELONGFUNCTION,
     WT_EXECUTEONLYONCE,
@@ -1239,7 +1237,7 @@ impl WaitHandle {
 
         unsafe extern "system" fn wait_callback<F: FnOnce() + Send + Sync + 'static>(
             context: *mut c_void,
-            _timer_fired: BOOLEAN,
+            _timer_fired: bool,
         ) {
             let _guard = AbortOnDrop;
             let callback = Box::from_raw(context as *mut F);
