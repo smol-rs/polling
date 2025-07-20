@@ -729,21 +729,29 @@ impl Poller {
     /// # std::io::Result::Ok(())
     /// ```
     pub fn wait(&self, events: &mut Events, timeout: Option<Duration>) -> io::Result<usize> {
+        self.wait_impl(
+            events,
+            timeout.and_then(|timeout| Instant::now().checked_add(timeout)),
+        )
+    }
+
+    /// Waits for at least one I/O event and returns the number of new events, with a deadline.
+    ///
+    /// See [`wait()`][`Poller::wait()`] for more details.
+    pub fn wait_deadline(&self, events: &mut Events, deadline: Instant) -> io::Result<usize> {
+        self.wait_impl(events, Some(deadline))
+    }
+
+    fn wait_impl(&self, events: &mut Events, deadline: Option<Instant>) -> io::Result<usize> {
         #[cfg(feature = "tracing")]
-        let span = tracing::trace_span!("Poller::wait", ?timeout);
+        let span = tracing::trace_span!("Poller::wait", ?deadline);
         #[cfg(feature = "tracing")]
         let _enter = span.enter();
 
         if let Ok(_lock) = self.lock.try_lock() {
-            let deadline = timeout.and_then(|timeout| Instant::now().checked_add(timeout));
-
             loop {
-                // Figure out how long to wait for.
-                let timeout =
-                    deadline.map(|deadline| deadline.saturating_duration_since(Instant::now()));
-
                 // Wait for I/O events.
-                if let Err(e) = self.poller.wait(&mut events.events, timeout) {
+                if let Err(e) = self.poller.wait_deadline(&mut events.events, deadline) {
                     // If the wait was interrupted by a signal, clear events and try again.
                     if e.kind() == io::ErrorKind::Interrupted {
                         events.clear();
