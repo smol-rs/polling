@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::io;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Condvar, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 #[cfg(not(target_os = "hermit"))]
 use rustix::fd::{AsFd, AsRawFd, BorrowedFd};
@@ -208,18 +208,16 @@ impl Poller {
         })
     }
 
-    /// Waits for I/O events with an optional timeout.
-    pub fn wait(&self, events: &mut Events, timeout: Option<Duration>) -> io::Result<()> {
+    /// Waits for I/O events with an optional deadline.
+    pub fn wait_deadline(&self, events: &mut Events, deadline: Option<Instant>) -> io::Result<()> {
         #[cfg(feature = "tracing")]
         let span = tracing::trace_span!(
             "wait",
             notify_read = ?self.notify.fd().as_raw_fd(),
-            ?timeout,
+            ?deadline,
         );
         #[cfg(feature = "tracing")]
         let _enter = span.enter();
-
-        let deadline = timeout.and_then(|t| Instant::now().checked_add(t));
 
         let mut fds = self.fds.lock().unwrap();
 

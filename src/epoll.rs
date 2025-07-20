@@ -2,7 +2,7 @@
 
 use std::io;
 use std::os::unix::io::{AsFd, AsRawFd, BorrowedFd, RawFd};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 #[cfg(not(target_os = "redox"))]
 use rustix::event::{eventfd, EventfdFlags};
@@ -162,17 +162,19 @@ impl Poller {
         Ok(())
     }
 
-    /// Waits for I/O events with an optional timeout.
+    /// Waits for I/O events with an optional deadline.
     #[allow(clippy::needless_update)]
-    pub fn wait(&self, events: &mut Events, timeout: Option<Duration>) -> io::Result<()> {
+    pub fn wait_deadline(&self, events: &mut Events, deadline: Option<Instant>) -> io::Result<()> {
         #[cfg(feature = "tracing")]
         let span = tracing::trace_span!(
             "wait",
             epoll_fd = ?self.epoll_fd.as_raw_fd(),
-            ?timeout,
+            ?deadline,
         );
         #[cfg(feature = "tracing")]
         let _enter = span.enter();
+
+        let timeout = deadline.map(|deadline| deadline.saturating_duration_since(Instant::now()));
 
         #[cfg(not(target_os = "redox"))]
         if let Some(ref timer_fd) = self.timer_fd {

@@ -4,7 +4,7 @@ use std::collections::HashSet;
 use std::io;
 use std::os::unix::io::{AsFd, AsRawFd, BorrowedFd, OwnedFd, RawFd};
 use std::sync::RwLock;
-use std::time::Duration;
+use std::time::Instant;
 
 use rustix::buffer::spare_capacity;
 use rustix::event::{kqueue, Timespec};
@@ -234,16 +234,18 @@ impl Poller {
         self.remove_source(SourceId::Fd(fd.as_raw_fd()))
     }
 
-    /// Waits for I/O events with an optional timeout.
-    pub fn wait(&self, events: &mut Events, timeout: Option<Duration>) -> io::Result<()> {
+    /// Waits for I/O events with an optional deadline.
+    pub fn wait_deadline(&self, events: &mut Events, deadline: Option<Instant>) -> io::Result<()> {
         #[cfg(feature = "tracing")]
         let span = tracing::trace_span!(
             "wait",
             kqueue_fd = ?self.kqueue_fd.as_raw_fd(),
-            ?timeout,
+            ?deadline,
         );
         #[cfg(feature = "tracing")]
         let _enter = span.enter();
+
+        let timeout = deadline.map(|deadline| deadline.saturating_duration_since(Instant::now()));
 
         // Timeout for kevent. In case of overflow, use no timeout.
         let timeout = match timeout {
