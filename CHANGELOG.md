@@ -1,3 +1,7 @@
+# Version 3.10.0
+
+- Add `wait_deadline` function. (#226)
+
 # Version 3.9.0
 
 - Add a new optional `tracing` feature. When enabled, this feature adds logging
