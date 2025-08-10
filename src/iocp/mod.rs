@@ -492,7 +492,7 @@ impl Poller {
             }
 
             // Break if there was a notification or at least one event, or if deadline is reached.
-            let timeout_is_empty = timeout.map_or(false, |t| t.is_zero());
+            let timeout_is_empty = timeout.is_some_and(|t| t.is_zero());
             if notified || new_events > 0 || timeout_is_empty {
                 break;
             }
