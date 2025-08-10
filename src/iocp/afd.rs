@@ -12,7 +12,7 @@ use std::os::windows::prelude::{AsRawHandle, RawHandle, RawSocket};
 use std::pin::Pin;
 use std::ptr;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Once;
+use std::sync::OnceLock;
 
 use windows_sys::Wdk::Foundation::OBJECT_ATTRIBUTES;
 use windows_sys::Wdk::Storage::FileSystem::FILE_OPEN;
@@ -293,7 +293,7 @@ impl NtdllImports {
             s!('l'),
             s!('\0'),
         ];
-        static NTDLL_IMPORTS: OnceCell<io::Result<NtdllImports>> = OnceCell::new();
+        static NTDLL_IMPORTS: OnceLock<io::Result<NtdllImports>> = OnceLock::new();
 
         NTDLL_IMPORTS
             .get_or_init(|| unsafe {
@@ -532,41 +532,6 @@ where
 
             Err(io::Error::from_raw_os_error(real_code as i32))
         }
-    }
-}
-
-/// A one-time initialization cell.
-struct OnceCell<T> {
-    /// The value.
-    value: UnsafeCell<MaybeUninit<T>>,
-
-    /// The one-time initialization.
-    once: Once,
-}
-
-unsafe impl<T: Send + Sync> Send for OnceCell<T> {}
-unsafe impl<T: Send + Sync> Sync for OnceCell<T> {}
-
-impl<T> OnceCell<T> {
-    /// Creates a new `OnceCell`.
-    pub const fn new() -> Self {
-        OnceCell {
-            value: UnsafeCell::new(MaybeUninit::uninit()),
-            once: Once::new(),
-        }
-    }
-
-    /// Gets the value or initializes it.
-    pub fn get_or_init<F>(&self, f: F) -> &T
-    where
-        F: FnOnce() -> T,
-    {
-        self.once.call_once(|| unsafe {
-            let value = f();
-            *self.value.get() = MaybeUninit::new(value);
-        });
-
-        unsafe { &*self.value.get().cast() }
     }
 }
 
