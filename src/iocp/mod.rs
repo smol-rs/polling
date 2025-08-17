@@ -26,6 +26,7 @@
 //! AFD-based strategy for polling.
 
 mod afd;
+pub(crate) mod ntdll;
 mod port;
 
 use afd::{base_socket, Afd, AfdPollInfo, AfdPollMask, HasAfdInfo, IoStatusBlock};
@@ -36,7 +37,10 @@ use windows_sys::Win32::System::Threading::{
     RegisterWaitForSingleObject, UnregisterWait, INFINITE, WT_EXECUTELONGFUNCTION,
     WT_EXECUTEONLYONCE,
 };
+use windows_sys::Win32::System::IO::{OVERLAPPED, OVERLAPPED_ENTRY};
 
+use crate::iocp::port::{FileCompletionHandle, FileOverlapped};
+use crate::os::iocp::{IocpFilePacket, Overlapped, OverlappedInner};
 use crate::{Event, PollMode};
 
 use concurrent_queue::ConcurrentQueue;
@@ -45,8 +49,6 @@ use pin_project_lite::pin_project;
 use std::cell::UnsafeCell;
 use std::collections::hash_map::{Entry, HashMap};
 use std::ffi::c_void;
-use std::fmt;
-use std::io;
 use std::marker::PhantomPinned;
 use std::mem::{forget, MaybeUninit};
 use std::os::windows::io::{
@@ -54,8 +56,9 @@ use std::os::windows::io::{
 };
 use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard, RwLock, Weak};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock, RwLock, Weak};
 use std::time::{Duration, Instant};
+use std::{fmt, io};
 
 /// Macro to lock and ignore lock poisoning.
 macro_rules! lock {
@@ -91,6 +94,9 @@ pub(super) struct Poller {
     /// The state of the waitable handles registered with this poller.
     waitables: RwLock<HashMap<RawHandle, Packet>>,
 
+    /// The state of the waitable handles registered with this poller.
+    files: RwLock<HashMap<RawHandle, Packet>>,
+
     /// Sockets with pending updates.
     ///
     /// This list contains packets with sockets that need to have their AFD state adjusted by
@@ -118,7 +124,7 @@ impl Poller {
     /// Creates a new poller.
     pub(super) fn new() -> io::Result<Self> {
         // Make sure AFD is able to be used.
-        if let Err(e) = afd::NtdllImports::force_load() {
+        if let Err(e) = ntdll::NtdllImports::force_load() {
             return Err(io::Error::new(
                 io::ErrorKind::Unsupported,
                 AfdError::new("failed to initialize unstable Windows functions", e),
@@ -143,6 +149,7 @@ impl Poller {
             afd: Mutex::new(vec![]),
             sources: RwLock::new(HashMap::new()),
             waitables: RwLock::new(HashMap::new()),
+            files: RwLock::new(HashMap::new()),
             pending_updates: ConcurrentQueue::bounded(1024),
             polling: AtomicBool::new(false),
             notifier: Arc::pin(
@@ -427,6 +434,91 @@ impl Poller {
         source.begin_delete()
     }
 
+    /// Add a file to the poller.
+    /// File handle work on PollMode::Edge mode. The IOCP continue to poll the events unitl
+    /// the file is closed. The caller must use the overlapped pointer return in IocpFilePacket
+    /// as overlapped paramter for I/O operation. The Packet do not need to increase Arc count because
+    /// the call can trigger events through I/O operation without update intrest events as long as the
+    /// file handle has been registered with the IOCP. So the Packet lifetime is ended with calling [`remove_file`].
+    /// Any I/O operation using return overlapped pointer return in IocpFilePacket is undefined behavior.
+    ///
+    /// IocpFilePacket will return both read and write overlapped pointer no matter what intrest events are.
+    /// The caller need to use the correct overlapped pointer for I/O operation. Such as: the read overlapped
+    /// pointer can be used for read operations, and the write overlapped pointer can be used for write operations.
+    pub(super) fn add_file(
+        &self,
+        handle: RawHandle,
+        interest: Event,
+    ) -> io::Result<IocpFilePacket> {
+        #[cfg(feature = "tracing")]
+        tracing::trace!(
+            "add_file: handle={:?}, file={:p}, ev={:?}",
+            self.port,
+            handle,
+            interest
+        );
+
+        // We only support edge events.
+        // Create a new packet.
+        let handle_state = {
+            let state = FileState { handle, interest };
+
+            Arc::pin(IoStatusBlock::from(PacketInner::File {
+                read: UnsafeCell::new(OverlappedInner::<Packet>::new(file_read_overlapped_done)),
+                write: UnsafeCell::new(OverlappedInner::<Packet>::new(file_write_overlapped_done)),
+                handle: Mutex::new(state),
+            }))
+        };
+
+        // Keep track of the source in the poller.
+        {
+            let mut sources = lock!(self.files.write());
+
+            match sources.entry(handle) {
+                Entry::Vacant(v) => {
+                    v.insert(Pin::<Arc<_>>::clone(&handle_state));
+                }
+
+                Entry::Occupied(_) => {
+                    return Err(io::Error::from(io::ErrorKind::AlreadyExists));
+                }
+            }
+        }
+
+        let (read, write, file_handle) = match handle_state.as_ref().data().project_ref() {
+            PacketInnerProj::File {
+                read,
+                write,
+                handle,
+            } => (read.get(), write.get(), handle),
+            _ => unreachable!("PacketInner should always be File here"),
+        };
+
+        let file_state = lock!(file_handle.lock());
+        // Register the file handle with the I/O completion port.
+        self.port
+            .register(&*file_state, true, port::CompletionKeyType::File)?;
+
+        let iocp_packet = unsafe { IocpFilePacket::new((*read).as_ptr(), (*write).as_ptr()) };
+        Ok(iocp_packet)
+    }
+
+    /// Remove a file from the poller.
+    pub(super) fn remove_file(&self, handle: RawHandle) -> io::Result<()> {
+        #[cfg(feature = "tracing")]
+        tracing::trace!("remove: handle={:?}, file={:p}", self.port, handle);
+
+        // Get a reference to the source.
+        let mut sources = lock!(self.files.write());
+        match sources.remove(&handle) {
+            Some(_) => Ok(()),
+            None => {
+                // If the source has already been removed, then we can just return.
+                Err(io::Error::from(io::ErrorKind::NotFound))
+            }
+        }
+    }
+
     /// Wait for events.
     pub(super) fn wait_deadline(
         &self,
@@ -476,10 +568,17 @@ impl Poller {
 
             // Process all of the events.
             for entry in events.completions.drain(..) {
-                let packet = entry.into_packet();
+                let result = if entry.is_file_completion() {
+                    let bytes_transferred = entry.bytes_transferred();
+                    let (packet, polling_status) = entry.into_file_packet();
+                    packet.feed_file_event(polling_status, bytes_transferred)
+                } else {
+                    let packet = entry.into_packet();
+                    packet.feed_event(self)
+                };
 
                 // Feed the event into the packet.
-                match packet.feed_event(self)? {
+                match result? {
                     FeedEventResult::NoEvent => {}
                     FeedEventResult::Event(event) => {
                         events.packets.push(event);
@@ -599,7 +698,8 @@ impl Poller {
         let afd = Arc::new(Afd::new()?);
 
         // Register the AFD instance with the I/O completion port.
-        self.port.register(&*afd, true)?;
+        self.port
+            .register(&*afd, true, port::CompletionKeyType::Socket)?;
 
         // Insert a weak pointer to the AFD instance into the list for other sockets.
         afd_handles.push(Arc::downgrade(&afd));
@@ -735,6 +835,37 @@ impl CompletionPacket {
 /// It needs to be pinned, since it contains data that is expected by IOCP not to be moved.
 type Packet = Pin<Arc<PacketUnwrapped>>;
 type PacketUnwrapped = IoStatusBlock<PacketInner>;
+/// A wrapper around the Overlapped<Packet> structure for file I/O operation result
+#[derive(Debug)]
+#[repr(transparent)]
+pub struct FileOverlappedWrapper(Overlapped<Packet>);
+
+impl FileOverlappedWrapper {
+    /// Wrapping to [`Overlapped<T>::from_overlapped_ptr`]
+    ///
+    /// # Safety
+    ///
+    /// The caller must ensure that the pointer is valid and points to an
+    /// `Overlapped<T>` structure.
+    pub unsafe fn from_overlapped_ptr(overlapped_ptr: *mut OVERLAPPED) -> *mut Self {
+        Overlapped::<Packet>::from_overlapped_ptr(overlapped_ptr) as *mut _
+    }
+
+    /// Wrapping to [`Overlapped<T>::get_bytes_transferred`]
+    pub fn get_bytes_transferred(&self) -> u32 {
+        self.0.get_bytes_transferred()
+    }
+
+    /// Wrapping to [`Overlapped<T>::get_result`]
+    pub fn get_result(&self) -> io::Result<bool> {
+        self.0.get_result()
+    }
+
+    /// Wrapping to [`Overlapped<T>::zeroed`]
+    pub fn zeroed(&mut self) {
+        self.0.zeroed();
+    }
+}
 
 pin_project! {
     /// The inner type of the packet.
@@ -754,6 +885,18 @@ pin_project! {
         /// A packet for a waitable handle.
         Waitable {
             handle: Mutex<WaitableState>
+        },
+
+        /// A packet for a File handle.
+        File {
+            // read update this overlapped structure.
+            #[pin]
+            read: UnsafeCell<OverlappedInner<Packet>>,
+
+            // write update this overlapped structure.
+            #[pin]
+            write: UnsafeCell<OverlappedInner<Packet>>,
+            handle: Mutex<FileState>
         },
 
         /// A custom event sent by the user.
@@ -782,6 +925,16 @@ impl fmt::Debug for PacketInner {
             Self::Waitable { handle } => {
                 f.debug_struct("Waitable").field("handle", handle).finish()
             }
+            Self::File {
+                handle,
+                read,
+                write,
+            } => f
+                .debug_struct("File")
+                .field("file", handle)
+                .field("read", &format_args!("{:p}", read as *const _))
+                .field("write", &format_args!("{:p}", write as *const _))
+                .finish(),
         }
     }
 }
@@ -792,6 +945,49 @@ impl HasAfdInfo for PacketInner {
             PacketInnerProj::Socket { packet, .. } => packet,
             _ => unreachable!(),
         }
+    }
+}
+
+/// Only caculate offset once
+static FILE_OVERLAPPED_OFFSET: OnceLock<(usize, usize)> = OnceLock::new();
+
+impl FileOverlapped for PacketInner {
+    fn file_read_offset() -> usize {
+        PacketInner::file_overlapped_offset().0
+    }
+
+    fn file_write_offset() -> usize {
+        PacketInner::file_overlapped_offset().1
+    }
+}
+
+impl PacketInner {
+    /// Calculate the offset of read and write overlapped in PacketInner::File
+    fn file_overlapped_offset() -> &'static (usize, usize) {
+        FILE_OVERLAPPED_OFFSET.get_or_init(|| {
+            let state = FileState {
+                handle: std::ptr::null_mut(),
+                interest: Event::none(0),
+            };
+
+            let packet = &PacketInner::File {
+                read: UnsafeCell::new(OverlappedInner::<Packet>::new(file_read_overlapped_done)),
+                write: UnsafeCell::new(OverlappedInner::<Packet>::new(file_write_overlapped_done)),
+                handle: Mutex::new(state),
+            };
+
+            let base = packet as *const _;
+            let (read, write) = match packet {
+                PacketInner::File { read, write, .. } => (read, write),
+                _ => unreachable!(),
+            };
+            let read_ptr = read as *const _;
+            let write_ptr = write as *const _;
+            (
+                unsafe { (read_ptr as *const u8).offset_from(base as *const _) as usize },
+                unsafe { (write_ptr as *const u8).offset_from(base as *const _) as usize },
+            )
+        })
     }
 }
 
@@ -889,7 +1085,7 @@ impl PacketUnwrapped {
 
                 return Ok(());
             }
-            _ => return Err(io::Error::new(io::ErrorKind::Other, "invalid socket state")),
+            _ => return Err(io::Error::other("invalid socket state")),
         };
 
         // If we are waiting on a delete, just return, dropping the packet.
@@ -980,6 +1176,7 @@ impl PacketUnwrapped {
 
                 return Ok(FeedEventResult::Event(event));
             }
+            _ => unreachable!("Should not be called on a file packet"),
         };
 
         let mut socket_state = lock!(socket.lock());
@@ -1067,6 +1264,52 @@ impl PacketUnwrapped {
         Ok(return_value)
     }
 
+    fn feed_file_event(
+        self: Pin<Arc<Self>>,
+        status: FileCompletionStatus,
+        bytes_transferred: u32,
+    ) -> io::Result<FeedEventResult> {
+        let inner = self.as_ref().data().project_ref();
+
+        let (handle, read, write) = match inner {
+            PacketInnerProj::File {
+                handle,
+                read,
+                write,
+            } => (handle, read, write),
+            _ => unreachable!("Should not be called on a non-file packet"),
+        };
+
+        let file_state = lock!(handle.lock());
+        let mut event = Event::none(file_state.interest.key);
+        if status.is_read() {
+            unsafe {
+                (*read.get()).set_bytes_transferred(bytes_transferred);
+            }
+            event.readable = true;
+        }
+
+        if status.is_write() {
+            unsafe {
+                (*write.get()).set_bytes_transferred(bytes_transferred);
+            }
+            event.writable = true;
+        }
+
+        event.readable &= file_state.interest.readable;
+        event.writable &= file_state.interest.writable;
+
+        // If this event doesn't have anything that interests us, don't return or
+        // update the oneshot state.
+        let return_value = if event.readable || event.writable {
+            FeedEventResult::Event(event)
+        } else {
+            FeedEventResult::NoEvent
+        };
+
+        Ok(return_value)
+    }
+
     /// Begin deleting this socket.
     fn begin_delete(self: Pin<Arc<Self>>) -> io::Result<()> {
         // If we aren't already being deleted, start deleting.
@@ -1109,6 +1352,22 @@ impl PacketUnwrapped {
 
         Ok(())
     }
+}
+
+/// Callback convert read overlapped pointer to Packet
+unsafe fn file_read_overlapped_done(entry: &OVERLAPPED_ENTRY) -> (Packet, FileCompletionStatus) {
+    (
+        Packet::file_read_done(entry),
+        FILE_STATUS_POLLING_FLAG_READ.into(),
+    )
+}
+
+/// Callback convert write overlapped pointer Packet
+unsafe fn file_write_overlapped_done(entry: &OVERLAPPED_ENTRY) -> (Packet, FileCompletionStatus) {
+    (
+        Packet::file_write_done(entry),
+        FILE_STATUS_POLLING_FLAG_WRITE.into(),
+    )
 }
 
 /// Per-socket state.
@@ -1190,6 +1449,50 @@ enum WaitableStatus {
 impl WaitableStatus {
     fn is_idle(&self) -> bool {
         matches!(self, WaitableStatus::Idle)
+    }
+}
+
+#[derive(Debug)]
+struct FileState {
+    /// The handle that this state is for.
+    handle: RawHandle,
+
+    /// The event that this handle will report.
+    interest: Event,
+}
+
+impl AsRawHandle for FileState {
+    fn as_raw_handle(&self) -> RawHandle {
+        self.handle as _
+    }
+}
+
+const FILE_STATUS_POLLING_FLAG_READ: u32 = 1 << 0; // 0001
+const FILE_STATUS_POLLING_FLAG_WRITE: u32 = 1 << 1; // 0010
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(transparent)]
+pub(crate) struct FileCompletionStatus(u32);
+
+impl FileCompletionStatus {
+    pub(crate) const fn is_read(&self) -> bool {
+        self.0 & FILE_STATUS_POLLING_FLAG_READ != 0
+    }
+
+    pub(crate) const fn is_write(&self) -> bool {
+        self.0 & FILE_STATUS_POLLING_FLAG_WRITE != 0
+    }
+}
+
+impl From<FileCompletionStatus> for u32 {
+    fn from(value: FileCompletionStatus) -> Self {
+        value.0
+    }
+}
+
+impl From<u32> for FileCompletionStatus {
+    fn from(value: u32) -> Self {
+        FileCompletionStatus(value)
     }
 }
 
