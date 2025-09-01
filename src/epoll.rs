@@ -165,34 +165,38 @@ impl Poller {
         let _enter = span.enter();
 
         #[cfg(not(target_os = "redox"))]
-        if let Some(ref timer_fd) = self.timer_fd {
-            // Configure the timeout using timerfd.
-            let new_val = Itimerspec {
-                it_interval: TS_ZERO,
-                it_value: match timeout {
-                    None => TS_ZERO,
-                    Some(t) => {
-                        let mut ts = TS_ZERO;
-                        ts.tv_sec = t.as_secs() as _;
-                        ts.tv_nsec = t.subsec_nanos() as _;
-                        ts
-                    }
-                },
-                ..unsafe { std::mem::zeroed() }
-            };
+        let timer_fd = if timeout.is_some() {
+            if let Some(ref timer_fd) = self.timer_fd {
+                // Configure the timeout using timerfd.
+                let new_val = Itimerspec {
+                    it_interval: TS_ZERO,
+                    it_value: match timeout {
+                        None => TS_ZERO,
+                        Some(t) => {
+                            let mut ts = TS_ZERO;
+                            ts.tv_sec = t.as_secs() as _;
+                            ts.tv_nsec = t.subsec_nanos() as _;
+                            ts
+                        }
+                    },
+                    ..unsafe { std::mem::zeroed() }
+                };
 
-            timerfd_settime(timer_fd, TimerfdTimerFlags::empty(), &new_val)?;
+                timerfd_settime(timer_fd, TimerfdTimerFlags::empty(), &new_val)?;
 
-            // Set interest in timerfd.
-            self.modify(
-                timer_fd.as_fd(),
-                Event::readable(crate::NOTIFY_KEY),
-                PollMode::Oneshot,
-            )?;
-        }
+                // Set interest in timerfd.
+                self.modify(
+                    timer_fd.as_fd(),
+                    Event::readable(crate::NOTIFY_KEY),
+                    PollMode::Oneshot,
+                )?;
+            }
 
-        #[cfg(not(target_os = "redox"))]
-        let timer_fd = &self.timer_fd;
+            &self.timer_fd
+        } else {
+            &None
+        };
+
         #[cfg(target_os = "redox")]
         let timer_fd: Option<core::convert::Infallible> = None;
 
