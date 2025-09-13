@@ -1,3 +1,8 @@
+# Version 3.11.0
+
+- Bump MSRV to 1.71. (#251)
+- Update to `windows-sys` v0.61. (#251)
+
 # Version 3.10.0
 
 - Add `wait_deadline` function. (#226)
