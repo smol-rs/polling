@@ -8,9 +8,7 @@ use std::time::Duration;
 fn basic_io() {
     let poller = Poller::new().unwrap();
     let (read, mut write) = tcp_pair().unwrap();
-    unsafe {
-        poller.add(&read, Event::readable(1)).unwrap();
-    }
+    poller.add(&read, Event::readable(1)).unwrap();
 
     // Nothing should be available at first.
     let mut events = Events::new();
@@ -42,7 +40,7 @@ fn basic_io() {
 #[test]
 fn insert_twice() {
     #[cfg(unix)]
-    use std::os::unix::io::AsRawFd;
+    use std::os::unix::io::AsFd;
     #[cfg(windows)]
     use std::os::windows::io::AsRawSocket;
 
@@ -50,18 +48,16 @@ fn insert_twice() {
     let read = Arc::new(read);
 
     let poller = Poller::new().unwrap();
-    unsafe {
-        #[cfg(unix)]
-        let read = read.as_raw_fd();
-        #[cfg(windows)]
-        let read = read.as_raw_socket();
+    #[cfg(unix)]
+    let read = read.as_fd();
+    #[cfg(windows)]
+    let read = read.as_raw_socket();
 
-        poller.add(read, Event::readable(1)).unwrap();
-        assert_eq!(
-            poller.add(read, Event::readable(1)).unwrap_err().kind(),
-            io::ErrorKind::AlreadyExists
-        );
-    }
+    poller.add(read, Event::readable(1)).unwrap();
+    assert_eq!(
+        poller.add(read, Event::readable(1)).unwrap_err().kind(),
+        io::ErrorKind::AlreadyExists
+    );
 
     write.write_all(&[1]).unwrap();
     let mut events = Events::new();
