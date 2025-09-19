@@ -2,16 +2,17 @@
 
 #![cfg(windows)]
 
-use polling::os::iocp::{FileOverlappedWrapper, PollerIocpFileExt};
+use polling::os::iocp::{
+    connect_named_pipe_overlapped, read_file_overlapped, write_file_overlapped, PollerIocpFileExt,
+};
 use polling::{Event, Events, Poller};
-use windows_sys::Win32::System::IO::OVERLAPPED;
 
 use std::ffi::OsStr;
 use std::fs::OpenOptions;
 use std::io;
 use std::os::windows::ffi::OsStrExt;
 use std::os::windows::fs::OpenOptionsExt;
-use std::os::windows::io::{AsRawHandle, FromRawHandle, IntoRawHandle, OwnedHandle};
+use std::os::windows::io::{FromRawHandle, IntoRawHandle, OwnedHandle};
 use std::time::Duration;
 
 use windows_sys::Win32::{Foundation as wf, Storage::FileSystem as wfs, System::Pipes as wps};
@@ -22,7 +23,6 @@ fn win32_file_io() {
     let poller = Poller::new().unwrap();
     let mut events = Events::new();
 
-    println!("Create a temp file");
     // Open a file for writing.
     let dir = tempfile::tempdir().unwrap();
     let file_path = dir.path().join("test.txt");
@@ -49,7 +49,6 @@ fn win32_file_io() {
         OwnedHandle::from_raw_handle(raw_handle as _)
     };
 
-    println!("file handle: {:?}", file_handle);
     let overlapped = unsafe {
         poller
             .add_file(&file_handle, Event::new(1, true, true))
@@ -58,21 +57,14 @@ fn win32_file_io() {
 
     // Repeatedly write to the pipe.
     let input_text = "Now is the time for all good men to come to the aid of their party";
-    let mut len = input_text.len();
 
-    while len > 0 {
-        // Begin the write.
-        let ptr = overlapped.write_ptr();
-        unsafe {
-            let ret = wfs::WriteFile(
-                file_handle.as_raw_handle() as _,
-                input_text.as_ptr() as _,
-                len as _,
-                std::ptr::null_mut(),
-                ptr,
-            );
-            println!("WriteFile returned: {}, len: {}, ptr: {:p}", ret, len, ptr);
-            if ret == 0 && wf::GetLastError() != wf::ERROR_IO_PENDING {
+    // Begin the write.
+    let ptr = overlapped.write_overlapped();
+    {
+        let ret = write_file_overlapped(&file_handle, input_text.as_ref(), ptr);
+        println!("WriteFile returned: {:?}", ret);
+        if let Err(e) = ret {
+            if e.kind() != io::ErrorKind::WouldBlock {
                 // Only panic if not running under Wine
                 if std::env::var("WINELOADER").is_ok()
                     || std::env::var("WINE").is_ok()
@@ -85,49 +77,27 @@ fn win32_file_io() {
                 }
             }
         }
-
-        // Wait for the overlapped operation to complete.
-        'waiter: loop {
-            events.clear();
-            println!("Starting wait...");
-            poller.wait(&mut events, None).unwrap();
-            println!("Got events");
-
-            for event in events.iter() {
-                if event.writable && event.key == 1 {
-                    break 'waiter;
-                }
-            }
-        }
-
-        // Decrement the length by the number of bytes written.
-        let wrapper = unsafe { &*FileOverlappedWrapper::from_overlapped_ptr(ptr) };
-        wrapper.get_result().map_or_else(
-            |e| {
-                match e.kind() {
-                    io::ErrorKind::WouldBlock => {
-                        // The operation is still pending, we can ignore this error.
-                        println!("WriteFile is still pending, continuing...");
-                    }
-                    _ => panic!("WriteFile failed: {}", e),
-                }
-            },
-            |ret| {
-                if !ret {
-                    println!("The file handle maybe closed");
-                } else {
-                    let bytes_written = wrapper.get_bytes_transferred();
-                    println!("Bytes written: {}", bytes_written);
-                    len -= bytes_written as usize;
-                }
-            },
-        );
     }
 
+    // Wait for the overlapped operation to complete.
+    events.clear();
+    poller.wait(&mut events, None).unwrap();
+    let w_events = events.iter().collect::<Vec<_>>();
+    assert_eq!(w_events.len(), 1);
+    assert_eq!(w_events[0].key, 1);
+    assert!(w_events[0].writable);
+
+    // Check the number of bytes written.
+    let wrapper = unsafe { &*overlapped.write_complete() };
+
+    assert!(wrapper.get_result().unwrap());
+    assert_eq!(wrapper.get_bytes_transferred() as usize, input_text.len());
+
     poller.remove_file(&file_handle).unwrap();
+
+    assert_eq!(overlapped.test_ref_count(), 1);
     // Close the file and re-open it for reading.
     drop(file_handle);
-    println!("file handle dropped");
 
     let file_handle = unsafe {
         let raw_handle = wfs::CreateFileW(
@@ -147,7 +117,6 @@ fn win32_file_io() {
         OwnedHandle::from_raw_handle(raw_handle as _)
     };
 
-    println!("file handle: {:?}", file_handle);
     let overlapped = unsafe {
         poller
             .add_file(&file_handle, Event::new(1, true, true))
@@ -156,48 +125,33 @@ fn win32_file_io() {
 
     // Repeatedly read from the pipe.
     let mut buffer = vec![0u8; 1024];
-    let mut buffer_cursor = &mut *buffer;
-    let mut len = 1024;
-    let mut bytes_received = 0;
+    let buffer_cursor = &mut *buffer;
 
-    while bytes_received < input_text.len() {
-        // Begin the read.
-        let ptr = overlapped.read_ptr();
-        unsafe {
-            if wfs::ReadFile(
-                file_handle.as_raw_handle() as _,
-                buffer_cursor.as_mut_ptr() as _,
-                len as _,
-                std::ptr::null_mut(),
-                ptr,
-            ) == 0
-                && wf::GetLastError() != wf::ERROR_IO_PENDING
-            {
-                panic!("ReadFile failed: {}", io::Error::last_os_error());
-            }
+    // Begin the read.
+    let ptr = overlapped.read_overlapped();
+    let ret = read_file_overlapped(&file_handle, buffer_cursor, ptr);
+
+    if let Err(e) = ret {
+        if e.kind() != io::ErrorKind::WouldBlock {
+            panic!("ReadFile failed: {}", io::Error::last_os_error());
         }
-
-        // Wait for the overlapped operation to complete.
-        'waiter: loop {
-            events.clear();
-            poller.wait(&mut events, None).unwrap();
-
-            for event in events.iter() {
-                if event.readable && event.key == 1 {
-                    break 'waiter;
-                }
-            }
-        }
-
-        // Increment the cursor and decrement the length by the number of bytes read.
-        let bytes_read = input_text.len();
-        buffer_cursor = &mut buffer_cursor[bytes_read..];
-        len -= bytes_read;
-        bytes_received += bytes_read;
     }
 
-    assert_eq!(bytes_received, input_text.len());
-    assert_eq!(&buffer[..bytes_received], input_text.as_bytes());
+    events.clear();
+    poller.wait(&mut events, None).unwrap();
+    let r_events = events.iter().collect::<Vec<_>>();
+    assert_eq!(r_events.len(), 1);
+    assert_eq!(r_events[0].key, 1);
+    assert!(r_events[0].readable);
+
+    // Check the number of bytes written.
+    let wrapper = unsafe { &*overlapped.read_complete() };
+
+    assert!(wrapper.get_result().unwrap());
+    assert_eq!(wrapper.get_bytes_transferred() as usize, input_text.len());
+    assert_eq!(&buffer[..input_text.len()], input_text.as_bytes());
+    drop(poller);
+    assert_eq!(overlapped.test_ref_count(), 1);
 }
 
 fn new_named_pipe<A: AsRef<OsStr>>(addr: A) -> io::Result<OwnedHandle> {
@@ -228,25 +182,6 @@ fn new_named_pipe<A: AsRef<OsStr>>(addr: A) -> io::Result<OwnedHandle> {
     Ok(handle)
 }
 
-unsafe fn connect_named_pipe(
-    handle: &impl AsRawHandle,
-    overlapped: *mut OVERLAPPED,
-) -> io::Result<()> {
-    if wps::ConnectNamedPipe(handle.as_raw_handle() as _, overlapped) != 0 {
-        // If ConnectNamedPipe returns non-zero, the connection was successful.
-        return Ok(());
-    }
-
-    let err = io::Error::last_os_error();
-
-    match err.raw_os_error().map(|e| e as u32) {
-        Some(wf::ERROR_PIPE_CONNECTED) => Ok(()),
-        Some(wf::ERROR_NO_DATA) => Err(io::ErrorKind::WouldBlock.into()),
-        Some(wf::ERROR_IO_PENDING) => Err(io::ErrorKind::WouldBlock.into()),
-        _ => Err(err),
-    }
-}
-
 fn server() -> (OwnedHandle, String) {
     let num: u64 = fastrand::u64(..);
     let name = format!(r"\\.\pipe\my-pipe-{}", num);
@@ -270,7 +205,8 @@ fn pipe() -> (OwnedHandle, OwnedHandle) {
 
 // Test client create success if server create named pipe first.
 // Client can write data to pipe without server call ConnectNamedPipe first.
-// Client return NotFound error if clinet create before server create named pipe.
+// Client return NotFound error if client create before server create named pipe.
+// If Client create file before server call connect_named_pipe, connect_named_pipe return ERROR_PIPE_CONNECTED
 // Poller will not receive event if client and server create before register file.
 // Poller will also not receive event if server create and add to poller before client create named pipe.
 #[test]
@@ -284,17 +220,27 @@ fn writable_after_register() {
         let poller = Poller::new().unwrap();
         let mut events = Events::new();
 
-        let _server_overlapped = unsafe {
+        let server_overlapped = unsafe {
             poller
                 .add_file(&server, Event::new(1, true, false))
                 .unwrap()
         };
 
-        let _client_overlapped = unsafe {
+        let client_overlapped = unsafe {
             poller
                 .add_file(&client, Event::new(2, false, true))
                 .unwrap()
         };
+
+        // connect_named_pipe return ERROR_PIPE_CONNECTED if the pipe has been connected.
+        {
+            let ret = connect_named_pipe_overlapped(&server, server_overlapped.read_overlapped());
+            assert_eq!(server_overlapped.test_ref_count(), 2);
+            assert_eq!(
+                ret.err().unwrap().raw_os_error(),
+                Some(wf::ERROR_PIPE_CONNECTED as i32)
+            );
+        }
 
         poller
             .wait(&mut events, Some(Duration::from_millis(10)))
@@ -305,6 +251,8 @@ fn writable_after_register() {
         poller.remove_file(&client).unwrap();
         drop(server);
         drop(client);
+        assert_eq!(server_overlapped.test_ref_count(), 1);
+        assert_eq!(client_overlapped.test_ref_count(), 1);
     }
 
     // Poller will receive event if server add to poller before client create file
@@ -312,7 +260,7 @@ fn writable_after_register() {
     let poller = Poller::new().unwrap();
     let mut events = Events::new();
 
-    let _server_overlapped = unsafe {
+    let server_overlapped = unsafe {
         poller
             .add_file(&server, Event::new(1, true, false))
             .unwrap()
@@ -324,7 +272,9 @@ fn writable_after_register() {
         .unwrap();
 
     assert!(events.is_empty());
+    assert_eq!(server_overlapped.test_ref_count(), 2);
 
+    drop(server_overlapped);
     poller.remove_file(&server).unwrap();
     drop(server);
     drop(client);
@@ -347,53 +297,37 @@ fn write_then_read() {
 
     let client_overlapped = unsafe { poller.add_file(&client, Event::new(2, true, true)).unwrap() };
 
-    unsafe {
-        let mut written = 0u32;
-        let ret = wfs::WriteFile(
-            client.as_raw_handle(),
-            b"1234" as *const u8,
-            4,
-            (&mut written) as *mut u32,
-            client_overlapped.write_ptr(),
-        );
+    {
+        let ret = write_file_overlapped(&client, b"1234", client_overlapped.write_overlapped());
 
-        assert!(ret == wf::TRUE && written == 4);
+        assert_eq!(ret.unwrap(), 4);
+        assert_eq!(client_overlapped.test_ref_count(), 3);
 
-        loop {
-            poller.wait(&mut events, None).unwrap();
-            let events = events.iter().collect::<Vec<_>>();
-            if let Some(event) = events.iter().find(|e| e.key == 2) {
-                if event.writable {
-                    break;
-                }
-            }
-        }
+        poller.wait(&mut events, None).unwrap();
+        assert_eq!(client_overlapped.test_ref_count(), 2);
+        let w_events = events.iter().collect::<Vec<_>>();
+        assert_eq!(w_events.len(), 1);
+        assert_eq!(w_events[0].key, 2);
+        assert!(w_events[0].writable);
 
         events.clear();
         let mut buf = [0u8; 10];
 
-        let mut read = 0u32;
-        let ret = wfs::ReadFile(
-            server.as_raw_handle(),
-            &mut buf as *mut u8,
-            10,
-            (&mut read) as *mut u32,
-            server_overlapped.read_ptr(),
-        );
+        let ret = read_file_overlapped(&server, &mut buf, server_overlapped.read_overlapped());
+        assert_eq!(server_overlapped.test_ref_count(), 3);
 
         let event_len = poller
             .wait(&mut events, Some(Duration::from_millis(10)))
             .unwrap();
         assert_eq!(event_len, 1);
+        assert_eq!(server_overlapped.test_ref_count(), 2);
 
-        let events = events.iter().collect::<Vec<_>>();
-        events.iter().for_each(|e| {
-            if e.key == 2 {
-                assert!(e.writable);
-            }
-        });
+        let r_events = events.iter().collect::<Vec<_>>();
+        assert_eq!(r_events.len(), 1);
+        assert_eq!(r_events[0].key, 1);
+        assert!(r_events[0].readable);
 
-        assert!(ret == wf::TRUE && read == 4);
+        assert_eq!(ret.unwrap(), 4);
         assert_eq!(&buf[..4], b"1234");
     }
 
@@ -401,6 +335,94 @@ fn write_then_read() {
     poller.remove_file(&client).unwrap();
     drop(server);
     drop(client);
+}
+
+// Read completion will be trigger if the pipe is closed
+#[test]
+fn close_before_read_complete() {
+    let (server, _name) = server();
+    let poller = Poller::new().unwrap();
+    let mut events = Events::new();
+
+    let server_overlapped = unsafe {
+        poller
+            .add_file(&server, Event::new(1, true, false))
+            .unwrap()
+    };
+
+    poller.wait(&mut events, Some(Duration::new(0, 0))).unwrap();
+    assert_eq!(events.iter().count(), 0);
+    assert_eq!(server_overlapped.test_ref_count(), 2);
+
+    {
+        let ret = connect_named_pipe_overlapped(&server, server_overlapped.read_overlapped());
+        assert_eq!(ret.err().unwrap().kind(), io::ErrorKind::WouldBlock);
+        assert_eq!(server_overlapped.test_ref_count(), 3);
+    }
+
+    poller.wait(&mut events, Some(Duration::new(0, 0))).unwrap();
+    assert_eq!(events.iter().count(), 0);
+    assert_eq!(server_overlapped.test_ref_count(), 3);
+
+    drop(server);
+    let event_num = poller.wait(&mut events, Some(Duration::new(0, 0))).unwrap();
+    assert_eq!(event_num, 1);
+    assert_eq!(server_overlapped.test_ref_count(), 2);
+
+    let r_events = events.iter().collect::<Vec<_>>();
+    events.clear();
+    assert_eq!(r_events.len(), 1);
+    assert_eq!(r_events[0].key, 1);
+    assert!(r_events[0].readable);
+    let overlapped_wrapper = unsafe { &*server_overlapped.read_complete() };
+    assert_eq!(overlapped_wrapper.get_bytes_transferred(), 0);
+    if !(std::env::var("WINELOADER").is_ok()
+        || std::env::var("WINE").is_ok()
+        || std::env::var("WINEPREFIX").is_ok())
+    {
+        assert_eq!(
+            overlapped_wrapper
+                .get_result()
+                .unwrap_err()
+                .raw_os_error()
+                .unwrap(),
+            wf::ERROR_BROKEN_PIPE as i32
+        );
+    }
+    drop(poller);
+    assert_eq!(server_overlapped.test_ref_count(), 1);
+}
+
+// Write completion will hold ref count until write complete even if the pipe is removed from poller and closed.
+// Poller is Edge mode, write events will be triggered twice.
+#[test]
+fn close_before_write_twice_complete() {
+    let (server, client) = pipe();
+    let poller = Poller::new().unwrap();
+    let mut events = Events::new();
+
+    let server_overlapped = unsafe { poller.add_file(&server, Event::new(1, true, true)).unwrap() };
+
+    let _client_overlapped =
+        unsafe { poller.add_file(&client, Event::new(2, true, true)).unwrap() };
+
+    let ret = write_file_overlapped(&server, b"1234", server_overlapped.write_overlapped());
+
+    assert_eq!(ret.unwrap(), 4);
+
+    let ret = write_file_overlapped(&server, b"1234", server_overlapped.write_overlapped());
+
+    assert_eq!(ret.unwrap(), 4);
+    assert_eq!(server_overlapped.test_ref_count(), 4);
+
+    assert!(poller.remove_file(&server).is_ok());
+    drop(server);
+
+    let event_num = poller
+        .wait(&mut events, Some(Duration::from_millis(10)))
+        .unwrap();
+    assert_eq!(event_num, 2);
+    assert_eq!(server_overlapped.test_ref_count(), 1);
 }
 
 // Poller will receive read event if server call ConnectNamedPipe after add to poller before
@@ -421,27 +443,22 @@ fn connect_before_client() {
     assert_eq!(events.iter().count(), 0);
 
     unsafe {
-        let ret = connect_named_pipe(&server, server_overlapped.read_ptr());
+        let ret = connect_named_pipe_overlapped(&server, server_overlapped.read_overlapped());
         assert_eq!(ret.err().unwrap().kind(), io::ErrorKind::WouldBlock);
 
         let client = client(&name).unwrap();
         let _client_overlapped = poller.add_file(&client, Event::new(2, true, true)).unwrap();
 
-        loop {
-            let event_num = poller.wait(&mut events, None).unwrap();
-            assert_eq!(event_num, 1);
-            let e = events.iter().collect::<Vec<_>>();
-            events.clear();
-            if let Some(event) = e.iter().find(|e| e.key == 1) {
-                if event.readable {
-                    let overlapped_wrapper =
-                        &*FileOverlappedWrapper::from_overlapped_ptr(server_overlapped.read_ptr());
-                    assert_eq!(overlapped_wrapper.get_bytes_transferred(), 0);
-                    assert!(overlapped_wrapper.get_result().is_ok());
-                    break;
-                }
-            }
-        }
+        let event_num = poller.wait(&mut events, None).unwrap();
+        assert_eq!(event_num, 1);
+        let r_events = events.iter().collect::<Vec<_>>();
+        assert_eq!(r_events[0].key, 1);
+        assert!(r_events[0].readable);
+        events.clear();
+
+        let overlapped_wrapper = &*server_overlapped.read_complete();
+        assert_eq!(overlapped_wrapper.get_bytes_transferred(), 0);
+        assert!(overlapped_wrapper.get_result().is_ok());
 
         poller.remove_file(&server).unwrap();
         poller.remove_file(&client).unwrap();
@@ -477,28 +494,19 @@ fn write_disconnected() {
         .unwrap();
     assert!(events.iter().count() == 0);
 
-    unsafe {
-        let mut written = 0u32;
-        let ret = wfs::WriteFile(
-            server.as_raw_handle(),
-            b"1234" as *const u8,
-            1,
-            (&mut written) as *mut u32,
-            server_overlapped.write_ptr(),
-        );
+    let ret = write_file_overlapped(&server, b"1234", server_overlapped.write_overlapped());
 
-        let e = io::Error::last_os_error();
+    assert_eq!(
+        ret.err().unwrap().raw_os_error(),
+        Some(wf::ERROR_NO_DATA as i32)
+    );
+    assert_eq!(server_overlapped.test_ref_count(), 2);
 
-        assert_eq!(ret, wf::FALSE);
-        assert_eq!(written, 0);
-        assert_eq!(e.raw_os_error(), Some(wf::ERROR_NO_DATA as i32));
-
-        // according testing, it return ERROR_NO_DATA. the server cannot write even one byte
-        let num_event = poller
-            .wait(&mut events, Some(Duration::from_millis(10)))
-            .unwrap();
-        assert_eq!(num_event, 0);
-    }
+    // according testing, it return ERROR_NO_DATA. the server cannot write even one byte
+    let num_event = poller
+        .wait(&mut events, Some(Duration::from_millis(10)))
+        .unwrap();
+    assert_eq!(num_event, 0);
 }
 
 // Poller will receive write event if client write data to pipe before drop.
@@ -522,18 +530,10 @@ fn write_then_drop() {
             .unwrap()
     };
 
-    unsafe {
-        let mut written = 0u32;
-        let ret = wfs::WriteFile(
-            client.as_raw_handle(),
-            b"1234" as *const u8,
-            4,
-            (&mut written) as *mut u32,
-            client_overlapped.write_ptr(),
-        );
+    let ret = write_file_overlapped(&client, b"1234", client_overlapped.write_overlapped());
 
-        assert!(ret == wf::TRUE && written == 4);
-    }
+    assert_eq!(ret.unwrap(), 4);
+    assert_eq!(client_overlapped.test_ref_count(), 3);
 
     drop(client);
 
@@ -543,17 +543,15 @@ fn write_then_drop() {
         .unwrap();
 
     assert_eq!(num_event, 1);
+    assert_eq!(client_overlapped.test_ref_count(), 2);
 
-    unsafe {
-        let events = events.iter().collect::<Vec<_>>();
-        assert_eq!(events[0].key, 2);
-        assert!(events[0].writable);
-        assert!(!events[0].readable);
-        let overlapped_wrapper =
-            &*FileOverlappedWrapper::from_overlapped_ptr(client_overlapped.write_ptr());
-        assert_eq!(overlapped_wrapper.get_bytes_transferred(), 4);
-        assert!(overlapped_wrapper.get_result().unwrap());
-    }
+    let w_events = events.iter().collect::<Vec<_>>();
+    assert_eq!(w_events[0].key, 2);
+    assert!(w_events[0].writable);
+    assert!(!w_events[0].readable);
+    let overlapped_wrapper = unsafe { &*client_overlapped.write_complete() };
+    assert_eq!(overlapped_wrapper.get_bytes_transferred(), 4);
+    assert!(overlapped_wrapper.get_result().unwrap());
 
     events.clear();
     let num_event = poller
@@ -562,28 +560,19 @@ fn write_then_drop() {
 
     assert_eq!(num_event, 0);
 
-    unsafe {
-        let mut buf = [0u8; 10];
+    let mut buf = [0u8; 10];
 
-        let mut read = 0u32;
-        let ret = wfs::ReadFile(
-            server.as_raw_handle(),
-            &mut buf as *mut u8,
-            10,
-            (&mut read) as *mut u32,
-            server_overlapped.read_ptr(),
-        );
+    let ret = read_file_overlapped(&server, buf.as_mut(), server_overlapped.read_overlapped());
 
-        assert_eq!(ret, wf::TRUE);
-        assert_eq!(read, 4);
+    assert_eq!(ret.unwrap(), 4);
+    assert_eq!(server_overlapped.test_ref_count(), 3);
 
-        // Still receive read event even ReadFile return true.
-        let num_event = poller
-            .wait(&mut events, Some(Duration::from_millis(10)))
-            .unwrap();
-        assert_eq!(num_event, 1);
-        assert_eq!(&buf[..4], b"1234");
-    }
+    // Still receive read event even ReadFile return true.
+    let num_event = poller
+        .wait(&mut events, Some(Duration::from_millis(10)))
+        .unwrap();
+    assert_eq!(num_event, 1);
+    assert_eq!(&buf[..4], b"1234");
 
     drop(server);
 }
@@ -604,38 +593,33 @@ fn connect_twice() {
         poller.wait(&mut events, Some(Duration::new(0, 0))).unwrap();
         assert_eq!(events.iter().count(), 0);
 
-        let ret = connect_named_pipe(&server, server_overlapped.read_ptr());
+        let ret = connect_named_pipe_overlapped(&server, server_overlapped.read_overlapped());
         assert_eq!(ret.err().unwrap().kind(), io::ErrorKind::WouldBlock);
+        assert_eq!(server_overlapped.test_ref_count(), 3);
 
         let c1 = client(&name).unwrap();
         let _c1_overlapped = poller.add_file(&c1, Event::new(2, true, true)).unwrap();
         drop(c1);
 
         poller.wait(&mut events, Some(Duration::new(0, 0))).unwrap();
-        let ret_events = events.iter().collect::<Vec<_>>();
-        assert_eq!(ret_events.len(), 1);
-        assert_eq!(ret_events[0].key, 1);
-        assert!(ret_events[0].readable);
+        assert_eq!(server_overlapped.test_ref_count(), 2);
+        let r_events = events.iter().collect::<Vec<_>>();
+        assert_eq!(r_events.len(), 1);
+        assert_eq!(r_events[0].key, 1);
+        assert!(r_events[0].readable);
 
         events.clear();
 
         let mut buf = [0u8; 10];
 
-        let mut read = 0u32;
         // Can not read, should close server pipe.
-        let ret = wfs::ReadFile(
-            server.as_raw_handle(),
-            &mut buf as *mut u8,
-            10,
-            (&mut read) as *mut u32,
-            server_overlapped.read_ptr(),
+        let ret = read_file_overlapped(&server, buf.as_mut(), server_overlapped.read_overlapped());
+
+        assert_eq!(
+            ret.err().unwrap().raw_os_error(),
+            Some(wf::ERROR_BROKEN_PIPE as i32)
         );
-
-        let e = io::Error::last_os_error();
-
-        assert_eq!(ret, wf::FALSE);
-        assert_eq!(read, 0);
-        assert_eq!(e.raw_os_error(), Some(wf::ERROR_BROKEN_PIPE as i32));
+        assert_eq!(server_overlapped.test_ref_count(), 2);
 
         let num_event = poller
             .wait(&mut events, Some(Duration::from_millis(10)))
