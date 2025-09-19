@@ -159,9 +159,9 @@ unsafe impl<T: FileOverlapped> FileCompletionHandle for Pin<Arc<T>> {
             let inner = Arc::from_raw((overlapped_ptr as *const u8).sub(offset) as *const T);
             assert!(Arc::strong_count(&inner) >= 1, "File has been removed, but still use FileOverlappedWrapper return from add_file function");
 
-            let new_one = Pin::new_unchecked(Arc::clone(&inner));
-            let _ = Arc::into_raw(inner); // Prevent Arc from being dropped
-            new_one
+            // Do not need to clone new one for file packet because it will be cloned for every successful I/O operation
+            // see [`IocpFilePacket::read_overlapped`]
+            Pin::new_unchecked(inner)
         }
     }
 
@@ -172,9 +172,9 @@ unsafe impl<T: FileOverlapped> FileCompletionHandle for Pin<Arc<T>> {
             let inner = Arc::from_raw((overlapped_ptr as *const u8).sub(offset) as *const T);
             assert!(Arc::strong_count(&inner) >= 1, "File has been removed, but still use FileOverlappedWrapper return from add_file function");
 
-            let new_one = Pin::new_unchecked(Arc::clone(&inner));
-            let _ = Arc::into_raw(inner); // Prevent Arc from being dropped
-            new_one
+            // Do not need to clone new one for file packet because it will be cloned for every successful I/O operation
+            // see [`IocpFilePacket::write_overlapped`]
+            Pin::new_unchecked(inner)
         }
     }
 }
@@ -182,6 +182,9 @@ unsafe impl<T: FileOverlapped> FileCompletionHandle for Pin<Arc<T>> {
 pub(super) struct IoCompletionPort<T> {
     /// The underlying handle.
     handle: HANDLE,
+
+    /// The completion key generator.
+    key_gen: CompletionKeyGenerator,
 
     /// We own the status block.
     _marker: PhantomData<T>,
@@ -234,6 +237,7 @@ impl<T: CompletionHandle + FileCompletionHandle> IoCompletionPort<T> {
         } else {
             Ok(Self {
                 handle,
+                key_gen: Default::default(),
                 _marker: PhantomData,
             })
         }
@@ -249,7 +253,12 @@ impl<T: CompletionHandle + FileCompletionHandle> IoCompletionPort<T> {
         let handle = handle.as_raw_handle();
 
         let result = unsafe {
-            CreateIoCompletionPort(handle as _, self.handle, CompletionKey::new(kind).into(), 0)
+            CreateIoCompletionPort(
+                handle as _,
+                self.handle,
+                CompletionKey::new(kind, &self.key_gen).into(),
+                0,
+            )
         };
 
         if result.is_null() {
@@ -421,28 +430,40 @@ pub(super) enum CompletionKeyType {
 /// to low value which may be used by existing handle.
 /// It is used to differentiate between different types of completion keys.
 #[repr(transparent)]
-pub(super) struct CompletionKey(usize);
+struct CompletionKey(usize);
 
-static NEXT_DEFAULT_TOKEN: AtomicUsize = AtomicUsize::new(1); // 0 reserved for default iocp packet
-static NEXT_FILE_TOKEN: AtomicUsize = AtomicUsize::new(1usize << (usize::BITS - 1)); // Initialize with high bit set
+#[derive(Debug)]
+struct CompletionKeyGenerator {
+    next_default_key: AtomicUsize,
+    next_file_key: AtomicUsize,
+}
+
+impl Default for CompletionKeyGenerator {
+    fn default() -> Self {
+        Self {
+            next_default_key: AtomicUsize::new(1), // 0 reserved for default iocp packet
+            next_file_key: AtomicUsize::new(1usize << (usize::BITS - 1)), // Initialize with high bit set
+        }
+    }
+}
 
 impl CompletionKey {
     const HIGH_BIT: usize = 1usize << (usize::BITS - 1); // 0x8000_0000_0000_0000 on 64-bit
     const COUNTER_MASK: usize = !Self::HIGH_BIT; // 0x7FFF_FFFF_FFFF_FFFF on 64-bit
-    pub(super) fn new(kind: CompletionKeyType) -> Self {
+    pub(super) fn new(kind: CompletionKeyType, gen: &CompletionKeyGenerator) -> Self {
         match kind {
             CompletionKeyType::File => {
-                // For file tokens, increment from HIGH_BIT base
+                // For file key, increment from HIGH_BIT base
                 // If it would overflow past HIGH_BIT | COUNTER_MASK, wrap back to HIGH_BIT
-                let token = loop {
-                    let current = NEXT_FILE_TOKEN.load(std::sync::atomic::Ordering::Relaxed);
+                let key = loop {
+                    let current = gen.next_file_key.load(std::sync::atomic::Ordering::Relaxed);
                     let next = if current == (Self::HIGH_BIT | Self::COUNTER_MASK) {
-                        Self::HIGH_BIT // Wrap back to HIGH_BIT (first file token)
+                        Self::HIGH_BIT // Wrap back to HIGH_BIT (first file key)
                     } else {
                         current + 1
                     };
 
-                    match NEXT_FILE_TOKEN.compare_exchange_weak(
+                    match gen.next_file_key.compare_exchange_weak(
                         current,
                         next,
                         std::sync::atomic::Ordering::Relaxed,
@@ -453,20 +474,22 @@ impl CompletionKey {
                     }
                 };
 
-                Self(token)
+                Self(key)
             }
             _ => {
-                // For default tokens, we need to ensure the counter never exceeds COUNTER_MASK
+                // For default keys, we need to ensure the counter never exceeds COUNTER_MASK
                 // If it would overflow, wrap back to 0
-                let counter = loop {
-                    let current = NEXT_DEFAULT_TOKEN.load(std::sync::atomic::Ordering::Relaxed);
+                let key = loop {
+                    let current = gen
+                        .next_default_key
+                        .load(std::sync::atomic::Ordering::Relaxed);
                     let next = if current >= Self::COUNTER_MASK {
                         1
                     } else {
                         current + 1
                     };
 
-                    match NEXT_DEFAULT_TOKEN.compare_exchange_weak(
+                    match gen.next_default_key.compare_exchange_weak(
                         current,
                         next,
                         std::sync::atomic::Ordering::Relaxed,
@@ -477,9 +500,8 @@ impl CompletionKey {
                     }
                 };
 
-                // Keep highest bit as 0, counter is already safe
-                let token = counter;
-                Self(token)
+                // Keep highest bit as 0, key is already safed by above logic
+                Self(key)
             }
         }
     }
@@ -497,7 +519,7 @@ impl From<CompletionKey> for usize {
 }
 
 impl From<usize> for CompletionKey {
-    fn from(token: usize) -> Self {
-        Self(token)
+    fn from(key: usize) -> Self {
+        Self(key)
     }
 }

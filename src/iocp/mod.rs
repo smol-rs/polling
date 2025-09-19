@@ -50,7 +50,7 @@ use std::cell::UnsafeCell;
 use std::collections::hash_map::{Entry, HashMap};
 use std::ffi::c_void;
 use std::marker::PhantomPinned;
-use std::mem::{forget, MaybeUninit};
+use std::mem::{forget, ManuallyDrop, MaybeUninit};
 use std::os::windows::io::{
     AsHandle, AsRawHandle, AsRawSocket, BorrowedHandle, BorrowedSocket, RawHandle, RawSocket,
 };
@@ -94,7 +94,7 @@ pub(super) struct Poller {
     /// The state of the waitable handles registered with this poller.
     waitables: RwLock<HashMap<RawHandle, Packet>>,
 
-    /// The state of the waitable handles registered with this poller.
+    /// The state of the overlapped files registered with this poller.
     files: RwLock<HashMap<RawHandle, Packet>>,
 
     /// Sockets with pending updates.
@@ -435,16 +435,31 @@ impl Poller {
     }
 
     /// Add a file to the poller.
+    ///
     /// File handle work on PollMode::Edge mode. The IOCP continue to poll the events unitl
     /// the file is closed. The caller must use the overlapped pointer return in IocpFilePacket
-    /// as overlapped paramter for I/O operation. The Packet do not need to increase Arc count because
-    /// the call can trigger events through I/O operation without update intrest events as long as the
-    /// file handle has been registered with the IOCP. So the Packet lifetime is ended with calling [`remove_file`].
-    /// Any I/O operation using return overlapped pointer return in IocpFilePacket is undefined behavior.
+    /// as overlapped paramter for I/O operation. The Packet need to increase Arc count every time the I/O operation
+    /// is performed success (return TRUE or FALSE with ERROR_IO_PENDING in last error), otherwise the Arc count do
+    /// not need to increase if I/O operation fail because [`IocpFilePacket`] can exist after the poller is dropped.
+    /// And I/O operation still be valid with the overlapped pointer after the poller is dropped. [`FileOverlappedConverter`]
+    /// can help to manage the Arc count to avoid memory leak.
     ///
-    /// IocpFilePacket will return both read and write overlapped pointer no matter what intrest events are.
-    /// The caller need to use the correct overlapped pointer for I/O operation. Such as: the read overlapped
-    /// pointer can be used for read operations, and the write overlapped pointer can be used for write operations.
+    /// Normally, the caller use I/O helper function like [`read_file_overlapped`], [`write_file_overlapped`] or
+    /// [`connect_named_pipe_overlapped`] to perform I/O operation to avoid the complexity of managing the Arc count.
+    ///
+    /// [`read_file_overlapped`]: crate::os::iocp::read_file_overlapped
+    /// [`write_file_overlapped`]: crate::os::iocp::write_file_overlapped
+    /// [`connect_named_pipe_overlapped`]: crate::os::iocp::connect_named_pipe_overlapped
+    ///
+    /// The call can trigger events through I/O operation without update intrest events as long as the
+    /// file handle has been registered with the IOCP. The Packet lifetime is ended with conditions: [`remove_file`]
+    /// is called, I/O operation is polled, and  [`IocpFilePacket`] is dropped.
+    ///
+    /// IocpFilePacket will return both read and write overlapped pointer through [`FileOverlappedConverter::as_ptr()`]
+    /// no matter what intrest events are.
+    ///
+    /// The caller need to use the correct overlapped converter for I/O operation. Such as: the read overlapped
+    /// converter can be used for read operations, and the write overlapped converter can be used for write operations.
     pub(super) fn add_file(
         &self,
         handle: RawHandle,
@@ -485,22 +500,55 @@ impl Poller {
             }
         }
 
-        let (read, write, file_handle) = match handle_state.as_ref().data().project_ref() {
-            PacketInnerProj::File {
-                read,
-                write,
-                handle,
-            } => (read.get(), write.get(), handle),
-            _ => unreachable!("PacketInner should always be File here"),
+        let read_ptr;
+        let write_ptr;
+        {
+            let (read, write, file_handle) = match handle_state.as_ref().data().project_ref() {
+                PacketInnerProj::File {
+                    read,
+                    write,
+                    handle,
+                } => (read.get(), write.get(), handle),
+                _ => unreachable!("PacketInner should always be File here"),
+            };
+
+            let file_state = lock!(file_handle.lock());
+            // Register the file handle with the I/O completion port.
+            self.port
+                .register(&*file_state, true, port::CompletionKeyType::File)?;
+
+            read_ptr = unsafe { (*read).as_ptr() };
+            write_ptr = unsafe { (*write).as_ptr() };
+        }
+
+        let iocp_packet =
+            unsafe { IocpFilePacket::new(read_ptr, write_ptr, PacketWrapper(handle_state)) };
+        Ok(iocp_packet)
+    }
+
+    pub(super) fn modify_file(&self, handle: RawHandle, interest: Event) -> io::Result<()> {
+        #[cfg(feature = "tracing")]
+        tracing::trace!(
+            "modify_file: handle={:?}, file={:p}, ev={:?}",
+            self.port,
+            handle,
+            interest
+        );
+
+        // Get a reference to the source.
+        let source = {
+            let sources = lock!(self.files.read());
+
+            sources
+                .get(&handle)
+                .cloned()
+                .ok_or_else(|| io::Error::from(io::ErrorKind::NotFound))?
         };
 
-        let file_state = lock!(file_handle.lock());
-        // Register the file handle with the I/O completion port.
-        self.port
-            .register(&*file_state, true, port::CompletionKeyType::File)?;
+        // Set the new event.
+        source.as_ref().set_events(interest, PollMode::Edge);
 
-        let iocp_packet = unsafe { IocpFilePacket::new((*read).as_ptr(), (*write).as_ptr()) };
-        Ok(iocp_packet)
+        Ok(())
     }
 
     /// Remove a file from the poller.
@@ -835,7 +883,8 @@ impl CompletionPacket {
 /// It needs to be pinned, since it contains data that is expected by IOCP not to be moved.
 type Packet = Pin<Arc<PacketUnwrapped>>;
 type PacketUnwrapped = IoStatusBlock<PacketInner>;
-/// A wrapper around the Overlapped<Packet> structure for file I/O operation result
+
+/// A wrapper around the `Overlapped<Packet>` structure for file I/O operation result
 #[derive(Debug)]
 #[repr(transparent)]
 pub struct FileOverlappedWrapper(Overlapped<Packet>);
@@ -864,6 +913,110 @@ impl FileOverlappedWrapper {
     /// Wrapping to [`Overlapped<T>::zeroed`]
     pub fn zeroed(&mut self) {
         self.0.zeroed();
+    }
+}
+
+/// The converter is used to safely reference count the Packet owned by the poller
+/// when overlapped I/O operation is called successfully (the operation return TRUE or ERROR_IO_PENDING).
+///
+/// If the I/O operation return FALSE with last error not ERROR_IO_PENDING, the caller must call
+/// [`reclaim`] to reclaim the Packet reference count. Otherwise the Packet will be leaked.
+///
+/// Normally the caller should use helper function [`read_file_overlapped`] or [`write_file_overlapped`]
+/// to do the I/O operation. The helper function will call `reclaim` automatically when I/O operation failed.
+///
+/// [`reclaim`]: FileOverlappedConverter::reclaim
+/// [`read_file_overlapped`]: crate::os::iocp::read_file_overlapped
+/// [`write_file_overlapped`]: crate::os::iocp::write_file_overlapped
+///
+/// # Examples
+///
+/// ```no_run
+/// use polling::os::iocp::FileOverlappedConverter;
+/// use std::{io, os::windows::io::RawHandle};
+/// use windows_sys::Win32::{Foundation as wf, Storage::FileSystem as wsf};
+/// fn read_file(
+///     handle: RawHandle,
+///     buf: &mut [u8],
+///     mut overlapped: FileOverlappedConverter,
+/// ) -> io::Result<usize> {
+///     let mut read = 0u32;
+///     // Safety: syscall
+///     if unsafe {
+///         wsf::ReadFile(
+///             handle,
+///             buf.as_mut_ptr(),
+///             buf.len() as u32,
+///             &mut read as *mut _,
+///             overlapped
+///                 .as_ptr()
+///                 .expect("The overlapped pointer may have been used for I/O operation"),
+///         )
+///     } != wf::FALSE
+///     {
+///         return Ok(read as usize);
+///     }
+///
+///     let err = io::Error::last_os_error();
+///     let err: io::Result<usize> = err
+///         .raw_os_error()
+///         .map(|e| match (e as u32) {
+///             wf::ERROR_IO_PENDING => Err(io::ErrorKind::WouldBlock.into()),
+///             _ => Err(err),
+///         })
+///         .unwrap();
+///     match err {
+///         Err(e) if e.kind() == io::ErrorKind::WouldBlock => Err(e),
+///         Err(e) => {
+///             overlapped.reclaim(); // reclaim the Packet reference count
+///             Err(e)
+///         }
+///         _ => unreachable!(),
+///     }
+/// }
+/// ```
+#[derive(Debug)]
+pub struct FileOverlappedConverter {
+    ptr: *mut OVERLAPPED,
+    owner: Option<PacketWrapper>,
+    drop: Option<ManuallyDrop<PacketWrapper>>,
+}
+
+impl FileOverlappedConverter {
+    pub(crate) fn new(ptr: *mut OVERLAPPED, packet: PacketWrapper) -> Self {
+        Self {
+            ptr,
+            owner: Some(packet),
+            drop: None,
+        }
+    }
+
+    /// Get the raw pointer. The caller must ensure the pointer is used for overlapped I/O operation.
+    pub fn as_ptr(&mut self) -> Option<*mut OVERLAPPED> {
+        if let Some(packet) = self.owner.take() {
+            self.drop = Some(ManuallyDrop::new(packet));
+        }
+        Some(self.ptr)
+    }
+
+    /// Reclaim the Packet reference count when I/O operation failed.
+    pub fn reclaim(&mut self) {
+        if let Some(drop) = self.drop.take() {
+            self.owner = Some(ManuallyDrop::into_inner(drop));
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+#[repr(transparent)]
+pub(crate) struct PacketWrapper(Packet);
+
+impl PacketWrapper {
+    #[doc(hidden)]
+    pub fn test_ref_count(&self) -> usize {
+        // Safety: the object is Arc and will not be moved
+        let inner = unsafe { &*(&self.0 as *const Packet as *const Arc<PacketUnwrapped>) };
+        Arc::strong_count(inner)
     }
 }
 
@@ -1021,6 +1174,13 @@ impl PacketUnwrapped {
 
                 // Update if there is no ongoing wait.
                 handle.status.is_idle()
+            }
+            PacketInnerProj::File { handle, .. } => {
+                let mut handle = lock!(handle.lock());
+
+                // Set the new interest.
+                handle.interest = interest;
+                false
             }
             _ => true,
         }
@@ -1269,44 +1429,46 @@ impl PacketUnwrapped {
         status: FileCompletionStatus,
         bytes_transferred: u32,
     ) -> io::Result<FeedEventResult> {
-        let inner = self.as_ref().data().project_ref();
+        let return_value;
+        {
+            let inner = self.as_ref().data().project_ref();
 
-        let (handle, read, write) = match inner {
-            PacketInnerProj::File {
-                handle,
-                read,
-                write,
-            } => (handle, read, write),
-            _ => unreachable!("Should not be called on a non-file packet"),
-        };
+            let (handle, read, write) = match inner {
+                PacketInnerProj::File {
+                    handle,
+                    read,
+                    write,
+                } => (handle, read, write),
+                _ => unreachable!("Should not be called on a non-file packet"),
+            };
 
-        let file_state = lock!(handle.lock());
-        let mut event = Event::none(file_state.interest.key);
-        if status.is_read() {
-            unsafe {
-                (*read.get()).set_bytes_transferred(bytes_transferred);
+            let file_state = lock!(handle.lock());
+            let mut event = Event::none(file_state.interest.key);
+            if status.is_read() {
+                unsafe {
+                    (*read.get()).set_bytes_transferred(bytes_transferred);
+                }
+                event.readable = true;
             }
-            event.readable = true;
-        }
 
-        if status.is_write() {
-            unsafe {
-                (*write.get()).set_bytes_transferred(bytes_transferred);
+            if status.is_write() {
+                unsafe {
+                    (*write.get()).set_bytes_transferred(bytes_transferred);
+                }
+                event.writable = true;
             }
-            event.writable = true;
+
+            event.readable &= file_state.interest.readable;
+            event.writable &= file_state.interest.writable;
+
+            // If this event doesn't have anything that interests us, don't return or
+            // update the oneshot state.
+            return_value = if event.readable || event.writable {
+                FeedEventResult::Event(event)
+            } else {
+                FeedEventResult::NoEvent
+            };
         }
-
-        event.readable &= file_state.interest.readable;
-        event.writable &= file_state.interest.writable;
-
-        // If this event doesn't have anything that interests us, don't return or
-        // update the oneshot state.
-        let return_value = if event.readable || event.writable {
-            FeedEventResult::Event(event)
-        } else {
-            FeedEventResult::NoEvent
-        };
-
         Ok(return_value)
     }
 

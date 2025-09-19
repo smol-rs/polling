@@ -53,6 +53,7 @@ features = [
     "Win32_System_LibraryLoader",
     "Win32_System_Threading",
     "Win32_System_WindowsProgramming",
+    "Win32_System_Pipes",
 ]
 
 [target.'cfg(target_os = "hermit")'.dependencies.hermit-abi]
@@ -71,4 +72,3 @@ signal-hook = "0.3.17"
 
 [target.'cfg(windows)'.dev-dependencies]
 tempfile = "3.7"
-windows-sys = { version = "0.60", features = ["Win32_System_Pipes"] }

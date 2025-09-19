@@ -468,13 +468,14 @@ unsafe impl<T> Completion for IoStatusBlock<T> {
 }
 
 impl<T: FileOverlapped> FileOverlapped for IoStatusBlock<T> {
+    #[inline]
     fn file_read_offset() -> usize {
         T::file_read_offset() + std::mem::offset_of!(IoStatusBlock<T>, data)
     }
 
+    #[inline]
     fn file_write_offset() -> usize {
-        let data_offset = std::mem::offset_of!(IoStatusBlock<T>, data);
-        T::file_write_offset() + data_offset
+        T::file_write_offset() + std::mem::offset_of!(IoStatusBlock<T>, data)
     }
 }
 
