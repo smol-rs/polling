@@ -6,7 +6,7 @@ name = "polling"
 version = "3.11.0"
 authors = ["Stjepan Glavina <stjepang@gmail.com>", "John Nunley <dev@notgull.net>"]
 edition = "2021"
-rust-version = "1.71"
+rust-version = "1.77"
 description = "Portable interface to epoll, kqueue, event ports, and IOCP"
 license = "Apache-2.0 OR MIT"
 repository = "https://github.com/smol-rs/polling"
@@ -18,7 +18,10 @@ exclude = ["/.*"]
 rustdoc-args = ["--cfg", "docsrs"]
 
 [lints.rust]
-unexpected_cfgs = { level = "warn", check-cfg = ['cfg(polling_test_poll_backend)', 'cfg(polling_test_epoll_pipe)'] }
+unexpected_cfgs = { level = "warn", check-cfg = [
+    'cfg(polling_test_poll_backend)',
+    'cfg(polling_test_epoll_pipe)',
+] }
 
 [dependencies]
 cfg-if = "1"
@@ -50,6 +53,7 @@ features = [
     "Win32_System_LibraryLoader",
     "Win32_System_Threading",
     "Win32_System_WindowsProgramming",
+    "Win32_System_Pipes",
 ]
 
 [target.'cfg(target_os = "hermit")'.dependencies.hermit-abi]
@@ -65,3 +69,6 @@ libc = "0.2"
 
 [target.'cfg(all(unix, not(target_os="vita")))'.dev-dependencies]
 signal-hook = "0.3.17"
+
+[target.'cfg(windows)'.dev-dependencies]
+tempfile = "3.7"
