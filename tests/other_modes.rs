@@ -16,7 +16,8 @@ fn level_triggered() {
 
     // Create our poller and register our streams.
     let poller = Poller::new().unwrap();
-    if unsafe { poller.add_with_mode(&reader, Event::readable(reader_token), PollMode::Level) }
+    if poller
+        .add_with_mode(&reader, Event::readable(reader_token), PollMode::Level)
         .is_err()
     {
         // Only panic if we're on a platform that should support level mode.
@@ -104,10 +105,11 @@ fn edge_triggered() {
 
     // Create our poller and register our streams.
     let poller = Poller::new().unwrap();
-    if unsafe { poller.add_with_mode(&reader, Event::readable(reader_token), PollMode::Edge) }
+    if poller
+        .add_with_mode(&reader, Event::readable(reader_token), PollMode::Edge)
         .is_err()
     {
-        // Only panic if we're on a platform that should support level mode.
+        // Only panic if we're on a platform that should support edge mode.
         cfg_if::cfg_if! {
             if #[cfg(all(
                 any(
@@ -191,7 +193,7 @@ fn edge_oneshot_triggered() {
 
     // Create our poller and register our streams.
     let poller = Poller::new().unwrap();
-    if unsafe {
+    if {
         poller.add_with_mode(
             &reader,
             Event::readable(reader_token),

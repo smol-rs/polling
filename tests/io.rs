@@ -8,9 +8,7 @@ use std::time::Duration;
 fn basic_io() {
     let poller = Poller::new().unwrap();
     let (read, mut write) = tcp_pair().unwrap();
-    unsafe {
-        poller.add(&read, Event::readable(1)).unwrap();
-    }
+    poller.add(&read, Event::readable(1)).unwrap();
 
     // Nothing should be available at first.
     let mut events = Events::new();
@@ -50,7 +48,8 @@ fn insert_twice() {
     let read = Arc::new(read);
 
     let poller = Poller::new().unwrap();
-    unsafe {
+
+    {
         #[cfg(unix)]
         let read = read.as_raw_fd();
         #[cfg(windows)]
@@ -101,15 +100,13 @@ fn append_events() {
 
     // Add the sockets to the poller.
     let poller = Poller::new().unwrap();
-    unsafe {
-        for (read, _write) in &pairs {
-            #[cfg(unix)]
-            let read = read.as_raw_fd();
-            #[cfg(windows)]
-            let read = read.as_raw_socket();
+    for (read, _write) in &pairs {
+        #[cfg(unix)]
+        let read = read.as_raw_fd();
+        #[cfg(windows)]
+        let read = read.as_raw_socket();
 
-            poller.add(read, Event::readable(1)).unwrap();
-        }
+        poller.add(read, Event::readable(1)).unwrap();
     }
 
     // Trigger read events on the sockets and reuse the event list to test

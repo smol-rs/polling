@@ -45,13 +45,9 @@ impl Poller {
     }
 
     /// Adds a file descriptor.
-    ///
-    /// # Safety
-    ///
-    /// The `fd` must be a valid file descriptor and it must last until it is deleted.
-    pub unsafe fn add(&self, fd: RawFd, ev: Event, mode: PollMode) -> io::Result<()> {
+    pub fn add(&self, fd: RawFd, ev: Event, mode: PollMode) -> io::Result<()> {
         // File descriptors don't need to be added explicitly, so just modify the interest.
-        self.modify(BorrowedFd::borrow_raw(fd), ev, mode)
+        self.modify(unsafe { BorrowedFd::borrow_raw(fd) }, ev, mode)
     }
 
     /// Modifies an existing file descriptor.

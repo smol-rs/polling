@@ -97,12 +97,7 @@ impl Poller {
     }
 
     /// Adds a new file descriptor.
-    ///
-    /// # Safety
-    ///
-    /// The `fd` must be a valid file descriptor. The usual condition of remaining registered in
-    /// the `Poller` doesn't apply to `epoll`.
-    pub unsafe fn add(&self, fd: RawFd, ev: Event, mode: PollMode) -> io::Result<()> {
+    pub fn add(&self, fd: RawFd, ev: Event, mode: PollMode) -> io::Result<()> {
         #[cfg(feature = "tracing")]
         let span = tracing::trace_span!(
             "add",

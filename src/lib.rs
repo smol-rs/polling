@@ -28,9 +28,7 @@
 //!
 //! // Create a poller and register interest in readability on the socket.
 //! let poller = Poller::new()?;
-//! unsafe {
-//!     poller.add(&socket, Event::readable(key))?;
-//! }
+//! poller.add(&socket, Event::readable(key))?;
 //!
 //! // The event loop.
 //! let mut events = Events::new();
@@ -343,16 +341,13 @@ impl Event {
     ///
     /// ```
     /// use std::{io, net};
-    /// // Assuming polling and socket2 are included as dependencies in Cargo.toml
     /// use polling::Event;
     /// use socket2::Type;
     ///
     /// fn main() -> io::Result<()> {
     ///     let socket = socket2::Socket::new(socket2::Domain::IPV4, Type::STREAM, None)?;
     ///     let poller = polling::Poller::new()?;
-    ///     unsafe {
-    ///         poller.add(&socket, Event::new(0, true, true))?;
-    ///     }
+    ///     poller.add(&socket, Event::new(0, true, true))?;
     ///     let addr = net::SocketAddr::new(net::Ipv4Addr::LOCALHOST.into(), 8080);
     ///     socket.set_nonblocking(true)?;
     ///     let _ = socket.connect(&addr.into());
@@ -495,12 +490,6 @@ impl Poller {
     /// will act as if the source was registered with another [`Poller`], with the same caveats
     /// as above.
     ///
-    /// # Safety
-    ///
-    /// The source must be [`delete()`]d from this `Poller` before it is dropped.
-    ///
-    /// [`delete()`]: Poller::delete
-    ///
     /// # Errors
     ///
     /// This method returns an error in the following situations:
@@ -520,13 +509,12 @@ impl Poller {
     /// let key = 7;
     ///
     /// let poller = Poller::new()?;
-    /// unsafe {
-    ///     poller.add(&source, Event::all(key))?;
-    /// }
+    /// poller.add(&source, Event::all(key))?;
     /// poller.delete(&source)?;
     /// # std::io::Result::Ok(())
     /// ```
-    pub unsafe fn add(&self, source: impl AsRawSource, interest: Event) -> io::Result<()> {
+    // TODO: At the next breaking change, change `AsRawSource` to `AsSource`
+    pub fn add(&self, source: impl AsRawSource, interest: Event) -> io::Result<()> {
         self.add_with_mode(source, interest, PollMode::Oneshot)
     }
 
@@ -535,17 +523,11 @@ impl Poller {
     /// This is identical to the `add()` function, but allows specifying the
     /// polling mode to use for this socket.
     ///
-    /// # Safety
-    ///
-    /// The source must be [`delete()`]d from this `Poller` before it is dropped.
-    ///
-    /// [`delete()`]: Poller::delete
-    ///
     /// # Errors
     ///
     /// If the operating system does not support the specified mode, this function
     /// will return an error.
-    pub unsafe fn add_with_mode(
+    pub fn add_with_mode(
         &self,
         source: impl AsRawSource,
         interest: Event,
@@ -588,7 +570,7 @@ impl Poller {
     /// # let source = std::net::TcpListener::bind("127.0.0.1:0")?;
     /// # let key = 7;
     /// # let poller = Poller::new()?;
-    /// # unsafe { poller.add(&source, Event::none(key))?; }
+    /// # poller.add(&source, Event::none(key))?;
     /// poller.modify(&source, Event::all(key))?;
     /// # std::io::Result::Ok(())
     /// ```
@@ -600,7 +582,7 @@ impl Poller {
     /// # let source = std::net::TcpListener::bind("127.0.0.1:0")?;
     /// # let key = 7;
     /// # let poller = Poller::new()?;
-    /// # unsafe { poller.add(&source, Event::none(key))?; }
+    /// # poller.add(&source, Event::none(key))?;
     /// poller.modify(&source, Event::readable(key))?;
     /// # poller.delete(&source)?;
     /// # std::io::Result::Ok(())
@@ -613,7 +595,7 @@ impl Poller {
     /// # let poller = Poller::new()?;
     /// # let key = 7;
     /// # let source = std::net::TcpListener::bind("127.0.0.1:0")?;
-    /// # unsafe { poller.add(&source, Event::none(key))? };
+    /// # poller.add(&source, Event::none(key))?;
     /// poller.modify(&source, Event::writable(key))?;
     /// # poller.delete(&source)?;
     /// # std::io::Result::Ok(())
@@ -626,7 +608,7 @@ impl Poller {
     /// # let source = std::net::TcpListener::bind("127.0.0.1:0")?;
     /// # let key = 7;
     /// # let poller = Poller::new()?;
-    /// # unsafe { poller.add(&source, Event::none(key))?; }
+    /// # poller.add(&source, Event::none(key))?;
     /// poller.modify(&source, Event::none(key))?;
     /// # poller.delete(&source)?;
     /// # std::io::Result::Ok(())
@@ -681,7 +663,7 @@ impl Poller {
     /// let key = 7;
     ///
     /// let poller = Poller::new()?;
-    /// unsafe { poller.add(&socket, Event::all(key))?; }
+    /// poller.add(&socket, Event::all(key))?;
     /// poller.delete(&socket)?;
     /// # std::io::Result::Ok(())
     /// ```
@@ -719,9 +701,7 @@ impl Poller {
     /// let key = 7;
     ///
     /// let poller = Poller::new()?;
-    /// unsafe {
-    ///     poller.add(&socket, Event::all(key))?;
-    /// }
+    /// poller.add(&socket, Event::all(key))?;
     ///
     /// let mut events = Events::new();
     /// let n = poller.wait(&mut events, Some(Duration::from_secs(1)))?;

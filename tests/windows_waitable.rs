@@ -79,11 +79,9 @@ fn smoke() {
 
     let event = EventHandle::new(true).unwrap();
 
-    unsafe {
-        poller
-            .add_waitable(&event, Event::all(0), PollMode::Oneshot)
-            .unwrap();
-    }
+    poller
+        .add_waitable(&event, Event::all(0), PollMode::Oneshot)
+        .unwrap();
 
     let mut events = Events::new();
     poller

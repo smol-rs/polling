@@ -82,15 +82,13 @@ impl Poller {
     }
 
     /// Adds a new file descriptor.
-    ///
-    /// # Safety
-    ///
-    /// The file descriptor must be valid and it must last until it is deleted.
-    pub unsafe fn add(&self, fd: RawFd, ev: Event, mode: PollMode) -> io::Result<()> {
+    pub fn add(&self, fd: RawFd, ev: Event, mode: PollMode) -> io::Result<()> {
         self.add_source(SourceId::Fd(fd))?;
 
         // File descriptors don't need to be added explicitly, so just modify the interest.
-        self.modify(BorrowedFd::borrow_raw(fd), ev, mode)
+        // SAFETY: Move to BorrowedFd at next breaking change.
+        // See also: https://github.com/smol-rs/polling/issues/255
+        self.modify(unsafe { BorrowedFd::borrow_raw(fd) }, ev, mode)
     }
 
     /// Modifies an existing file descriptor.

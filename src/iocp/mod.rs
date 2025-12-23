@@ -165,16 +165,7 @@ impl Poller {
     }
 
     /// Add a new source to the poller.
-    ///
-    /// # Safety
-    ///
-    /// The socket must be a valid socket and must last until it is deleted.
-    pub(super) unsafe fn add(
-        &self,
-        socket: RawSocket,
-        interest: Event,
-        mode: PollMode,
-    ) -> io::Result<()> {
+    pub(super) fn add(&self, socket: RawSocket, interest: Event, mode: PollMode) -> io::Result<()> {
         #[cfg(feature = "tracing")]
         let span = tracing::trace_span!(
             "add",

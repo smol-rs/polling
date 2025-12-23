@@ -65,10 +65,6 @@ pub trait PollerIocpExt: PollerSealed {
     ///
     /// Once the object has been signalled, the poller will emit the `interest` event.
     ///
-    /// # Safety
-    ///
-    /// The added handle must not be dropped before it is deleted.
-    ///
     /// # Examples
     ///
     /// ```no_run
@@ -98,7 +94,7 @@ pub trait PollerIocpExt: PollerSealed {
     /// assert_eq!(events.len(), 1);
     /// assert_eq!(events.iter().next().unwrap(), Event::all(0));
     /// ```
-    unsafe fn add_waitable(
+    fn add_waitable(
         &self,
         handle: impl AsRawWaitable,
         interest: Event,
@@ -198,7 +194,7 @@ impl PollerIocpExt for Poller {
         self.poller.post(packet)
     }
 
-    unsafe fn add_waitable(
+    fn add_waitable(
         &self,
         handle: impl AsRawWaitable,
         event: Event,
