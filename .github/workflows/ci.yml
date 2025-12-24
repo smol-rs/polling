@@ -136,15 +136,19 @@ jobs:
       run: |
         rustup target add x86_64-unknown-redox
         cargo check --target x86_64-unknown-redox
-    - name: HermitOS
-      if: startsWith(matrix.rust, 'nightly') && startsWith(matrix.os, 'ubuntu')
-      run: cargo check -Z build-std --target x86_64-unknown-hermit
+    # Bring this back once Hermit stdlib bugs are fixed
+    # See: https://github.com/rust-lang/rust/issues/150294
+    #- name: HermitOS
+    #  if: startsWith(matrix.rust, 'nightly') && startsWith(matrix.os, 'ubuntu')
+    #  run: cargo check -Z build-std --target x86_64-unknown-hermit
     - name: Check haiku
       if: startsWith(matrix.rust, 'nightly') && startsWith(matrix.os, 'ubuntu')
       run: cargo check -Z build-std --target x86_64-unknown-haiku
-    - name: Check vita
-      if: startsWith(matrix.rust, 'nightly') && startsWith(matrix.os, 'ubuntu')
-      run: cargo check -Z build-std --target armv7-sony-vita-newlibeabihf
+    # Bring this back once Vita stdlib bugs are fixed
+    # See: https://github.com/rust-lang/rust/pull/150297
+    #- name: Check vita
+    #  if: startsWith(matrix.rust, 'nightly') && startsWith(matrix.os, 'ubuntu')
+    #  run: cargo check -Z build-std --target armv7-sony-vita-newlibeabihf
     - name: Check ESP-IDF
       if: startsWith(matrix.rust, 'nightly') && startsWith(matrix.os, 'ubuntu')
       run: cargo check -Z build-std --target riscv32imc-esp-espidf
