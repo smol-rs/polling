@@ -64,4 +64,4 @@ socket2 = "0.6.0"
 libc = "0.2"
 
 [target.'cfg(all(unix, not(target_os="vita")))'.dev-dependencies]
-signal-hook = "0.3.17"
+signal-hook = "0.4.1"
