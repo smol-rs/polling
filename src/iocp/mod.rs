@@ -295,8 +295,8 @@ impl Poller {
             match sources.remove(&socket.as_raw_socket()) {
                 Some(s) => s,
                 None => {
-                    // If the source has already been removed, then we can just return.
-                    return Ok(());
+                    // If the source wasn't recognized then we must return a NotFound error.
+                    return Err(io::ErrorKind::NotFound.into());
                 }
             }
         };
