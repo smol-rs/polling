@@ -81,6 +81,22 @@ fn insert_twice() {
     poller.delete(&read).unwrap();
 }
 
+#[test]
+fn delete_unrecognized() {
+    let (read, _) = tcp_pair().unwrap();
+    let read = Arc::new(read);
+
+    let poller = Poller::new().unwrap();
+    match poller.delete(&read) {
+        Ok(_) => panic!("delete of unregistered source succeeded"),
+        Err(e) => assert_eq!(
+            e.kind(),
+            io::ErrorKind::NotFound,
+            "wrong error kind for delete of unregistered source",
+        ),
+    }
+}
+
 /// Test that calling `wait` appends events, as [documented], rather than
 /// overwriting them.
 ///
