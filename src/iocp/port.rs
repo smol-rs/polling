@@ -1,5 +1,8 @@
 //! A safe wrapper around the Windows I/O API.
 
+use crate::iocp::FileCompletionStatus;
+use crate::os::iocp::OverlappedInner;
+
 use super::dur2timeout;
 
 use std::fmt;
@@ -10,6 +13,7 @@ use std::ops::Deref;
 use std::os::windows::io::{AsRawHandle, RawHandle};
 use std::pin::Pin;
 use std::ptr;
+use std::sync::atomic::AtomicUsize;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -65,6 +69,32 @@ pub(super) unsafe trait CompletionHandle: Deref + Sized {
     fn as_ptr(&self) -> *mut OVERLAPPED;
 }
 
+/// Offset that a file read/write overlapped position to the begining of the whole 'IoStatusBlock<T>' block.
+///
+/// # Safety
+///
+/// The whole 'IoStatusBlock<T>' block must include file read/write `Overlapped<T>` struct
+pub(super) trait FileOverlapped {
+    /// Get the offset of the file read overlapped structure to the whole 'IoStatusBlock<T>' block
+    fn file_read_offset() -> usize;
+
+    /// Get the offset of the file write overlapped structure to the whole 'IoStatusBlock<T>' block
+    fn file_write_offset() -> usize;
+}
+
+/// File completion overlapped pointer convert to 'IoStatusBlock<T>'
+///
+/// # Safety
+///
+/// The completion overlaped pointer must be valid as part of 'IoStatusBlock<T>'
+pub(super) unsafe trait FileCompletionHandle {
+    /// file read overlapped pointer convert to 'IoStatusBlock<T>'
+    fn file_read_done(entry: &OVERLAPPED_ENTRY) -> Self;
+
+    /// file write overlapped pointer convert to 'IoStatusBlock<T>'
+    fn file_write_done(entry: &OVERLAPPED_ENTRY) -> Self;
+}
+
 unsafe impl<T: Completion> CompletionHandle for Pin<&T> {
     type Completion = T;
 
@@ -105,10 +135,56 @@ unsafe impl<T: Completion> CompletionHandle for Pin<Arc<T>> {
     }
 }
 
+unsafe impl<T: FileOverlapped> FileCompletionHandle for Pin<&T> {
+    fn file_read_done(entry: &OVERLAPPED_ENTRY) -> Self {
+        let overlapped_ptr = entry.lpOverlapped;
+        let offset = T::file_read_offset();
+        unsafe { Pin::new_unchecked(&*((overlapped_ptr as *mut u8).sub(offset) as *const T)) }
+    }
+
+    fn file_write_done(entry: &OVERLAPPED_ENTRY) -> Self {
+        let overlapped_ptr = entry.lpOverlapped;
+        let offset = T::file_write_offset();
+        unsafe { Pin::new_unchecked(&*((overlapped_ptr as *mut u8).sub(offset) as *const T)) }
+    }
+}
+
+unsafe impl<T: FileOverlapped> FileCompletionHandle for Pin<Arc<T>> {
+    fn file_read_done(entry: &OVERLAPPED_ENTRY) -> Self {
+        let overlapped_ptr = entry.lpOverlapped;
+        let offset = T::file_read_offset();
+        // File completion does not clone the Packet when add the file handle to IOCP
+        // So need to clone the Packet to avoid the owner ship lost
+        unsafe {
+            let inner = Arc::from_raw((overlapped_ptr as *const u8).sub(offset) as *const T);
+            assert!(Arc::strong_count(&inner) >= 1, "File has been removed, but still use FileOverlappedWrapper return from add_file function");
+
+            // Do not need to clone new one for file packet because it will be cloned for every successful I/O operation
+            // see [`IocpFilePacket::read_overlapped`]
+            Pin::new_unchecked(inner)
+        }
+    }
+
+    fn file_write_done(entry: &OVERLAPPED_ENTRY) -> Self {
+        let overlapped_ptr = entry.lpOverlapped;
+        let offset = T::file_write_offset();
+        unsafe {
+            let inner = Arc::from_raw((overlapped_ptr as *const u8).sub(offset) as *const T);
+            assert!(Arc::strong_count(&inner) >= 1, "File has been removed, but still use FileOverlappedWrapper return from add_file function");
+
+            // Do not need to clone new one for file packet because it will be cloned for every successful I/O operation
+            // see [`IocpFilePacket::write_overlapped`]
+            Pin::new_unchecked(inner)
+        }
+    }
+}
 /// A handle to the I/O completion port.
 pub(super) struct IoCompletionPort<T> {
     /// The underlying handle.
     handle: HANDLE,
+
+    /// The completion key generator.
+    key_gen: CompletionKeyGenerator,
 
     /// We own the status block.
     _marker: PhantomData<T>,
@@ -144,7 +220,7 @@ impl<T> fmt::Debug for IoCompletionPort<T> {
     }
 }
 
-impl<T: CompletionHandle> IoCompletionPort<T> {
+impl<T: CompletionHandle + FileCompletionHandle> IoCompletionPort<T> {
     /// Create a new I/O completion port.
     pub(super) fn new(threads: usize) -> io::Result<Self> {
         let handle = unsafe {
@@ -161,6 +237,7 @@ impl<T: CompletionHandle> IoCompletionPort<T> {
         } else {
             Ok(Self {
                 handle,
+                key_gen: Default::default(),
                 _marker: PhantomData,
             })
         }
@@ -171,11 +248,18 @@ impl<T: CompletionHandle> IoCompletionPort<T> {
         &self,
         handle: &impl AsRawHandle, // TODO change to AsHandle
         skip_set_event_on_handle: bool,
+        kind: CompletionKeyType,
     ) -> io::Result<()> {
         let handle = handle.as_raw_handle();
 
-        let result =
-            unsafe { CreateIoCompletionPort(handle as _, self.handle, handle as usize, 0) };
+        let result = unsafe {
+            CreateIoCompletionPort(
+                handle as _,
+                self.handle,
+                CompletionKey::new(kind, &self.key_gen).into(),
+                0,
+            )
+        };
 
         if result.is_null() {
             return Err(io::Error::last_os_error());
@@ -257,7 +341,7 @@ impl<T: CompletionHandle> IoCompletionPort<T> {
 
 /// An `OVERLAPPED_ENTRY` resulting from an I/O completion port.
 #[repr(transparent)]
-pub(super) struct OverlappedEntry<T: CompletionHandle> {
+pub(super) struct OverlappedEntry<T: CompletionHandle + FileCompletionHandle> {
     /// The underlying entry.
     entry: OVERLAPPED_ENTRY,
 
@@ -265,18 +349,45 @@ pub(super) struct OverlappedEntry<T: CompletionHandle> {
     _marker: PhantomData<T>,
 }
 
-impl<T: CompletionHandle> fmt::Debug for OverlappedEntry<T> {
+impl<T: CompletionHandle + FileCompletionHandle> fmt::Debug for OverlappedEntry<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str("OverlappedEntry { .. }")
     }
 }
 
-impl<T: CompletionHandle> OverlappedEntry<T> {
+impl<T: CompletionHandle + FileCompletionHandle> OverlappedEntry<T> {
     /// Convert into the completion packet.
     pub(super) fn into_packet(self) -> T {
         let packet = unsafe { self.packet() };
         std::mem::forget(self);
         packet
+    }
+
+    /// Get the number of bytes transferred by the I/O operation.
+    pub(super) fn bytes_transferred(&self) -> u32 {
+        self.entry.dwNumberOfBytesTransferred
+    }
+
+    /// Check if this entry is a file completion packet.
+    pub(super) fn is_file_completion(&self) -> bool {
+        CompletionKey::from(self.entry.lpCompletionKey).is_file()
+    }
+
+    /// Convert into the completion packet through file overlapped pointer which is not the beginning address
+    /// of the packet.
+    ///
+    /// # Safety
+    ///
+    /// This function should only be called once, since it moves
+    /// out the `T` from the `OVERLAPPED_ENTRY`.
+    pub(super) fn into_file_packet(self) -> (T, FileCompletionStatus) {
+        assert!(
+            self.is_file_completion(),
+            "This is not a file completion packet"
+        );
+        let (packet, status) = unsafe { OverlappedInner::<T>::from_entry(&self.entry) };
+        std::mem::forget(self);
+        (packet, status)
     }
 
     /// Get the packet reference that this entry refers to.
@@ -292,8 +403,123 @@ impl<T: CompletionHandle> OverlappedEntry<T> {
     }
 }
 
-impl<T: CompletionHandle> Drop for OverlappedEntry<T> {
+impl<T: CompletionHandle + FileCompletionHandle> Drop for OverlappedEntry<T> {
     fn drop(&mut self) {
-        drop(unsafe { self.packet() });
+        // File packet do not need to Arc::Clone to add or remove from the poller
+        // So we can safely drop it without decrease the reference count.
+        if !self.is_file_completion() {
+            drop(unsafe { self.packet() });
+        }
+    }
+}
+
+/// The type of completion key used to differentiate between different types of completion keys.
+/// The completion key type determines how to convert raw address to packet block.
+/// [`OverlappedEntry<T>::into_packet`]: create::iocp::OverlappedEntry<T>::into_packet
+/// [`OverlappedEntry<T>::into_file_packet`]: create::iocp::OverlappedEntry<T>::into_file_packet
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum CompletionKeyType {
+    Socket,
+    File,
+}
+
+/// This is used to differentiate between different types of completion keys.
+/// Completion key has not to be unique per handle for IOCP. The `CompletionKey` is used to
+/// identify the type of completion key, it assign one key for per handle. But it does not
+/// guarantee uniqueness across different handles when the token is overflowed and wrapped back
+/// to low value which may be used by existing handle.
+/// It is used to differentiate between different types of completion keys.
+#[repr(transparent)]
+struct CompletionKey(usize);
+
+#[derive(Debug)]
+struct CompletionKeyGenerator {
+    next_default_key: AtomicUsize,
+    next_file_key: AtomicUsize,
+}
+
+impl Default for CompletionKeyGenerator {
+    fn default() -> Self {
+        Self {
+            next_default_key: AtomicUsize::new(1), // 0 reserved for default iocp packet
+            next_file_key: AtomicUsize::new(1usize << (usize::BITS - 1)), // Initialize with high bit set
+        }
+    }
+}
+
+impl CompletionKey {
+    const HIGH_BIT: usize = 1usize << (usize::BITS - 1); // 0x8000_0000_0000_0000 on 64-bit
+    const COUNTER_MASK: usize = !Self::HIGH_BIT; // 0x7FFF_FFFF_FFFF_FFFF on 64-bit
+    pub(super) fn new(kind: CompletionKeyType, gen: &CompletionKeyGenerator) -> Self {
+        match kind {
+            CompletionKeyType::File => {
+                // For file key, increment from HIGH_BIT base
+                // If it would overflow past HIGH_BIT | COUNTER_MASK, wrap back to HIGH_BIT
+                let key = loop {
+                    let current = gen.next_file_key.load(std::sync::atomic::Ordering::Relaxed);
+                    let next = if current == (Self::HIGH_BIT | Self::COUNTER_MASK) {
+                        Self::HIGH_BIT // Wrap back to HIGH_BIT (first file key)
+                    } else {
+                        current + 1
+                    };
+
+                    match gen.next_file_key.compare_exchange_weak(
+                        current,
+                        next,
+                        std::sync::atomic::Ordering::Relaxed,
+                        std::sync::atomic::Ordering::Relaxed,
+                    ) {
+                        Ok(_) => break current,
+                        Err(_) => continue, // Retry if another thread modified it
+                    }
+                };
+
+                Self(key)
+            }
+            _ => {
+                // For default keys, we need to ensure the counter never exceeds COUNTER_MASK
+                // If it would overflow, wrap back to 0
+                let key = loop {
+                    let current = gen
+                        .next_default_key
+                        .load(std::sync::atomic::Ordering::Relaxed);
+                    let next = if current >= Self::COUNTER_MASK {
+                        1
+                    } else {
+                        current + 1
+                    };
+
+                    match gen.next_default_key.compare_exchange_weak(
+                        current,
+                        next,
+                        std::sync::atomic::Ordering::Relaxed,
+                        std::sync::atomic::Ordering::Relaxed,
+                    ) {
+                        Ok(_) => break current,
+                        Err(_) => continue, // Retry if another thread modified it
+                    }
+                };
+
+                // Keep highest bit as 0, key is already safed by above logic
+                Self(key)
+            }
+        }
+    }
+
+    /// Check if this completion key is for a File type
+    pub(super) fn is_file(&self) -> bool {
+        (self.0 & Self::HIGH_BIT) != 0
+    }
+}
+
+impl From<CompletionKey> for usize {
+    fn from(key: CompletionKey) -> Self {
+        key.0
+    }
+}
+
+impl From<usize> for CompletionKey {
+    fn from(key: usize) -> Self {
+        Self(key)
     }
 }
