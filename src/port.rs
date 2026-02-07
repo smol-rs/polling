@@ -98,14 +98,7 @@ impl Poller {
         #[cfg(feature = "tracing")]
         let _enter = span.enter();
 
-        let result = unsafe { port::dissociate_fd(&self.port_fd, fd) };
-        if let Err(e) = result {
-            match e {
-                rustix::io::Errno::NOENT => return Ok(()),
-                _ => return Err(e.into()),
-            }
-        }
-
+        unsafe { port::dissociate_fd(&self.port_fd, fd) }?;
         Ok(())
     }
 

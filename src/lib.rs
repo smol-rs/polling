@@ -670,6 +670,10 @@ impl Poller {
     /// Unlike [`add()`][`Poller::add()`], this method only removes the file descriptor or
     /// socket from the poller without putting it back into blocking mode.
     ///
+    /// If the given source is not known to the poller then this is guaranteed to fail
+    /// with [`std::io::ErrorKind::NotFound`]. That particular error kind is never
+    /// returned in any other situation.
+    ///
     /// # Examples
     ///
     /// ```
