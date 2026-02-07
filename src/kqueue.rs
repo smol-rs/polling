@@ -86,11 +86,17 @@ impl Poller {
     /// # Safety
     ///
     /// The file descriptor must be valid and it must last until it is deleted.
-    pub unsafe fn add(&self, fd: RawFd, ev: Event, mode: PollMode) -> io::Result<()> {
-        self.add_source(SourceId::Fd(fd))?;
+    pub fn add(&self, fd: BorrowedFd<'_>, ev: Event, mode: PollMode) -> io::Result<()> {
+        let rawfd = fd.as_raw_fd();
+
+        // SAFETY: `rawfd` is valid as it is from `BorrowedFd`. And
+        // this block never closes / deletes `rawfd`.
+        unsafe {
+            self.add_source(SourceId::Fd(rawfd))?;
+        }
 
         // File descriptors don't need to be added explicitly, so just modify the interest.
-        self.modify(BorrowedFd::borrow_raw(fd), ev, mode)
+        self.modify(fd, ev, mode)
     }
 
     /// Modifies an existing file descriptor.
