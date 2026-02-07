@@ -1,9 +1,6 @@
 #[cfg(all(
     any(
-        target_os = "macos",
-        target_os = "ios",
-        target_os = "tvos",
-        target_os = "watchos",
+        target_vendor = "apple",
         target_os = "freebsd",
         target_os = "netbsd",
         target_os = "openbsd",
@@ -20,7 +17,7 @@ mod example {
         let poller = Poller::new().unwrap();
 
         // Register SIGINT in the poller.
-        let sigint = Signal(rustix::process::Signal::Int as _);
+        let sigint = Signal(rustix::process::Signal::INT.as_raw());
         poller.add_filter(sigint, 1, PollMode::Oneshot).unwrap();
 
         let mut events = Events::new();
@@ -43,10 +40,7 @@ mod example {
 
 #[cfg(all(
     any(
-        target_os = "macos",
-        target_os = "ios",
-        target_os = "tvos",
-        target_os = "watchos",
+        target_vendor = "apple",
         target_os = "freebsd",
         target_os = "netbsd",
         target_os = "openbsd",
@@ -60,10 +54,7 @@ fn main() {
 
 #[cfg(not(all(
     any(
-        target_os = "macos",
-        target_os = "ios",
-        target_os = "tvos",
-        target_os = "watchos",
+        target_vendor = "apple",
         target_os = "freebsd",
         target_os = "netbsd",
         target_os = "openbsd",

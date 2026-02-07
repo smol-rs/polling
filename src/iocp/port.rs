@@ -9,6 +9,7 @@ use std::mem::MaybeUninit;
 use std::ops::Deref;
 use std::os::windows::io::{AsRawHandle, RawHandle};
 use std::pin::Pin;
+use std::ptr;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -64,7 +65,7 @@ pub(super) unsafe trait CompletionHandle: Deref + Sized {
     fn as_ptr(&self) -> *mut OVERLAPPED;
 }
 
-unsafe impl<'a, T: Completion> CompletionHandle for Pin<&'a T> {
+unsafe impl<T: Completion> CompletionHandle for Pin<&T> {
     type Completion = T;
 
     fn get(&self) -> Pin<&Self::Completion> {
@@ -133,7 +134,7 @@ impl<T> fmt::Debug for IoCompletionPort<T> {
 
         impl fmt::Debug for WriteAsHex {
             fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                write!(f, "{:010x}", self.0)
+                write!(f, "{:010x}", self.0 as usize)
             }
         }
 
@@ -149,13 +150,13 @@ impl<T: CompletionHandle> IoCompletionPort<T> {
         let handle = unsafe {
             CreateIoCompletionPort(
                 INVALID_HANDLE_VALUE,
-                0,
+                ptr::null_mut(),
                 0,
                 threads.try_into().expect("too many threads"),
             )
         };
 
-        if handle == 0 {
+        if handle.is_null() {
             Err(io::Error::last_os_error())
         } else {
             Ok(Self {
@@ -176,7 +177,7 @@ impl<T: CompletionHandle> IoCompletionPort<T> {
         let result =
             unsafe { CreateIoCompletionPort(handle as _, self.handle, handle as usize, 0) };
 
-        if result == 0 {
+        if result.is_null() {
             return Err(io::Error::last_os_error());
         }
 

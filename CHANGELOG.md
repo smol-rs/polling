@@ -1,3 +1,38 @@
+# Version 3.11.0
+
+- Bump MSRV to 1.71. (#251)
+- Update to `windows-sys` v0.61. (#251)
+
+# Version 3.10.0
+
+- Add `wait_deadline` function. (#226)
+
+# Version 3.9.0
+
+- Add a new optional `tracing` feature. When enabled, this feature adds logging
+  to the implementation. By default it is disabled. (#238)
+- Update to `windows-sys` v0.60. (#239)
+
+# Version 3.8.0
+
+- Implement `AsRawFd` and `AsFd` for `Poller` on Redox OS. (#235)
+- Update `hermit-abi` to v0.5.0. (#229)
+- Update `rustix` to 1.0 (#230). This also fixed a bug in `wait` which (contradicting docs) cleared the events vector instead of appending to it.
+- Add support for QNX. (#201)
+
+# Version 3.7.4
+
+- Add support for visionOS. (#217)
+- Fix typos in documentation. (#216)
+
+# Version 3.7.3
+
+- Update to `windows-sys` v0.59. (#214)
+
+# Version 3.7.2
+
+- Update `hermit-abi` to v0.4.0. (#209)
+
 # Version 3.7.1
 
 - Fix a typo in `Event::is_err()`. (#204)

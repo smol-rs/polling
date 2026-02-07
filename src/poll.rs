@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::io;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Condvar, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 #[cfg(not(target_os = "hermit"))]
 use rustix::fd::{AsFd, AsRawFd, BorrowedFd};
@@ -70,6 +70,7 @@ impl Poller {
     pub fn new() -> io::Result<Poller> {
         let notify = notify::Notify::new()?;
 
+        #[cfg(feature = "tracing")]
         tracing::trace!(?notify, "new");
 
         Ok(Self {
@@ -104,12 +105,14 @@ impl Poller {
             return Err(io::Error::from(io::ErrorKind::InvalidInput));
         }
 
+        #[cfg(feature = "tracing")]
         let span = tracing::trace_span!(
             "add",
             notify_read = ?self.notify.fd().as_raw_fd(),
             ?fd,
             ?ev,
         );
+        #[cfg(feature = "tracing")]
         let _enter = span.enter();
 
         self.modify_fds(|fds| {
@@ -143,12 +146,14 @@ impl Poller {
             return Err(io::Error::from(io::ErrorKind::InvalidInput));
         }
 
+        #[cfg(feature = "tracing")]
         let span = tracing::trace_span!(
             "modify",
             notify_read = ?self.notify.fd().as_raw_fd(),
             ?fd,
             ?ev,
         );
+        #[cfg(feature = "tracing")]
         let _enter = span.enter();
 
         self.modify_fds(|fds| {
@@ -177,11 +182,13 @@ impl Poller {
             return Err(io::Error::from(io::ErrorKind::InvalidInput));
         }
 
+        #[cfg(feature = "tracing")]
         let span = tracing::trace_span!(
             "delete",
             notify_read = ?self.notify.fd().as_raw_fd(),
             ?fd,
         );
+        #[cfg(feature = "tracing")]
         let _enter = span.enter();
 
         self.modify_fds(|fds| {
@@ -201,18 +208,16 @@ impl Poller {
         })
     }
 
-    /// Waits for I/O events with an optional timeout.
-    pub fn wait(&self, events: &mut Events, timeout: Option<Duration>) -> io::Result<()> {
+    /// Waits for I/O events with an optional deadline.
+    pub fn wait_deadline(&self, events: &mut Events, deadline: Option<Instant>) -> io::Result<()> {
+        #[cfg(feature = "tracing")]
         let span = tracing::trace_span!(
             "wait",
             notify_read = ?self.notify.fd().as_raw_fd(),
-            ?timeout,
+            ?deadline,
         );
+        #[cfg(feature = "tracing")]
         let _enter = span.enter();
-
-        let deadline = timeout.and_then(|t| Instant::now().checked_add(t));
-
-        events.inner.clear();
 
         let mut fds = self.fds.lock().unwrap();
 
@@ -230,24 +235,14 @@ impl Poller {
                 fds = self.operations_complete.wait(fds).unwrap();
             }
 
-            // Convert the timeout to milliseconds.
-            let timeout_ms = deadline
-                .map(|deadline| {
-                    let timeout = deadline.saturating_duration_since(Instant::now());
-
-                    // Round up to a whole millisecond.
-                    let mut ms = timeout.as_millis().try_into().unwrap_or(std::u64::MAX);
-                    if Duration::from_millis(ms) < timeout {
-                        ms = ms.saturating_add(1);
-                    }
-                    ms.try_into().unwrap_or(std::i32::MAX)
-                })
-                .unwrap_or(-1);
+            let timeout =
+                deadline.map(|deadline| deadline.saturating_duration_since(Instant::now()));
 
             // Perform the poll.
-            let num_events = poll(&mut fds.poll_fds, timeout_ms)?;
+            let num_events = poll(&mut fds.poll_fds, timeout)?;
             let notified = !fds.poll_fds[0].revents().is_empty();
             let num_fd_events = if notified { num_events - 1 } else { num_events };
+            #[cfg(feature = "tracing")]
             tracing::trace!(?num_events, ?notified, ?num_fd_events, "new events",);
 
             // Read all notifications.
@@ -301,10 +296,12 @@ impl Poller {
 
     /// Sends a notification to wake up the current or next `wait()` call.
     pub fn notify(&self) -> io::Result<()> {
+        #[cfg(feature = "tracing")]
         let span = tracing::trace_span!(
             "notify",
             notify_read = ?self.notify.fd().as_raw_fd(),
         );
+        #[cfg(feature = "tracing")]
         let _enter = span.enter();
 
         if !self.notified.swap(true, Ordering::SeqCst) {
@@ -454,14 +451,28 @@ fn cvt_mode_as_remove(mode: PollMode) -> io::Result<bool> {
 
 #[cfg(unix)]
 mod syscall {
-    pub(super) use rustix::event::{poll, PollFd, PollFlags};
+    pub(super) use rustix::event::{PollFd, PollFlags};
 
+    pub(super) use rustix::event::Timespec;
     #[cfg(target_os = "espidf")]
     pub(super) use rustix::event::{eventfd, EventfdFlags};
     #[cfg(target_os = "espidf")]
     pub(super) use rustix::fd::{AsFd, AsRawFd, BorrowedFd, OwnedFd, RawFd};
     #[cfg(target_os = "espidf")]
     pub(super) use rustix::io::{read, write};
+    use std::io;
+    use std::time::Duration;
+
+    /// Safe wrapper around the `poll` system call.
+    pub(super) fn poll(fds: &mut [PollFd<'_>], timeout: Option<Duration>) -> io::Result<usize> {
+        // Timeout for `poll`. In case of overflow, use no timeout.
+        let timeout = match timeout {
+            Some(timeout) => Timespec::try_from(timeout).ok(),
+            None => None,
+        };
+
+        Ok(rustix::event::poll(fds, timeout.as_ref())?)
+    }
 }
 
 #[cfg(target_os = "hermit")]
@@ -472,6 +483,7 @@ mod syscall {
     use std::io;
     use std::marker::PhantomData;
     use std::ops::BitOr;
+    use std::time::Duration;
 
     pub(super) use std::os::hermit::io::{AsFd, AsRawFd, BorrowedFd, FromRawFd, OwnedFd, RawFd};
 
@@ -503,12 +515,27 @@ mod syscall {
     }
 
     /// Safe wrapper around the `poll` system call.
-    pub(super) fn poll(fds: &mut [PollFd<'_>], timeout: i32) -> io::Result<usize> {
+    pub(super) fn poll(fds: &mut [PollFd<'_>], timeout: Option<Duration>) -> io::Result<usize> {
+        // Timeout in milliseconds for epoll. In case of overflow, use no timeout.
+        let mut timeout_ms = -1;
+        if let Some(t) = timeout {
+            if let Ok(ms) = i32::try_from(t.as_millis()) {
+                // Round up to a whole millisecond.
+                if Duration::from_millis(ms as u64) < t {
+                    if let Some(ms) = ms.checked_add(1) {
+                        timeout_ms = ms;
+                    }
+                } else {
+                    timeout_ms = ms;
+                }
+            }
+        }
+
         let call = unsafe {
             hermit_abi::poll(
                 fds.as_mut_ptr() as *mut hermit_abi::pollfd,
                 fds.len(),
-                timeout,
+                timeout_ms,
             )
         };
 
@@ -635,7 +662,7 @@ mod notify {
     use rustix::fd::{AsFd, AsRawFd, BorrowedFd, OwnedFd, RawFd};
     use rustix::fs::{fcntl_getfl, fcntl_setfl, OFlags};
     use rustix::io::{fcntl_getfd, fcntl_setfd, read, write, FdFlags};
-    #[cfg(not(target_os = "haiku"))]
+    #[cfg(not(any(target_os = "haiku", target_os = "nto")))]
     use rustix::pipe::pipe_with;
     use rustix::pipe::{pipe, PipeFlags};
 
@@ -665,10 +692,10 @@ mod notify {
                 io::Result::Ok((read_pipe, write_pipe))
             };
 
-            #[cfg(not(target_os = "haiku"))]
+            #[cfg(not(any(target_os = "haiku", target_os = "nto")))]
             let (read_pipe, write_pipe) = pipe_with(PipeFlags::CLOEXEC).or_else(fallback_pipe)?;
 
-            #[cfg(target_os = "haiku")]
+            #[cfg(any(target_os = "haiku", target_os = "nto"))]
             let (read_pipe, write_pipe) = fallback_pipe(PipeFlags::CLOEXEC)?;
 
             // Put the reading side into non-blocking mode.

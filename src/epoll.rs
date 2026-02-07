@@ -2,17 +2,17 @@
 
 use std::io;
 use std::os::unix::io::{AsFd, AsRawFd, BorrowedFd, RawFd};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 #[cfg(not(target_os = "redox"))]
 use rustix::event::{eventfd, EventfdFlags};
 #[cfg(not(target_os = "redox"))]
 use rustix::time::{
     timerfd_create, timerfd_settime, Itimerspec, TimerfdClockId, TimerfdFlags, TimerfdTimerFlags,
-    Timespec,
 };
 
-use rustix::event::epoll;
+use rustix::buffer::spare_capacity;
+use rustix::event::{epoll, Timespec};
 use rustix::fd::OwnedFd;
 use rustix::fs::{fcntl_getfl, fcntl_setfl, OFlags};
 use rustix::io::{fcntl_getfd, fcntl_setfd, read, write, FdFlags};
@@ -77,6 +77,7 @@ impl Poller {
             )?;
         }
 
+        #[cfg(feature = "tracing")]
         tracing::trace!(
             epoll_fd = ?poller.epoll_fd.as_raw_fd(),
             notifier = ?poller.notifier,
@@ -102,12 +103,14 @@ impl Poller {
     /// The `fd` must be a valid file descriptor. The usual condition of remaining registered in
     /// the `Poller` doesn't apply to `epoll`.
     pub unsafe fn add(&self, fd: RawFd, ev: Event, mode: PollMode) -> io::Result<()> {
+        #[cfg(feature = "tracing")]
         let span = tracing::trace_span!(
             "add",
             epoll_fd = ?self.epoll_fd.as_raw_fd(),
             ?fd,
             ?ev,
         );
+        #[cfg(feature = "tracing")]
         let _enter = span.enter();
 
         epoll::add(
@@ -122,12 +125,14 @@ impl Poller {
 
     /// Modifies an existing file descriptor.
     pub fn modify(&self, fd: BorrowedFd<'_>, ev: Event, mode: PollMode) -> io::Result<()> {
+        #[cfg(feature = "tracing")]
         let span = tracing::trace_span!(
             "modify",
             epoll_fd = ?self.epoll_fd.as_raw_fd(),
             ?fd,
             ?ev,
         );
+        #[cfg(feature = "tracing")]
         let _enter = span.enter();
 
         epoll::modify(
@@ -141,12 +146,15 @@ impl Poller {
     }
 
     /// Deletes a file descriptor.
+    #[cfg_attr(not(feature = "tracing"), inline(always))]
     pub fn delete(&self, fd: BorrowedFd<'_>) -> io::Result<()> {
+        #[cfg(feature = "tracing")]
         let span = tracing::trace_span!(
             "delete",
             epoll_fd = ?self.epoll_fd.as_raw_fd(),
             ?fd,
         );
+        #[cfg(feature = "tracing")]
         let _enter = span.enter();
 
         epoll::delete(&self.epoll_fd, fd)?;
@@ -154,15 +162,19 @@ impl Poller {
         Ok(())
     }
 
-    /// Waits for I/O events with an optional timeout.
+    /// Waits for I/O events with an optional deadline.
     #[allow(clippy::needless_update)]
-    pub fn wait(&self, events: &mut Events, timeout: Option<Duration>) -> io::Result<()> {
+    pub fn wait_deadline(&self, events: &mut Events, deadline: Option<Instant>) -> io::Result<()> {
+        #[cfg(feature = "tracing")]
         let span = tracing::trace_span!(
             "wait",
             epoll_fd = ?self.epoll_fd.as_raw_fd(),
-            ?timeout,
+            ?deadline,
         );
+        #[cfg(feature = "tracing")]
         let _enter = span.enter();
+
+        let timeout = deadline.map(|deadline| deadline.saturating_duration_since(Instant::now()));
 
         #[cfg(not(target_os = "redox"))]
         let timer_fd = if timeout.is_some() {
@@ -200,22 +212,20 @@ impl Poller {
         #[cfg(target_os = "redox")]
         let timer_fd: Option<core::convert::Infallible> = None;
 
-        // Timeout in milliseconds for epoll.
-        let timeout_ms = match (timer_fd, timeout) {
-            (_, Some(t)) if t == Duration::from_secs(0) => 0,
-            (None, Some(t)) => {
-                // Round up to a whole millisecond.
-                let mut ms = t.as_millis().try_into().unwrap_or(i32::MAX);
-                if Duration::from_millis(ms as u64) < t {
-                    ms = ms.saturating_add(1);
-                }
-                ms
-            }
-            _ => -1,
+        // Timeout for epoll. In case of overflow, use no timeout.
+        let timeout = match (timer_fd, timeout) {
+            (_, Some(t)) if t == Duration::from_secs(0) => Some(Timespec::default()),
+            (None, Some(t)) => Timespec::try_from(t).ok(),
+            _ => None,
         };
 
         // Wait for I/O events.
-        epoll::wait(&self.epoll_fd, &mut events.list, timeout_ms)?;
+        epoll::wait(
+            &self.epoll_fd,
+            spare_capacity(&mut events.list),
+            timeout.as_ref(),
+        )?;
+        #[cfg(feature = "tracing")]
         tracing::trace!(
             epoll_fd = ?self.epoll_fd.as_raw_fd(),
             res = ?events.list.len(),
@@ -234,11 +244,13 @@ impl Poller {
 
     /// Sends a notification to wake up the current or next `wait()` call.
     pub fn notify(&self) -> io::Result<()> {
+        #[cfg(feature = "tracing")]
         let span = tracing::trace_span!(
             "notify",
             epoll_fd = ?self.epoll_fd.as_raw_fd(),
             notifier = ?self.notifier,
         );
+        #[cfg(feature = "tracing")]
         let _enter = span.enter();
 
         self.notifier.notify();
@@ -260,11 +272,13 @@ impl AsFd for Poller {
 
 impl Drop for Poller {
     fn drop(&mut self) {
+        #[cfg(feature = "tracing")]
         let span = tracing::trace_span!(
             "drop",
             epoll_fd = ?self.epoll_fd.as_raw_fd(),
             notifier = ?self.notifier,
         );
+        #[cfg(feature = "tracing")]
         let _enter = span.enter();
 
         #[cfg(not(target_os = "redox"))]
@@ -310,7 +324,7 @@ fn write_flags() -> epoll::EventFlags {
 
 /// A list of reported I/O events.
 pub struct Events {
-    list: epoll::EventVec,
+    list: Vec<epoll::Event>,
 }
 
 unsafe impl Send for Events {}
@@ -319,7 +333,7 @@ impl Events {
     /// Creates an empty list.
     pub fn with_capacity(cap: usize) -> Events {
         Events {
-            list: epoll::EventVec::with_capacity(cap),
+            list: Vec::with_capacity(cap),
         }
     }
 
@@ -433,14 +447,16 @@ impl Notifier {
                 // Try to create an eventfd.
                 match eventfd(0, EventfdFlags::CLOEXEC | EventfdFlags::NONBLOCK) {
                     Ok(fd) => {
+                        #[cfg(feature = "tracing")]
                         tracing::trace!("created eventfd for notifier");
                         return Ok(Notifier::EventFd(fd));
                     }
 
-                    Err(err) => {
+                    Err(_err) => {
+                        #[cfg(feature = "tracing")]
                         tracing::warn!(
                             "eventfd() failed with error ({}), falling back to pipe",
-                            err
+                            _err
                         );
                     }
                 }

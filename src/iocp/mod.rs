@@ -3,7 +3,7 @@
 //! I/O Completion Ports is a completion-based API rather than a polling-based API, like
 //! epoll or kqueue. Therefore, we have to adapt the IOCP API to the crate's API.
 //!
-//! WinSock is powered by the Auxillary Function Driver (AFD) subsystem, which can be
+//! WinSock is powered by the Auxiliary Function Driver (AFD) subsystem, which can be
 //! accessed directly by using unstable `ntdll` functions. AFD exposes features that are not
 //! available through the normal WinSock interface, such as IOCTL_AFD_POLL. This function is
 //! similar to the exposed `WSAPoll` method. However, once the targeted socket is "ready",
@@ -13,7 +13,7 @@
 //! to the one Windows expects. When a device is added to the `Poller`, an IOCTL_AFD_POLL
 //! operation is started and queued to the IOCP. To modify a currently registered device
 //! (e.g. with `modify()` or `delete()`), the ongoing POLL is cancelled and then restarted
-//! with new parameters. Whn the POLL eventually completes, the packet is posted to the IOCP.
+//! with new parameters. When the POLL eventually completes, the packet is posted to the IOCP.
 //! From here it's a simple matter of using `GetQueuedCompletionStatusEx` to read the packets
 //! from the IOCP and react accordingly. Notifying the poller is trivial, because we can
 //! simply post a packet to the IOCP to wake it up.
@@ -31,9 +31,7 @@ mod port;
 use afd::{base_socket, Afd, AfdPollInfo, AfdPollMask, HasAfdInfo, IoStatusBlock};
 use port::{IoCompletionPort, OverlappedEntry};
 
-use windows_sys::Win32::Foundation::{
-    BOOLEAN, ERROR_INVALID_HANDLE, ERROR_IO_PENDING, STATUS_CANCELLED,
-};
+use windows_sys::Win32::Foundation::{ERROR_INVALID_HANDLE, ERROR_IO_PENDING, STATUS_CANCELLED};
 use windows_sys::Win32::System::Threading::{
     RegisterWaitForSingleObject, UnregisterWait, INFINITE, WT_EXECUTELONGFUNCTION,
     WT_EXECUTEONLYONCE,
@@ -136,9 +134,11 @@ impl Poller {
         })?;
 
         let port = IoCompletionPort::new(0)?;
+        #[cfg(feature = "tracing")]
         tracing::trace!(handle = ?port, "new");
 
         Ok(Poller {
+            #[allow(clippy::arc_with_non_send_sync)]
             port: Arc::new(port),
             afd: Mutex::new(vec![]),
             sources: RwLock::new(HashMap::new()),
@@ -175,12 +175,14 @@ impl Poller {
         interest: Event,
         mode: PollMode,
     ) -> io::Result<()> {
+        #[cfg(feature = "tracing")]
         let span = tracing::trace_span!(
             "add",
             handle = ?self.port,
             sock = ?socket,
             ev = ?interest,
         );
+        #[cfg(feature = "tracing")]
         let _enter = span.enter();
 
         // We don't support edge-triggered events.
@@ -238,12 +240,14 @@ impl Poller {
         interest: Event,
         mode: PollMode,
     ) -> io::Result<()> {
+        #[cfg(feature = "tracing")]
         let span = tracing::trace_span!(
             "modify",
             handle = ?self.port,
             sock = ?socket,
             ev = ?interest,
         );
+        #[cfg(feature = "tracing")]
         let _enter = span.enter();
 
         // We don't support edge-triggered events.
@@ -275,11 +279,13 @@ impl Poller {
 
     /// Delete a source from the poller.
     pub(super) fn delete(&self, socket: BorrowedSocket<'_>) -> io::Result<()> {
+        #[cfg(feature = "tracing")]
         let span = tracing::trace_span!(
             "remove",
             handle = ?self.port,
             sock = ?socket,
         );
+        #[cfg(feature = "tracing")]
         let _enter = span.enter();
 
         // Remove the source from our associative map.
@@ -289,8 +295,8 @@ impl Poller {
             match sources.remove(&socket.as_raw_socket()) {
                 Some(s) => s,
                 None => {
-                    // If the source has already been removed, then we can just return.
-                    return Ok(());
+                    // If the source wasn't recognized then we must return a NotFound error.
+                    return Err(io::ErrorKind::NotFound.into());
                 }
             }
         };
@@ -307,6 +313,7 @@ impl Poller {
         interest: Event,
         mode: PollMode,
     ) -> io::Result<()> {
+        #[cfg(feature = "tracing")]
         tracing::trace!(
             "add_waitable: handle={:?}, waitable={:p}, ev={:?}",
             self.port,
@@ -363,6 +370,7 @@ impl Poller {
         interest: Event,
         mode: PollMode,
     ) -> io::Result<()> {
+        #[cfg(feature = "tracing")]
         tracing::trace!(
             "modify_waitable: handle={:?}, waitable={:p}, ev={:?}",
             self.port,
@@ -398,6 +406,7 @@ impl Poller {
 
     /// Delete a waitable from the poller.
     pub(super) fn remove_waitable(&self, waitable: RawHandle) -> io::Result<()> {
+        #[cfg(feature = "tracing")]
         tracing::trace!("remove: handle={:?}, waitable={:p}", self.port, waitable);
 
         // Get a reference to the source.
@@ -419,18 +428,21 @@ impl Poller {
     }
 
     /// Wait for events.
-    pub(super) fn wait(&self, events: &mut Events, timeout: Option<Duration>) -> io::Result<()> {
+    pub(super) fn wait_deadline(
+        &self,
+        events: &mut Events,
+        deadline: Option<Instant>,
+    ) -> io::Result<()> {
+        #[cfg(feature = "tracing")]
         let span = tracing::trace_span!(
             "wait",
             handle = ?self.port,
-            ?timeout,
+            ?deadline,
         );
+        #[cfg(feature = "tracing")]
         let _enter = span.enter();
 
-        // Make sure we have a consistent timeout.
-        let deadline = timeout.and_then(|timeout| Instant::now().checked_add(timeout));
         let mut notified = false;
-        events.packets.clear();
 
         loop {
             let mut new_events = 0;
@@ -452,10 +464,11 @@ impl Poller {
             let timeout = deadline.map(|t| t.saturating_duration_since(Instant::now()));
 
             // Wait for I/O events.
-            let len = self.port.wait(&mut events.completions, timeout)?;
+            let _len = self.port.wait(&mut events.completions, timeout)?;
+            #[cfg(feature = "tracing")]
             tracing::trace!(
                 handle = ?self.port,
-                res = ?len,
+                res = ?_len,
                 "new events");
 
             // We are no longer polling.
@@ -479,12 +492,12 @@ impl Poller {
             }
 
             // Break if there was a notification or at least one event, or if deadline is reached.
-            let timeout_is_empty =
-                timeout.map_or(false, |t| t.as_secs() == 0 && t.subsec_nanos() == 0);
+            let timeout_is_empty = timeout.is_some_and(|t| t.is_zero());
             if notified || new_events > 0 || timeout_is_empty {
                 break;
             }
 
+            #[cfg(feature = "tracing")]
             tracing::trace!("wait: no events found, re-entering polling loop");
         }
 
@@ -532,7 +545,7 @@ impl Poller {
             self.pending_updates.capacity().unwrap()
         } else {
             // Less of a concern if we're draining the queue prior to a poll operation.
-            std::usize::MAX
+            usize::MAX
         };
 
         self.pending_updates
@@ -582,6 +595,7 @@ impl Poller {
         }
 
         // No available handles, create a new AFD instance.
+        #[allow(clippy::arc_with_non_send_sync)]
         let afd = Arc::new(Afd::new()?);
 
         // Register the AFD instance with the I/O completion port.
@@ -861,8 +875,9 @@ impl PacketUnwrapped {
 
                         // Push this packet.
                         drop(handle);
-                        if let Err(e) = iocp.post(0, 0, packet) {
-                            tracing::error!("failed to post completion packet: {}", e);
+                        if let Err(_e) = iocp.post(0, 0, packet) {
+                            #[cfg(feature = "tracing")]
+                            tracing::error!("failed to post completion packet: {}", _e);
                         }
                     },
                     None,
@@ -1225,7 +1240,7 @@ impl WaitHandle {
 
         unsafe extern "system" fn wait_callback<F: FnOnce() + Send + Sync + 'static>(
             context: *mut c_void,
-            _timer_fired: BOOLEAN,
+            _timer_fired: bool,
         ) {
             let _guard = AbortOnDrop;
             let callback = Box::from_raw(context as *mut F);

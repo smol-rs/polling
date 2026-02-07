@@ -12,7 +12,7 @@ use std::os::windows::prelude::{AsRawHandle, RawHandle, RawSocket};
 use std::pin::Pin;
 use std::ptr;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Once;
+use std::sync::OnceLock;
 
 use windows_sys::Wdk::Foundation::OBJECT_ATTRIBUTES;
 use windows_sys::Wdk::Storage::FileSystem::FILE_OPEN;
@@ -43,7 +43,6 @@ pub(super) struct AfdPollInfo {
     handles: [AfdPollHandleInfo; 1],
 }
 
-#[derive(Default)]
 #[repr(C)]
 struct AfdPollHandleInfo {
     /// The handle to poll.
@@ -54,6 +53,16 @@ struct AfdPollHandleInfo {
 
     /// The status of the poll.
     status: NTSTATUS,
+}
+
+impl Default for AfdPollHandleInfo {
+    fn default() -> Self {
+        Self {
+            handle: ptr::null_mut(),
+            events: Default::default(),
+            status: Default::default(),
+        }
+    }
 }
 
 impl AfdPollInfo {
@@ -121,7 +130,7 @@ impl fmt::Debug for AfdPollMask {
                 }
 
                 first = false;
-                write!(f, "{}", name)?;
+                write!(f, "{name}")?;
             }
         }
 
@@ -181,6 +190,7 @@ macro_rules! define_ntdll_import {
         impl NtdllImports {
             unsafe fn load(ntdll: HMODULE) -> io::Result<Self> {
                 $(
+                    #[allow(clippy::missing_transmute_annotations)]
                     let $name = {
                         const NAME: &str = concat!(stringify!($name), "\0");
                         let addr = GetProcAddress(ntdll, NAME.as_ptr() as *const _);
@@ -188,6 +198,7 @@ macro_rules! define_ntdll_import {
                         let addr = match addr {
                             Some(addr) => addr,
                             None => {
+                                #[cfg(feature = "tracing")]
                                 tracing::error!("Failed to load ntdll function {}", NAME);
                                 return Err(io::Error::last_os_error());
                             },
@@ -282,13 +293,14 @@ impl NtdllImports {
             s!('l'),
             s!('\0'),
         ];
-        static NTDLL_IMPORTS: OnceCell<io::Result<NtdllImports>> = OnceCell::new();
+        static NTDLL_IMPORTS: OnceLock<io::Result<NtdllImports>> = OnceLock::new();
 
         NTDLL_IMPORTS
             .get_or_init(|| unsafe {
                 let ntdll = GetModuleHandleW(NTDLL_NAME.as_ptr() as *const _);
 
-                if ntdll == 0 {
+                if ntdll.is_null() {
+                    #[cfg(feature = "tracing")]
                     tracing::error!("Failed to load ntdll.dll");
                     return Err(io::Error::last_os_error());
                 }
@@ -320,7 +332,7 @@ impl<T> fmt::Debug for Afd<T> {
 
         impl fmt::Debug for WriteAsHex {
             fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                write!(f, "{:010x}", self.0)
+                write!(f, "{:010x}", self.0 as usize)
             }
         }
 
@@ -385,7 +397,7 @@ where
         };
         let mut device_attributes = OBJECT_ATTRIBUTES {
             Length: size_of::<OBJECT_ATTRIBUTES>() as u32,
-            RootDirectory: 0,
+            RootDirectory: ptr::null_mut(),
             ObjectName: &mut device_name,
             Attributes: 0,
             SecurityDescriptor: ptr::null_mut(),
@@ -450,7 +462,7 @@ where
             // Initialize the AFD poll info.
             (*poll_info).exclusive = false.into();
             (*poll_info).handle_count = 1;
-            (*poll_info).timeout = std::i64::MAX;
+            (*poll_info).timeout = i64::MAX;
             (*poll_info).handles[0].handle = base_socket as HANDLE;
             (*poll_info).handles[0].status = 0;
             (*poll_info).handles[0].events = afd_events;
@@ -468,7 +480,7 @@ where
         let result = unsafe {
             ntdll.NtDeviceIoControlFile(
                 self.handle,
-                0,
+                ptr::null_mut(),
                 ptr::null_mut(),
                 iosb.cast(),
                 iosb.cast(),
@@ -523,43 +535,8 @@ where
     }
 }
 
-/// A one-time initialization cell.
-struct OnceCell<T> {
-    /// The value.
-    value: UnsafeCell<MaybeUninit<T>>,
-
-    /// The one-time initialization.
-    once: Once,
-}
-
-unsafe impl<T: Send + Sync> Send for OnceCell<T> {}
-unsafe impl<T: Send + Sync> Sync for OnceCell<T> {}
-
-impl<T> OnceCell<T> {
-    /// Creates a new `OnceCell`.
-    pub const fn new() -> Self {
-        OnceCell {
-            value: UnsafeCell::new(MaybeUninit::uninit()),
-            once: Once::new(),
-        }
-    }
-
-    /// Gets the value or initializes it.
-    pub fn get_or_init<F>(&self, f: F) -> &T
-    where
-        F: FnOnce() -> T,
-    {
-        self.once.call_once(|| unsafe {
-            let value = f();
-            *self.value.get() = MaybeUninit::new(value);
-        });
-
-        unsafe { &*self.value.get().cast() }
-    }
-}
-
 pin_project_lite::pin_project! {
-    /// An I/O status block paired with some auxillary data.
+    /// An I/O status block paired with some auxiliary data.
     #[repr(C)]
     pub(super) struct IoStatusBlock<T> {
         // The I/O status block.
@@ -568,7 +545,7 @@ pin_project_lite::pin_project! {
         // Whether or not the block is in use.
         in_use: AtomicBool,
 
-        // The auxillary data.
+        // The auxiliary data.
         #[pin]
         data: T,
 

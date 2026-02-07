@@ -3,10 +3,10 @@ name = "polling"
 # When publishing a new version:
 # - Update CHANGELOG.md
 # - Create "v3.x.y" git tag
-version = "3.7.1"
+version = "3.11.0"
 authors = ["Stjepan Glavina <stjepang@gmail.com>", "John Nunley <dev@notgull.net>"]
 edition = "2021"
-rust-version = "1.63"
+rust-version = "1.71"
 description = "Portable interface to epoll, kqueue, event ports, and IOCP"
 license = "Apache-2.0 OR MIT"
 repository = "https://github.com/smol-rs/polling"
@@ -22,10 +22,14 @@ unexpected_cfgs = { level = "warn", check-cfg = ['cfg(polling_test_poll_backend)
 
 [dependencies]
 cfg-if = "1"
-tracing = { version = "0.1.37", default-features = false }
+
+[dependencies.tracing]
+version = "0.1.37"
+default-features = false
+optional = true
 
 [target.'cfg(any(unix, target_os = "fuchsia", target_os = "vxworks"))'.dependencies.rustix]
-version = "0.38.31"
+version = "1.0.5"
 features = ["event", "fs", "pipe", "process", "std", "time"]
 default-features = false
 
@@ -34,7 +38,7 @@ concurrent-queue = "2.2.0"
 pin-project-lite = "0.2.9"
 
 [target.'cfg(windows)'.dependencies.windows-sys]
-version = "0.52"
+version = "0.61"
 features = [
     "Wdk_Foundation",
     "Wdk_Storage_FileSystem",
@@ -49,12 +53,12 @@ features = [
 ]
 
 [target.'cfg(target_os = "hermit")'.dependencies.hermit-abi]
-version = "0.3.9"
+version = "0.5.0"
 
 [dev-dependencies]
 easy-parallel = "3.1.0"
 fastrand = "2.0.0"
-socket2 = "0.5.5"
+socket2 = "0.6.0"
 
 [target.'cfg(unix)'.dev-dependencies]
 libc = "0.2"

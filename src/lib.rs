@@ -2,7 +2,7 @@
 //!
 //! Supported platforms:
 //! - [epoll](https://en.wikipedia.org/wiki/Epoll): Linux, Android, RedoxOS
-//! - [kqueue](https://en.wikipedia.org/wiki/Kqueue): macOS, iOS, tvOS, watchOS, FreeBSD, NetBSD, OpenBSD,
+//! - [kqueue](https://en.wikipedia.org/wiki/Kqueue): macOS, iOS, tvOS, watchOS, visionOS, FreeBSD, NetBSD, OpenBSD,
 //!   DragonFly BSD
 //! - [event ports](https://illumos.org/man/port_create): illumos, Solaris
 //! - [poll](https://en.wikipedia.org/wiki/Poll_(Unix)): VxWorks, Fuchsia, HermitOS, other Unix systems
@@ -94,10 +94,7 @@ cfg_if! {
         mod port;
         use port as sys;
     } else if #[cfg(any(
-        target_os = "macos",
-        target_os = "ios",
-        target_os = "tvos",
-        target_os = "watchos",
+        target_vendor = "apple",
         target_os = "freebsd",
         target_os = "netbsd",
         target_os = "openbsd",
@@ -673,6 +670,10 @@ impl Poller {
     /// Unlike [`add()`][`Poller::add()`], this method only removes the file descriptor or
     /// socket from the poller without putting it back into blocking mode.
     ///
+    /// If the given source is not known to the poller then this is guaranteed to fail
+    /// with [`std::io::ErrorKind::NotFound`]. That particular error kind is never
+    /// returned in any other situation.
+    ///
     /// # Examples
     ///
     /// ```
@@ -732,19 +733,29 @@ impl Poller {
     /// # std::io::Result::Ok(())
     /// ```
     pub fn wait(&self, events: &mut Events, timeout: Option<Duration>) -> io::Result<usize> {
-        let span = tracing::trace_span!("Poller::wait", ?timeout);
+        self.wait_impl(
+            events,
+            timeout.and_then(|timeout| Instant::now().checked_add(timeout)),
+        )
+    }
+
+    /// Waits for at least one I/O event and returns the number of new events, with a deadline.
+    ///
+    /// See [`wait()`][`Poller::wait()`] for more details.
+    pub fn wait_deadline(&self, events: &mut Events, deadline: Instant) -> io::Result<usize> {
+        self.wait_impl(events, Some(deadline))
+    }
+
+    fn wait_impl(&self, events: &mut Events, deadline: Option<Instant>) -> io::Result<usize> {
+        #[cfg(feature = "tracing")]
+        let span = tracing::trace_span!("Poller::wait", ?deadline);
+        #[cfg(feature = "tracing")]
         let _enter = span.enter();
 
         if let Ok(_lock) = self.lock.try_lock() {
-            let deadline = timeout.and_then(|timeout| Instant::now().checked_add(timeout));
-
             loop {
-                // Figure out how long to wait for.
-                let timeout =
-                    deadline.map(|deadline| deadline.saturating_duration_since(Instant::now()));
-
                 // Wait for I/O events.
-                if let Err(e) = self.poller.wait(&mut events.events, timeout) {
+                if let Err(e) = self.poller.wait_deadline(&mut events.events, deadline) {
                     // If the wait was interrupted by a signal, clear events and try again.
                     if e.kind() == io::ErrorKind::Interrupted {
                         events.clear();
@@ -761,6 +772,7 @@ impl Poller {
                 return Ok(events.len());
             }
         } else {
+            #[cfg(feature = "tracing")]
             tracing::trace!("wait: skipping because another thread is already waiting on I/O");
             Ok(0)
         }
@@ -789,7 +801,9 @@ impl Poller {
     /// # std::io::Result::Ok(())
     /// ```
     pub fn notify(&self) -> io::Result<()> {
+        #[cfg(feature = "tracing")]
         let span = tracing::trace_span!("Poller::notify");
+        #[cfg(feature = "tracing")]
         let _enter = span.enter();
 
         if self
@@ -966,12 +980,10 @@ impl fmt::Debug for Events {
     any(
         target_os = "linux",
         target_os = "android",
+        target_os = "redox",
         target_os = "illumos",
         target_os = "solaris",
-        target_os = "macos",
-        target_os = "ios",
-        target_os = "tvos",
-        target_os = "watchos",
+        target_vendor = "apple",
         target_os = "freebsd",
         target_os = "netbsd",
         target_os = "openbsd",
@@ -984,12 +996,10 @@ impl fmt::Debug for Events {
     doc(cfg(any(
         target_os = "linux",
         target_os = "android",
+        target_os = "redox",
         target_os = "illumos",
         target_os = "solaris",
-        target_os = "macos",
-        target_os = "ios",
-        target_os = "tvos",
-        target_os = "watchos",
+        target_vendor = "apple",
         target_os = "freebsd",
         target_os = "netbsd",
         target_os = "openbsd",

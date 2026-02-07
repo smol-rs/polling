@@ -2,9 +2,10 @@
 
 use std::io;
 use std::os::unix::io::{AsFd, AsRawFd, BorrowedFd, RawFd};
-use std::time::Duration;
+use std::time::Instant;
 
-use rustix::event::{port, PollFlags};
+use rustix::buffer::spare_capacity;
+use rustix::event::{port, PollFlags, Timespec};
 use rustix::fd::OwnedFd;
 use rustix::io::{fcntl_getfd, fcntl_setfd, FdFlags};
 
@@ -20,10 +21,11 @@ pub struct Poller {
 impl Poller {
     /// Creates a new poller.
     pub fn new() -> io::Result<Poller> {
-        let port_fd = port::port_create()?;
+        let port_fd = port::create()?;
         let flags = fcntl_getfd(&port_fd)?;
         fcntl_setfd(&port_fd, flags | FdFlags::CLOEXEC)?;
 
+        #[cfg(feature = "tracing")]
         tracing::trace!(
             port_fd = ?port_fd.as_raw_fd(),
             "new",
@@ -54,12 +56,14 @@ impl Poller {
 
     /// Modifies an existing file descriptor.
     pub fn modify(&self, fd: BorrowedFd<'_>, ev: Event, mode: PollMode) -> io::Result<()> {
+        #[cfg(feature = "tracing")]
         let span = tracing::trace_span!(
             "modify",
             port_fd = ?self.port_fd.as_raw_fd(),
             ?fd,
             ?ev,
         );
+        #[cfg(feature = "tracing")]
         let _enter = span.enter();
 
         let mut flags = PollFlags::empty();
@@ -77,7 +81,7 @@ impl Poller {
         }
 
         unsafe {
-            port::port_associate_fd(&self.port_fd, fd, flags, ev.key as _)?;
+            port::associate_fd(&self.port_fd, fd, flags, ev.key as _)?;
         }
 
         Ok(())
@@ -85,35 +89,46 @@ impl Poller {
 
     /// Deletes a file descriptor.
     pub fn delete(&self, fd: BorrowedFd<'_>) -> io::Result<()> {
+        #[cfg(feature = "tracing")]
         let span = tracing::trace_span!(
             "delete",
             port_fd = ?self.port_fd.as_raw_fd(),
             ?fd,
         );
+        #[cfg(feature = "tracing")]
         let _enter = span.enter();
 
-        let result = unsafe { port::port_dissociate_fd(&self.port_fd, fd) };
-        if let Err(e) = result {
-            match e {
-                rustix::io::Errno::NOENT => return Ok(()),
-                _ => return Err(e.into()),
-            }
-        }
-
+        unsafe { port::dissociate_fd(&self.port_fd, fd) }?;
         Ok(())
     }
 
-    /// Waits for I/O events with an optional timeout.
-    pub fn wait(&self, events: &mut Events, timeout: Option<Duration>) -> io::Result<()> {
+    /// Waits for I/O events with an optional deadline.
+    pub fn wait_deadline(&self, events: &mut Events, deadline: Option<Instant>) -> io::Result<()> {
+        #[cfg(feature = "tracing")]
         let span = tracing::trace_span!(
             "wait",
             port_fd = ?self.port_fd.as_raw_fd(),
-            ?timeout,
+            ?deadline,
         );
+        #[cfg(feature = "tracing")]
         let _enter = span.enter();
 
+        let timeout = deadline.map(|deadline| deadline.saturating_duration_since(Instant::now()));
+
+        // Timeout for `port::getn`. In case of overflow, use no timeout.
+        let timeout = match timeout {
+            Some(t) => Timespec::try_from(t).ok(),
+            None => None,
+        };
+
         // Wait for I/O events.
-        let res = port::port_getn(&self.port_fd, &mut events.list, 1, timeout);
+        let res = port::getn(
+            &self.port_fd,
+            spare_capacity(&mut events.list),
+            1,
+            timeout.as_ref(),
+        );
+        #[cfg(feature = "tracing")]
         tracing::trace!(
             port_fd = ?self.port_fd,
             res = ?events.list.len(),
@@ -137,14 +152,16 @@ impl Poller {
     pub fn notify(&self) -> io::Result<()> {
         const PORT_SOURCE_USER: i32 = 3;
 
+        #[cfg(feature = "tracing")]
         let span = tracing::trace_span!(
             "notify",
             port_fd = ?self.port_fd.as_raw_fd(),
         );
+        #[cfg(feature = "tracing")]
         let _enter = span.enter();
 
         // Use port_send to send a notification to the port.
-        port::port_send(&self.port_fd, PORT_SOURCE_USER, crate::NOTIFY_KEY as _)?;
+        port::send(&self.port_fd, PORT_SOURCE_USER, crate::NOTIFY_KEY as _)?;
 
         Ok(())
     }
