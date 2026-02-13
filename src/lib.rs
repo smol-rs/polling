@@ -133,6 +133,8 @@ pub struct Event {
     pub readable: bool,
     /// Can it do a write operation without blocking?
     pub writable: bool,
+    /// Has the io operation completed?
+    pub completed: bool,
     /// System-specific event data.
     extra: sys::EventExtra,
 }
@@ -183,45 +185,50 @@ pub enum PollMode {
 
 impl Event {
     /// Create a new event.
-    pub const fn new(key: usize, readable: bool, writable: bool) -> Event {
+    pub const fn new(key: usize, readable: bool, writable: bool, completed: bool) -> Event {
         Event {
             key,
             readable,
             writable,
+            completed,
             extra: sys::EventExtra::empty(),
         }
     }
 
     /// All kinds of events (readable and writable).
     ///
-    /// Equivalent to: `Event::new(key, true, true)`
+    /// Equivalent to: `Event::new(key, true, true, false)`
     #[inline]
     pub const fn all(key: usize) -> Event {
-        Event::new(key, true, true)
+        Event::new(key, true, true, false)
     }
 
     /// Only the readable event.
     ///
-    /// Equivalent to: `Event::new(key, true, false)`
+    /// Equivalent to: `Event::new(key, true, false, false)`
     #[inline]
     pub const fn readable(key: usize) -> Event {
-        Event::new(key, true, false)
+        Event::new(key, true, false, false)
     }
 
     /// Only the writable event.
     ///
-    /// Equivalent to: `Event::new(key, false, true)`
+    /// Equivalent to: `Event::new(key, false, true, false)`
     #[inline]
-    pub const fn writable(key: usize) -> Event {
-        Event::new(key, false, true)
-    }
+    pub const fn writable(key: usize) -> Event { Event::new(key, false, true, false) }
+
+    /// Only the completed event.
+    ///
+    /// Equivalent to: `Event::new(key, false, false, true)`
+    #[inline]
+    pub const fn completed(key: usize) -> Event { Event::new(key, false, false, true) }
 
     /// No events.
     ///
     /// Equivalent to: `Event::new(key, false, false)`
     #[inline]
     pub const fn none(key: usize) -> Event {
-        Event::new(key, false, false)
+        Event::new(key, false, false, false)
     }
 
     /// Add interruption events to this interest.
@@ -334,6 +341,26 @@ impl Event {
         self.extra.is_pri()
     }
 
+    /// The number of transferred bytes.
+    ///
+    /// This is only supported on the following platforms:
+    ///
+    /// - IOCP
+    ///
+    /// On other platforms, this will always return 0.
+    #[inline]
+    pub fn transferred_bytes(&self) -> usize { self.extra.transferred_bytes() }
+
+    /// Set the number of transferred bytes.
+    ///
+    /// This is only supported on the following platforms:
+    ///
+    /// - IOCP
+    ///
+    /// On other platforms, this function is a no-op.
+    #[inline]
+    pub(crate) fn set_transferred_bytes(&mut self, bytes: usize) { self.extra.set_transferred_bytes(bytes); }
+
     /// Tells if this event is the result of a connection failure.
     ///
     /// This function checks if a TCP connection has failed. It corresponds to the `EPOLLERR`  or `EPOLLHUP` event in Linux
@@ -351,7 +378,7 @@ impl Event {
     ///     let socket = socket2::Socket::new(socket2::Domain::IPV4, Type::STREAM, None)?;
     ///     let poller = polling::Poller::new()?;
     ///     unsafe {
-    ///         poller.add(&socket, Event::new(0, true, true))?;
+    ///         poller.add(&socket, Event::new(0, true, true, false))?;
     ///     }
     ///     let addr = net::SocketAddr::new(net::Ipv4Addr::LOCALHOST.into(), 8080);
     ///     socket.set_nonblocking(true)?;

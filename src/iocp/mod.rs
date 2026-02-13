@@ -479,10 +479,11 @@ impl Poller {
 
             // Process all of the events.
             for entry in events.completions.drain(..) {
+                let transferred_bytes = entry.transferred_bytes();
                 let packet = entry.into_packet();
 
                 // Feed the event into the packet.
-                match packet.feed_event(self)? {
+                match packet.feed_event(self, transferred_bytes)? {
                     FeedEventResult::NoEvent => {}
                     FeedEventResult::Event(event) => {
                         events.packets.push(event);
@@ -664,6 +665,8 @@ impl Events {
 pub struct EventExtra {
     /// Flags associated with this event.
     flags: AfdPollMask,
+    /// Number of bytes transferred
+    transferred_bytes: usize,
 }
 
 impl EventExtra {
@@ -672,6 +675,7 @@ impl EventExtra {
     pub const fn empty() -> EventExtra {
         EventExtra {
             flags: AfdPollMask::empty(),
+            transferred_bytes: 0,
         }
     }
 
@@ -692,7 +696,7 @@ impl EventExtra {
     pub fn set_hup(&mut self, active: bool) {
         self.flags.set(AfdPollMask::ABORT, active);
     }
-
+    
     /// Set up a listener for PRI events.
     #[inline]
     pub fn set_pri(&mut self, active: bool) {
@@ -710,6 +714,15 @@ impl EventExtra {
     pub fn is_err(&self) -> Option<bool> {
         Some(self.flags.intersects(AfdPollMask::CONNECT_FAIL))
     }
+
+    /// Set the number of transferred bytes
+    #[inline]
+    pub fn set_transferred_bytes(&mut self, transferred_bytes: usize) { self.transferred_bytes = transferred_bytes; }
+    
+    /// Get the number of transferred bytes
+    #[inline]
+    pub fn transferred_bytes(&self) -> usize { self.transferred_bytes }
+
 }
 
 /// The type of our completion packet.
@@ -944,14 +957,19 @@ impl PacketUnwrapped {
     ///
     /// This indicates that this packet was indicated as "ready" by the IOCP and needs to be
     /// processed.
-    fn feed_event(self: Pin<Arc<Self>>, poller: &Poller) -> io::Result<FeedEventResult> {
+    fn feed_event(
+        self: Pin<Arc<Self>>,
+        poller: &Poller,
+        transferred_bytes: u32) -> io::Result<FeedEventResult> {
         let inner = self.as_ref().data().project_ref();
 
         let (afd_info, socket) = match inner {
             PacketInnerProj::Socket { packet, socket } => (packet, socket),
             PacketInnerProj::Custom { event } => {
+                let mut event = event.clone();
+                event.set_transferred_bytes(transferred_bytes as usize);
                 // This is a custom event.
-                return Ok(FeedEventResult::Event(*event));
+                return Ok(FeedEventResult::Event(event));
             }
             PacketInnerProj::Wakeup { .. } => {
                 // The poller was notified.
@@ -987,10 +1005,10 @@ impl PacketUnwrapped {
 
         unsafe {
             // SAFETY: The packet is not in transit.
-            let iosb = &mut *self.as_ref().iosb().get();
+            let iosb = &mut *self.as_ref().padded_io_status_block().get();
 
             // Check the status.
-            match iosb.Anonymous.Status {
+            match iosb.io_status_block.Anonymous.Status {
                 STATUS_CANCELLED => {
                     // Poll request was cancelled.
                 }

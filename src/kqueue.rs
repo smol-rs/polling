@@ -411,6 +411,14 @@ impl EventExtra {
     pub fn is_err(&self) -> Option<bool> {
         None
     }
+
+    #[inline]
+    pub fn set_transferred_bytes(&mut self, _transferred_bytes: usize) {
+        // No-op.
+    }
+
+    #[inline]
+    pub fn transferred_bytes(&self) -> usize { 0 }
 }
 
 pub(crate) fn mode_to_flags(mode: PollMode) -> kqueue::EventFlags {

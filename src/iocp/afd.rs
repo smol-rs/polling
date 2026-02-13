@@ -25,7 +25,7 @@ use windows_sys::Win32::Networking::WinSock::{
 };
 use windows_sys::Win32::Storage::FileSystem::{FILE_SHARE_READ, FILE_SHARE_WRITE, SYNCHRONIZE};
 use windows_sys::Win32::System::LibraryLoader::{GetModuleHandleW, GetProcAddress};
-use windows_sys::Win32::System::IO::IO_STATUS_BLOCK;
+use windows_sys::Win32::System::IO::{IO_STATUS_BLOCK, OVERLAPPED};
 
 #[derive(Default)]
 #[repr(C)]
@@ -535,12 +535,27 @@ where
     }
 }
 
+// The OVERLAPPED struct is larger than the IO_STATUS_BLOCK struct.
+// This way it is possible to use the memory as either/or without
+// the risk of reading or writing out-of-bounds.
+#[repr(C)]
+pub(crate) union PaddedIOStatusBlock {
+    pub(crate) io_status_block: IO_STATUS_BLOCK,
+    pub(crate) overlapped: OVERLAPPED,
+}
+
+impl Default for PaddedIOStatusBlock {
+    fn default() -> Self {
+        unsafe { core::mem::zeroed() }
+    }
+}
+
 pin_project_lite::pin_project! {
     /// An I/O status block paired with some auxiliary data.
     #[repr(C)]
     pub(crate) struct IoStatusBlock<T> {
         // The I/O status block.
-        iosb: UnsafeCell<IO_STATUS_BLOCK>,
+        padded_io_status_block: UnsafeCell<PaddedIOStatusBlock>,
 
         // Whether or not the block is in use.
         in_use: AtomicBool,
@@ -571,7 +586,7 @@ unsafe impl<T: Sync> Sync for IoStatusBlock<T> {}
 impl<T> From<T> for IoStatusBlock<T> {
     fn from(data: T) -> Self {
         Self {
-            iosb: UnsafeCell::new(unsafe { std::mem::zeroed() }),
+            padded_io_status_block: UnsafeCell::new(unsafe { std::mem::zeroed() }),
             in_use: AtomicBool::new(false),
             data,
             _marker: PhantomPinned,
@@ -580,8 +595,8 @@ impl<T> From<T> for IoStatusBlock<T> {
 }
 
 impl<T> IoStatusBlock<T> {
-    pub(super) fn iosb(self: Pin<&Self>) -> &UnsafeCell<IO_STATUS_BLOCK> {
-        self.project_ref().iosb
+    pub(super) fn padded_io_status_block(self: Pin<&Self>) -> &UnsafeCell<PaddedIOStatusBlock> {
+        self.project_ref().padded_io_status_block
     }
 
     pub(super) fn data(self: Pin<&Self>) -> Pin<&T> {
