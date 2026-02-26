@@ -31,12 +31,26 @@ impl CompletionPacket {
     /// This pointer can be used as an `OVERLAPPED` block in Windows APIs. Calling this function
     /// marks the block as "in use". Trying to call this function again before the operation is
     /// indicated as complete by the poller will result in a panic.
-    pub fn as_overlapped(&self) -> *mut () {
+    pub fn as_overlapped_ptr(&self) -> *mut () {
         if !self.0.as_ref().get().try_lock() {
             panic!("completion packet is already in use");
         }
+        // The key point here is to increment the Arc reference count by cloning it.
+        // Otherwise, the Arc<> will be dropped in the method Poller::wait_deadline
+        // after it is re-created via from_raw() once the overlapped io has completed.
         unsafe {
             Arc::into_raw(Pin::into_inner_unchecked(self.0.clone())) as *mut ()
+        }
+    }
+
+    /// Get the number of transferred bytes after an OVERLAPPED IO has finished.
+    pub fn transferred_bytes(&self) -> usize {
+        if !self.0.as_ref().get().try_lock() {
+            panic!("completion packet is currently in use");
+        }
+
+        unsafe {
+            (*self.0.as_ref().padded_io_status_block().get()).overlapped.InternalHigh
         }
     }
 

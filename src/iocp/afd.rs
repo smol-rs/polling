@@ -595,7 +595,7 @@ impl<T> From<T> for IoStatusBlock<T> {
 }
 
 impl<T> IoStatusBlock<T> {
-    pub(super) fn padded_io_status_block(self: Pin<&Self>) -> &UnsafeCell<PaddedIOStatusBlock> {
+    pub(crate) fn padded_io_status_block(self: Pin<&Self>) -> &UnsafeCell<PaddedIOStatusBlock> {
         self.project_ref().padded_io_status_block
     }
 

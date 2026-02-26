@@ -408,14 +408,6 @@ impl EventExtra {
     pub fn is_err(&self) -> Option<bool> {
         Some(self.flags.contains(epoll::EventFlags::ERR))
     }
-
-    #[inline]
-    pub fn set_transferred_bytes(&mut self, _transferred_bytes: usize) {
-        // No-op.
-    }
-
-    #[inline]
-    pub fn transferred_bytes(&self) -> usize { 0 }
 }
 
 /// The notifier for Linux.

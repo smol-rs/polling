@@ -279,8 +279,6 @@ impl<T: CompletionHandle> OverlappedEntry<T> {
         packet
     }
 
-    pub(super) fn transferred_bytes(&self) -> u32 { self.entry.dwNumberOfBytesTransferred }
-    
     /// Get the packet reference that this entry refers to.
     ///
     /// # Safety

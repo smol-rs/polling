@@ -67,7 +67,7 @@ fn win32_file_io() {
 
     while len > 0 {
         // Begin to write.
-        let ptr = write_packet.as_overlapped().cast();
+        let ptr = write_packet.as_overlapped_ptr().cast();
         unsafe {
             if wfs::WriteFile(
                 file_handle.as_raw_handle() as _,
@@ -90,11 +90,10 @@ fn win32_file_io() {
 
             for event in events.iter() {
                 if event.writable && event.key == 2 {
-                    let bytes_written  = event.transferred_bytes();
+                    let bytes_written  = write_packet.transferred_bytes();
                     write_buffer_cursor = & write_buffer_cursor[bytes_written as usize..];
                     len -= bytes_written as usize;
                     break 'waiter;
-
                 }
             }
         }
@@ -146,7 +145,7 @@ fn win32_file_io() {
     let read_packet = CompletionPacket::new(Event::readable(1));
     while bytes_received < input_text.len() {
         // Begin the read.
-        let ptr = read_packet.as_overlapped().cast();
+        let ptr = read_packet.as_overlapped_ptr().cast();
         unsafe {
             if wfs::ReadFile(
                 file_handle.as_raw_handle() as _,
@@ -166,7 +165,7 @@ fn win32_file_io() {
 
             for event in events.iter() {
                 if event.readable && event.key == 1 {
-                    let bytes_read  = event.transferred_bytes();
+                    let bytes_read  = read_packet.transferred_bytes();
                     buffer_cursor = &mut buffer_cursor[bytes_read ..];
                     len -= bytes_read;
                     bytes_received += bytes_read;
