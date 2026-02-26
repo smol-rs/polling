@@ -8,6 +8,7 @@ use crate::{Event, PollMode, Poller};
 use std::io;
 use std::os::windows::io::{AsRawHandle, RawHandle};
 use std::os::windows::prelude::{AsHandle, BorrowedHandle};
+use std::pin::Pin;
 use std::sync::Arc;
 
 /// A packet used to wake up the poller with an event.
@@ -30,12 +31,13 @@ impl CompletionPacket {
     /// This pointer can be used as an `OVERLAPPED` block in Windows APIs. Calling this function
     /// marks the block as "in use". Trying to call this function again before the operation is
     /// indicated as complete by the poller will result in a panic.
-    pub fn as_ptr(&self) -> *mut () {
+    pub fn as_overlapped(&self) -> *mut () {
         if !self.0.as_ref().get().try_lock() {
             panic!("completion packet is already in use");
         }
-
-        self.0.as_ref().get_ref() as *const _ as *const () as *mut ()
+        unsafe {
+            Arc::into_raw(Pin::into_inner_unchecked(self.0.clone())) as *mut ()
+        }
     }
 
     /// Cancel the in flight operation.

@@ -67,9 +67,7 @@ fn win32_file_io() {
 
     while len > 0 {
         // Begin to write.
-        // TODO: CompletionPacket is already in use!!!!! But this should be reset
-        // once the packet completes. in poller.wait(...)
-        let ptr = write_packet.as_ptr() as *mut _;
+        let ptr = write_packet.as_overlapped().cast();
         unsafe {
             if wfs::WriteFile(
                 file_handle.as_raw_handle() as _,
@@ -102,7 +100,7 @@ fn win32_file_io() {
         }
     }
 
-/*
+
     // Close the file and re-open it for reading.
     drop(file_handle);
     let file_handle = unsafe {
@@ -148,7 +146,7 @@ fn win32_file_io() {
     let read_packet = CompletionPacket::new(Event::readable(1));
     while bytes_received < input_text.len() {
         // Begin the read.
-        let ptr = read_packet.as_ptr().cast();
+        let ptr = read_packet.as_overlapped().cast();
         unsafe {
             if wfs::ReadFile(
                 file_handle.as_raw_handle() as _,
@@ -180,5 +178,4 @@ fn win32_file_io() {
 
     assert_eq!(bytes_received, input_text.len());
     assert_eq!(&buffer[..bytes_received], input_text.as_bytes());
-*/
 }
