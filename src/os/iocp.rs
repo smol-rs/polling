@@ -38,9 +38,7 @@ impl CompletionPacket {
         // The key point here is to increment the Arc reference count by cloning it.
         // Otherwise, the Arc<> will be dropped in the method Poller::wait_deadline
         // after it is re-created via from_raw() once the overlapped io has completed.
-        unsafe {
-            Arc::into_raw(Pin::into_inner_unchecked(self.0.clone())) as *mut ()
-        }
+        unsafe { Arc::into_raw(Pin::into_inner_unchecked(self.0.clone())) as *mut () }
     }
 
     /// Get the number of transferred bytes after an OVERLAPPED IO has finished.
@@ -50,7 +48,9 @@ impl CompletionPacket {
         }
 
         unsafe {
-            (*self.0.as_ref().padded_io_status_block().get()).overlapped.InternalHigh
+            (*self.0.as_ref().padded_io_status_block().get())
+                .overlapped
+                .InternalHigh
         }
     }
 

@@ -44,11 +44,8 @@ fn win32_file_io() {
     // Associate this file with the poller.
     unsafe {
         let poller_handle = poller.as_raw_handle();
-        if wio::CreateIoCompletionPort(
-            file_handle.as_raw_handle() as _,
-            poller_handle as _,
-            1,
-            0) == std::ptr::null_mut()
+        if wio::CreateIoCompletionPort(file_handle.as_raw_handle() as _, poller_handle as _, 1, 0)
+            .is_null()
         {
             panic!(
                 "CreateIoCompletionPort failed: {}",
@@ -59,8 +56,8 @@ fn win32_file_io() {
 
     // Repeatedly write to the pipe.
     let input_text = "Now is the time for all good men to come to the aid of their party";
-    let write_buffer : &[u8] = input_text.as_bytes();
-    let mut write_buffer_cursor = & *write_buffer;
+    let write_buffer: &[u8] = input_text.as_bytes();
+    let mut write_buffer_cursor = write_buffer;
     let mut len = input_text.len();
 
     let write_packet = CompletionPacket::new(Event::writable(2));
@@ -74,12 +71,13 @@ fn win32_file_io() {
                 write_buffer_cursor.as_ptr() as _,
                 len as _,
                 std::ptr::null_mut(),
-                ptr) == 0 && wf::GetLastError() != wf::ERROR_IO_PENDING
+                ptr,
+            ) == 0
+                && wf::GetLastError() != wf::ERROR_IO_PENDING
             {
                 panic!("WriteFile failed: {}", io::Error::last_os_error());
             }
         }
-
 
         // Wait for the overlapped operation to complete.
         'waiter: loop {
@@ -90,15 +88,14 @@ fn win32_file_io() {
 
             for event in events.iter() {
                 if event.writable && event.key == 2 {
-                    let bytes_written  = write_packet.transferred_bytes();
-                    write_buffer_cursor = & write_buffer_cursor[bytes_written as usize..];
-                    len -= bytes_written as usize;
+                    let bytes_written = write_packet.transferred_bytes();
+                    write_buffer_cursor = &write_buffer_cursor[bytes_written..];
+                    len -= bytes_written;
                     break 'waiter;
                 }
             }
         }
     }
-
 
     // Close the file and re-open it for reading.
     drop(file_handle);
@@ -123,11 +120,8 @@ fn win32_file_io() {
     // Associate this file with the poller.
     unsafe {
         let poller_handle = poller.as_raw_handle();
-        if wio::CreateIoCompletionPort(
-            file_handle.as_raw_handle() as _,
-            poller_handle as _,
-            2,
-            0) == std::ptr::null_mut()
+        if wio::CreateIoCompletionPort(file_handle.as_raw_handle() as _, poller_handle as _, 2, 0)
+            .is_null()
         {
             panic!(
                 "CreateIoCompletionPort failed: {}",
@@ -152,7 +146,9 @@ fn win32_file_io() {
                 buffer_cursor.as_mut_ptr() as _,
                 len as _,
                 std::ptr::null_mut(),
-                ptr) == 0 && wf::GetLastError() != wf::ERROR_IO_PENDING
+                ptr,
+            ) == 0
+                && wf::GetLastError() != wf::ERROR_IO_PENDING
             {
                 panic!("ReadFile failed: {}", io::Error::last_os_error());
             }
@@ -165,8 +161,8 @@ fn win32_file_io() {
 
             for event in events.iter() {
                 if event.readable && event.key == 1 {
-                    let bytes_read  = read_packet.transferred_bytes();
-                    buffer_cursor = &mut buffer_cursor[bytes_read ..];
+                    let bytes_read = read_packet.transferred_bytes();
+                    buffer_cursor = &mut buffer_cursor[bytes_read..];
                     len -= bytes_read;
                     bytes_received += bytes_read;
                     break 'waiter;
