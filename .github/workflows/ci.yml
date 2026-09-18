@@ -51,15 +51,23 @@ jobs:
         include:
           - os: windows-latest
             rust: nightly-x86_64-pc-windows-gnu
+          # Rust no longer ships host tools for i686-pc-windows-msvc, so cross-compile
+          # from the x86_64 host and run the 32-bit tests there. The host triple is
+          # spelled out because `rust: nightly` would merge this entry into the
+          # existing (windows-latest, nightly) job instead of adding a new one.
           - os: windows-latest
-            rust: nightly-i686-pc-windows-msvc
-          - os: windows-latest
-            rust: nightly-i686-pc-windows-gnu
+            rust: nightly-x86_64-pc-windows-msvc
+            target: i686-pc-windows-msvc
     steps:
       - uses: actions/checkout@v4
       - name: Install Rust
         # --no-self-update is necessary because the windows environment cannot self-update rustup.exe.
         run: rustup update ${{ matrix.rust }} --no-self-update && rustup default ${{ matrix.rust }}
+      - name: Set up cross-compilation target
+        if: matrix.target
+        run: |
+          rustup target add ${{ matrix.target }}
+          echo "CARGO_BUILD_TARGET=${{ matrix.target }}" >> $GITHUB_ENV
       - name: Install cargo-hack and cargo-minimal-versions
         uses: taiki-e/install-action@v2
         with:
