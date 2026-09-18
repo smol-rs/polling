@@ -1391,7 +1391,7 @@ impl fmt::Display for AfdError {
         write!(
             f,
             "{}: {}\nThis error is usually caused by running on old Windows or Wine",
-            self.description, &self.system
+            self.description, self.system
         )
     }
 }
