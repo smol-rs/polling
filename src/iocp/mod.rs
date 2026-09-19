@@ -26,6 +26,8 @@
 //! AFD-based strategy for polling.
 
 mod afd;
+pub(crate) mod buf;
+pub(crate) mod ntdll;
 mod port;
 
 use afd::{base_socket, Afd, AfdPollInfo, AfdPollMask, HasAfdInfo, IoStatusBlock};
@@ -36,7 +38,12 @@ use windows_sys::Win32::System::Threading::{
     RegisterWaitForSingleObject, UnregisterWait, INFINITE, WT_EXECUTELONGFUNCTION,
     WT_EXECUTEONLYONCE,
 };
+use windows_sys::Win32::System::WindowsProgramming::{
+    FILE_SKIP_COMPLETION_PORT_ON_SUCCESS, FILE_SKIP_SET_EVENT_ON_HANDLE,
+};
+use windows_sys::Win32::System::IO::OVERLAPPED;
 
+use crate::iocp::port::FileOverlapped;
 use crate::{Event, PollMode};
 
 use concurrent_queue::ConcurrentQueue;
@@ -45,17 +52,16 @@ use pin_project_lite::pin_project;
 use std::cell::UnsafeCell;
 use std::collections::hash_map::{Entry, HashMap};
 use std::ffi::c_void;
-use std::fmt;
-use std::io;
 use std::marker::PhantomPinned;
 use std::mem::{forget, MaybeUninit};
 use std::os::windows::io::{
     AsHandle, AsRawHandle, AsRawSocket, BorrowedHandle, BorrowedSocket, RawHandle, RawSocket,
 };
 use std::pin::Pin;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard, RwLock, Weak};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU8, AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock, RwLock, Weak};
 use std::time::{Duration, Instant};
+use std::{fmt, io};
 
 /// Macro to lock and ignore lock poisoning.
 macro_rules! lock {
@@ -118,7 +124,7 @@ impl Poller {
     /// Creates a new poller.
     pub(super) fn new() -> io::Result<Self> {
         // Make sure AFD is able to be used.
-        if let Err(e) = afd::NtdllImports::force_load() {
+        if let Err(e) = ntdll::NtdllImports::force_load() {
             return Err(io::Error::new(
                 io::ErrorKind::Unsupported,
                 AfdError::new("failed to initialize unstable Windows functions", e),
@@ -427,6 +433,47 @@ impl Poller {
         source.begin_delete()
     }
 
+    /// Register a file handle for the `submit_*` API.
+    ///
+    /// `key` is the same kind of value passed to
+    /// [`Poller::add`](crate::Poller::add): it is mirrored into
+    /// [`Event::key`] of every completion this file emits, so a
+    /// reactor (e.g. `async-io`) can route the completion to the
+    /// correct source via its key-indexed waker registry.
+    ///
+    /// Each [`RegisteredFile`] is its own self-managed registration;
+    /// per-op packets carry their own Arc lifetimes.
+    pub(super) fn register_file(
+        &self,
+        handle: RawHandle,
+        key: usize,
+    ) -> io::Result<RegisteredFile> {
+        struct H(RawHandle);
+        impl AsRawHandle for H {
+            fn as_raw_handle(&self) -> RawHandle {
+                self.0
+            }
+        }
+
+        // Attach the handle to this IOCP and request the sync-success
+        // fast-path flags; ERROR_INVALID_FUNCTION is treated as a
+        // non-fatal no-op inside `register`.
+        self.port.register(
+            &H(handle),
+            (FILE_SKIP_SET_EVENT_ON_HANDLE | FILE_SKIP_COMPLETION_PORT_ON_SUCCESS) as u8,
+            port::CompletionKeyType::FileOp,
+        )?;
+
+        Ok(RegisteredFile {
+            inner: Arc::new(RegisteredFileInner {
+                handle,
+                port: Arc::clone(&self.port),
+                active: AtomicBool::new(true),
+                user_key: AtomicUsize::new(key),
+            }),
+        })
+    }
+
     /// Wait for events.
     pub(super) fn wait_deadline(
         &self,
@@ -476,10 +523,92 @@ impl Poller {
 
             // Process all of the events.
             for entry in events.completions.drain(..) {
-                let packet = entry.into_packet();
+                let result = if entry.is_file_completion() {
+                    let bytes = entry.bytes_transferred();
+                    // SAFETY: the entry is fresh from
+                    // `GetQueuedCompletionStatusEx`, so its
+                    // `lpOverlapped` points to a live `OVERLAPPED`.
+                    let nt_status = unsafe { entry.nt_status_raw() };
+                    // Reclaim the kernel's `Arc` strong reference (bumped
+                    // at submit time in `classify_submission`) and
+                    // publish the completion fields. The packet is
+                    // dropped at the end of this scope, releasing that
+                    // strong ref. If the user already dropped their
+                    // `OpHandle`, the allocation is freed here and
+                    // `OpInner::Drop` reclaims the buffer.
+                    let packet = entry.into_file_op_packet();
+                    if let PacketInnerProj::FileOp { op } = packet.as_ref().data().project_ref() {
+                        let op = op.get_ref();
+                        // Order matters: the user-visible state must
+                        // be Released BEFORE we push the Event, so
+                        // that a task woken by its reactor sees
+                        // `Completed` on its Acquire-load of `state`.
+                        op.bytes_transferred.store(bytes, Ordering::Release);
+                        // Translate the NTSTATUS to a Win32 error
+                        // here so consumers (`OpHandle::take`) can
+                        // hand the value straight to
+                        // `io::Error::from_raw_os_error`.
+                        // `STATUS_BUFFER_OVERFLOW` translates to
+                        // `ERROR_MORE_DATA`, which `take_inner`
+                        // treats as success-with-remaining-data so
+                        // the partial buffer is not lost.
+                        let dos = match ntdll::NtdllImports::get() {
+                            // SAFETY: pure translation, no
+                            // preconditions on `Status`.
+                            Ok(ntdll) => unsafe { ntdll.RtlNtStatusToDosError(nt_status) },
+                            // ntdll failed to load — extremely
+                            // unlikely (the rest of this module
+                            // already requires it). Fall back to a
+                            // generic Win32 error so the user still
+                            // sees a non-zero failure.
+                            Err(_) => ERROR_INVALID_HANDLE,
+                        };
+                        op.dos_error.store(dos, Ordering::Release);
+                        // Unconditionally publish Completed. If the user
+                        // pre-cancelled (state = Cancelled), the kernel
+                        // still posted a completion entry (typically
+                        // with STATUS_CANCELLED in `nt_status`), and the
+                        // outcome is encoded in `nt_status` rather than
+                        // the lifecycle state.
+                        op.state.store(OpState::Completed as u8, Ordering::Release);
+                        // Emit a normal Event so the reactor (e.g.
+                        // `async-io`) can wake the task that owns the
+                        // matching source via its key-indexed waker
+                        // registry. The op carries its own
+                        // direction-of-interest, mirrored here.
+                        let interest = op.interest;
+                        // Acquire pairs with the `Release` store in
+                        // `RegisteredFile::set_user_key`. Reading
+                        // `user_key` *after* the `state` Release store
+                        // above is intentional: a concurrent
+                        // `set_user_key` either lands before this load
+                        // (event carries the new key) or after it
+                        // (event carries the old key). Both outcomes
+                        // are documented as acceptable — `set_user_key`
+                        // is best-effort for in-flight ops.
+                        let key = op
+                            .file
+                            .as_ref()
+                            .expect("submitted op has back-ref to its RegisteredFile")
+                            .user_key
+                            .load(Ordering::Acquire);
+                        let event = Event {
+                            key,
+                            readable: interest.readable,
+                            writable: interest.writable,
+                            extra: crate::sys::EventExtra::empty(),
+                        };
+                        events.packets.push(event);
+                        new_events += 1;
+                    }
+                    Ok::<_, io::Error>(FeedEventResult::NoEvent)
+                } else {
+                    let packet = entry.into_packet();
+                    packet.feed_event(self)
+                };
 
                 // Feed the event into the packet.
-                match packet.feed_event(self)? {
+                match result? {
                     FeedEventResult::NoEvent => {}
                     FeedEventResult::Event(event) => {
                         events.packets.push(event);
@@ -599,7 +728,11 @@ impl Poller {
         let afd = Arc::new(Afd::new()?);
 
         // Register the AFD instance with the I/O completion port.
-        self.port.register(&*afd, true)?;
+        self.port.register(
+            &*afd,
+            FILE_SKIP_SET_EVENT_ON_HANDLE as u8,
+            port::CompletionKeyType::Socket,
+        )?;
 
         // Insert a weak pointer to the AFD instance into the list for other sockets.
         afd_handles.push(Arc::downgrade(&afd));
@@ -756,6 +889,15 @@ pin_project! {
             handle: Mutex<WaitableState>
         },
 
+        /// A single overlapped file operation with owned buffer.
+        ///
+        /// Per-op allocation: one [`OVERLAPPED`] per outstanding op.
+        /// See `docs/named-pipe.design.md` §3.1.
+        FileOp {
+            #[pin]
+            op: OpInner,
+        },
+
         /// A custom event sent by the user.
         Custom {
             event: Event,
@@ -763,6 +905,158 @@ pin_project! {
 
         // A packet used to wake up the poller.
         Wakeup { #[pin] _pinned: PhantomPinned },
+    }
+}
+
+/// Lifecycle state of a single [`OpInner`] operation.
+///
+/// Stored as an `AtomicU8` so the completion path and a concurrent
+/// `cancel()` can race on the transition without a lock.
+#[repr(u8)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum OpState {
+    Submitted = 0,
+    Completed = 1,
+    Cancelled = 2,
+}
+
+/// VTable for type-erased buffer storage inside [`OpInner`].
+///
+/// The concrete buffer type `B` is recovered at the typed `OpHandle<B>`
+/// layer.
+struct OpVTable {
+    /// Drop the buffer in place.
+    pub drop_buf: unsafe fn(*mut u8),
+}
+
+/// Type-erased buffer slot embedded in [`OpInner`].
+///
+/// A fixed 32-byte, 8-byte-aligned blob large enough to hold the
+/// buffer wrapper types the [`buf::StableBuf`] / [`buf::StableBufMut`]
+/// machinery stores — typically a `(ptr, len, cap)` triple for
+/// `Vec<u8>`, a `(ptr, len)` pair for `Box<[u8]>`, or similar.
+#[repr(C, align(8))]
+pub(crate) struct ErasedBuf([u8; 32]);
+
+/// No-op vtable used while the buffer slot is empty (e.g. for the
+/// bare `OpInner::new` constructor used by tests).
+static NOOP_VTABLE: OpVTable = OpVTable {
+    drop_buf: noop_drop_buf,
+};
+
+unsafe fn noop_drop_buf(_: *mut u8) {}
+
+/// Kernel-visible per-operation block.
+///
+/// `#[repr(C)]` with the `OVERLAPPED` block at offset 0 so the
+/// `lpOverlapped` pointer the kernel writes into a completion entry
+/// can be cast straight back to `*mut OpInner` (after the file-op
+/// classifier has identified it as a file packet).
+///
+/// Buffer storage is type-erased; [`OpInner::vtable`] knows how to
+/// drop or move it. The concrete buffer type is recovered at the typed
+/// `OpHandle<B>` layer.
+///
+/// The struct is `!Unpin` (via [`PhantomPinned`]) because the kernel
+/// holds a raw pointer into the embedded [`OVERLAPPED`] for the
+/// duration of the operation; moving the payload after submission
+/// would invalidate that pointer.
+#[repr(C)]
+pub(crate) struct OpInner {
+    /// `OVERLAPPED` MUST be the first field. The kernel writes the
+    /// completion status into it.
+    overlapped: UnsafeCell<OVERLAPPED>,
+    /// Lifecycle state of this operation.
+    state: AtomicU8,
+    /// Bytes transferred, written by the completion path.
+    bytes_transferred: AtomicU32,
+    /// Win32 error reaped from the completion entry, already
+    /// translated from NTSTATUS via `ntdll!RtlNtStatusToDosError`
+    /// inside the dispatcher; `0` (= success) until set. `OpHandle`
+    /// consumers feed this straight into
+    /// [`io::Error::from_raw_os_error`] without ever touching the
+    /// raw NTSTATUS.
+    dos_error: AtomicU32,
+    /// `true` after `OpHandle::take` (or sync-success classification)
+    /// extracts the buffer; the in-place destructor in `Drop for
+    /// OpInner` then becomes a no-op.
+    taken: AtomicBool,
+    /// Type-erased buffer storage.
+    buf_storage: UnsafeCell<MaybeUninit<ErasedBuf>>,
+    /// VTable that knows how to drop / move the contents of
+    /// [`OpInner::buf_storage`].
+    vtable: &'static OpVTable,
+    /// Back-reference to the owning [`RegisteredFile`]. `None` when the
+    /// op is built from the bare `OpInner::new` constructor used by
+    /// internal unit tests; `Some(_)` for every `submit_*`-issued op.
+    file: Option<Arc<RegisteredFileInner>>,
+    /// Direction of interest for this op. The dispatcher emits an
+    /// `Event { key, readable, writable }` mirroring this on
+    /// completion, so a reactor (e.g. `async-io`) can wake the right
+    /// task via its key-indexed waker registry.
+    interest: OpInterest,
+    /// Marks the struct as `!Unpin`: the kernel holds a raw pointer
+    /// into `overlapped`, so the payload must never be moved.
+    _pinned: PhantomPinned,
+}
+
+/// Direction of interest for a single in-flight op.
+///
+/// Mirrored into the `Event { readable, writable }` the dispatcher
+/// emits on completion. Reads (and `ConnectNamedPipe`) set
+/// `readable = true`; writes set `writable = true`.
+#[derive(Copy, Clone, Debug)]
+pub(crate) struct OpInterest {
+    pub readable: bool,
+    pub writable: bool,
+}
+
+// Safety: the kernel holds a raw pointer into `OpInner` (specifically
+// into `overlapped`) but never reads or writes through any of the
+// Rust-side fields concurrently with the user; the typed `OpHandle<B>`
+// layer owns the synchronisation discipline for the buffer slot.
+unsafe impl Send for OpInner {}
+unsafe impl Sync for OpInner {}
+
+impl OpInner {
+    /// Construct a fresh `OpInner` in the [`OpState::Submitted`] state
+    /// with an empty buffer slot and the [`NOOP_VTABLE`].
+    ///
+    /// Used by internal layout / unit tests; production submission
+    /// sites build `OpInner` inline inside `make_op_packet` so the
+    /// buffer / vtable / file back-reference can be set in one move.
+    fn new() -> Self {
+        Self {
+            overlapped: UnsafeCell::new(OVERLAPPED::default()),
+            state: AtomicU8::new(OpState::Submitted as u8),
+            bytes_transferred: AtomicU32::new(0),
+            dos_error: AtomicU32::new(0),
+            taken: AtomicBool::new(false),
+            buf_storage: UnsafeCell::new(MaybeUninit::zeroed()),
+            vtable: &NOOP_VTABLE,
+            file: None,
+            interest: OpInterest {
+                readable: false,
+                writable: false,
+            },
+            _pinned: PhantomPinned,
+        }
+    }
+}
+
+impl Drop for OpInner {
+    fn drop(&mut self) {
+        // Drop the buffer in place via the type-erased vtable, unless it
+        // was already extracted by `OpHandle::take` / sync-success.
+        if !self.taken.load(Ordering::Acquire) {
+            // SAFETY: `buf_storage` was either initialised by the
+            // `submit_*` helper (in which case `vtable.drop_buf` is a
+            // typed `drop_in_place::<B>`), or remained zeroed with
+            // [`NOOP_VTABLE`] (in which case `drop_buf` is a no-op).
+            unsafe {
+                (self.vtable.drop_buf)(self.buf_storage.get() as *mut u8);
+            }
+        }
     }
 }
 
@@ -782,6 +1076,7 @@ impl fmt::Debug for PacketInner {
             Self::Waitable { handle } => {
                 f.debug_struct("Waitable").field("handle", handle).finish()
             }
+            Self::FileOp { .. } => f.write_str("FileOp { .. }"),
         }
     }
 }
@@ -792,6 +1087,38 @@ impl HasAfdInfo for PacketInner {
             PacketInnerProj::Socket { packet, .. } => packet,
             _ => unreachable!(),
         }
+    }
+}
+
+/// Cached offset of the `FileOp` variant payload inside [`PacketInner`].
+///
+/// `std::mem::offset_of!` does not yet support enum variants on stable
+/// (tracking issue rust-lang/rust#120141), so the variant offset is
+/// computed once at runtime.
+static FILE_OP_VARIANT_OFFSET: OnceLock<usize> = OnceLock::new();
+
+impl FileOverlapped for PacketInner {
+    fn file_op_offset() -> usize {
+        // `OpInner.overlapped` is at offset 0 of `OpInner`, so the offset
+        // from the `OVERLAPPED` back to the start of `PacketInner` equals
+        // the `FileOp` variant offset (no further intra-struct add).
+        PacketInner::file_op_variant_offset()
+    }
+}
+
+impl PacketInner {
+    /// Compute (and cache) the offset of the `FileOp` variant payload
+    /// (i.e. the embedded `OpInner`) inside `PacketInner`.
+    fn file_op_variant_offset() -> usize {
+        *FILE_OP_VARIANT_OFFSET.get_or_init(|| {
+            let packet = PacketInner::FileOp { op: OpInner::new() };
+            let base = &packet as *const _ as *const u8;
+            let op_ptr = match &packet {
+                PacketInner::FileOp { op } => op as *const _ as *const u8,
+                _ => unreachable!(),
+            };
+            unsafe { op_ptr.offset_from(base) as usize }
+        })
     }
 }
 
@@ -825,6 +1152,10 @@ impl PacketUnwrapped {
 
                 // Update if there is no ongoing wait.
                 handle.status.is_idle()
+            }
+            PacketInnerProj::FileOp { .. } => {
+                // One-shot per-op packet: no readiness reconfiguration.
+                false
             }
             _ => true,
         }
@@ -889,7 +1220,11 @@ impl PacketUnwrapped {
 
                 return Ok(());
             }
-            _ => return Err(io::Error::new(io::ErrorKind::Other, "invalid socket state")),
+            PacketInnerProj::FileOp { .. } => {
+                // One-shot per-op packet: nothing to update.
+                return Ok(());
+            }
+            _ => return Err(io::Error::other("invalid socket state")),
         };
 
         // If we are waiting on a delete, just return, dropping the packet.
@@ -979,6 +1314,11 @@ impl PacketUnwrapped {
                 poller.update_packet(self)?;
 
                 return Ok(FeedEventResult::Event(event));
+            }
+            PacketInnerProj::FileOp { .. } => {
+                unreachable!(
+                    "FileOp packets are dispatched inline in `wait_deadline` and never reach `feed_event`"
+                )
             }
         };
 
@@ -1408,5 +1748,639 @@ struct CallOnDrop<F: FnMut()>(F);
 impl<F: FnMut()> Drop for CallOnDrop<F> {
     fn drop(&mut self) {
         (self.0)();
+    }
+}
+
+/// Inner, Arc-shared state of a [`RegisteredFile`].
+///
+/// Held behind an [`Arc`] so each in-flight [`OpHandle`] can keep the
+/// registration alive independently of the user-facing
+/// [`RegisteredFile`] handle.
+#[derive(Debug)]
+pub(crate) struct RegisteredFileInner {
+    /// Raw handle, used by `CancelIoEx` and submission helpers.
+    /// Borrowed; never closed by us.
+    handle: RawHandle,
+    /// Back-reference to the IOCP port. Each in-flight Op holds an
+    /// `Arc<RegisteredFileInner>`, so the port stays alive at least as
+    /// long as any Op needs to deliver a completion to it.
+    #[allow(dead_code)] // Holds the port alive; consulted only by Drop chain.
+    port: Arc<IoCompletionPort<Packet>>,
+    /// `false` after `RegisteredFile::deactivate`. New `submit_*` calls
+    /// are rejected.
+    active: AtomicBool,
+    /// User-chosen key, mirrored into the `Event::key` of every
+    /// completion this file emits. Same convention as
+    /// `Poller::add(socket, Event::none(key))` — it identifies the
+    /// reactor-side source for an external waker registry.
+    ///
+    /// Stored atomically so reactors that allocate the key after
+    /// constructing the [`RegisteredFile`] (e.g. `async-io`'s
+    /// `Slab<Source>` indexing) can rebind it via
+    /// [`RegisteredFile::set_user_key`]. The dispatcher reads with
+    /// `Acquire`; `set_user_key` writes with `Release`.
+    user_key: AtomicUsize,
+}
+
+// SAFETY: `RawHandle` is `*mut c_void`; we never dereference it
+// concurrently with the kernel except via `ReadFile`/`WriteFile`/
+// `CancelIoEx`, which are themselves thread-safe.
+unsafe impl Send for RegisteredFileInner {}
+unsafe impl Sync for RegisteredFileInner {}
+
+// =====================================================================
+// File-handle submission API.
+// =====================================================================
+
+use crate::iocp::buf::{StableBuf, StableBufMut};
+
+use std::marker::PhantomData;
+use std::ptr;
+
+use windows_sys::Win32::Foundation::{ERROR_NOT_FOUND, ERROR_PIPE_CONNECTED, FALSE};
+use windows_sys::Win32::Storage::FileSystem::{ReadFile, WriteFile};
+use windows_sys::Win32::System::Pipes::ConnectNamedPipe;
+use windows_sys::Win32::System::IO::CancelIoEx;
+
+/// A long-lived registration token for the IOCP file submission API.
+///
+/// Cloning is cheap (it bumps an internal `Arc` refcount). All
+/// clones submit to the same kernel handle.
+#[derive(Clone, Debug)]
+pub struct RegisteredFile {
+    inner: Arc<RegisteredFileInner>,
+}
+
+/// Result of a `RegisteredFile::submit_*` call.
+pub enum Submission<B> {
+    /// Synchronous success: the kernel processed the I/O immediately
+    /// and (because of `FILE_SKIP_COMPLETION_PORT_ON_SUCCESS`) will
+    /// not post a completion. The buffer is returned together with
+    /// the byte count.
+    Complete {
+        /// Number of bytes transferred.
+        bytes: usize,
+        /// The buffer handed back to the caller.
+        buf: B,
+    },
+    /// `ERROR_IO_PENDING` was returned and the completion will arrive
+    /// on the poller. Drive [`crate::Poller::wait`] until the
+    /// returned [`OpHandle`] reports [`OpHandle::is_complete`], then
+    /// call [`OpHandle::take`].
+    Pending(OpHandle<B>),
+    /// The syscall failed before reaching the kernel queue. The
+    /// buffer is handed back together with the error.
+    Failed {
+        /// The error reported by the syscall.
+        error: io::Error,
+        /// The buffer handed back to the caller.
+        buf: B,
+    },
+}
+
+impl<B> std::fmt::Debug for Submission<B> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Submission::Complete { bytes, .. } => f
+                .debug_struct("Complete")
+                .field("bytes", bytes)
+                .finish_non_exhaustive(),
+            Submission::Pending(_) => f.write_str("Pending(..)"),
+            Submission::Failed { error, .. } => f
+                .debug_struct("Failed")
+                .field("error", error)
+                .finish_non_exhaustive(),
+        }
+    }
+}
+
+impl<B> Submission<B> {
+    /// Returns `true` for the `Complete` variant.
+    pub fn is_complete(&self) -> bool {
+        matches!(self, Submission::Complete { .. })
+    }
+    /// Returns `true` for the `Pending` variant.
+    pub fn is_pending(&self) -> bool {
+        matches!(self, Submission::Pending(_))
+    }
+}
+
+/// Typed handle for one outstanding file operation.
+///
+/// Holds the per-op packet allocation. The buffer lives inside the
+/// allocation; recover it by calling [`OpHandle::take`] once
+/// [`OpHandle::is_complete`] reports `true`.
+pub struct OpHandle<B> {
+    packet: Packet,
+    _marker: PhantomData<B>,
+}
+
+impl<B> std::fmt::Debug for OpHandle<B> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("OpHandle").finish_non_exhaustive()
+    }
+}
+
+// SAFETY: `OpHandle<B>` exposes only `&self` cancel access, and the
+// kernel completion path serialises with the user via atomic state.
+// The packet itself is `Send + Sync` (its `Pin<Arc<…>>` wraps a
+// `Send + Sync` `IoStatusBlock<PacketInner>`).
+unsafe impl<B: Send> Send for OpHandle<B> {}
+unsafe impl<B: Sync> Sync for OpHandle<B> {}
+
+impl<B> OpHandle<B> {
+    /// Issue [`CancelIoEx`] for this op.
+    ///
+    /// If the op already completed, this is a no-op (`Ok(())`).
+    /// Otherwise the kernel best-effort aborts the op; the user
+    /// must still drain the completion via [`crate::Poller::wait`]
+    /// before calling [`OpHandle::take`].
+    ///
+    /// # Why this takes `&self` and does not return `B`
+    ///
+    /// `CancelIoEx` is asynchronous: it only *requests* cancellation.
+    /// The kernel may still be reading from / writing into the buffer
+    /// at the moment `cancel` returns, and a final completion packet
+    /// (either a late `Ok(n)` or `Err(ERROR_OPERATION_ABORTED)`) is
+    /// delivered to the IOCP some time later. The buffer must remain
+    /// pinned at its original address until that completion is observed,
+    /// otherwise the kernel would write into freed or reused memory.
+    ///
+    /// Consequently `cancel` does *not* consume `self` and does *not*
+    /// hand back `B`. The buffer is reclaimed through the normal path:
+    /// poll until [`OpHandle::is_complete`] returns `true`, then call
+    /// [`OpHandle::take`] (or [`OpHandle::try_take`]) — both now return
+    /// `B` on every path, including the cancelled / errored case.
+    ///
+    /// This mirrors `compio`'s cancellation contract, where the buffer
+    /// is also returned via the awaited completion rather than from the
+    /// cancel call itself.
+    pub fn cancel(&self) -> io::Result<()> {
+        let op = self.op_ref();
+        // Fast path: already completed.
+        if op.state.load(Ordering::Acquire) == OpState::Completed as u8 {
+            return Ok(());
+        }
+        // CAS Submitted -> Cancelled (idempotent on already-Cancelled).
+        let _ = op.state.compare_exchange(
+            OpState::Submitted as u8,
+            OpState::Cancelled as u8,
+            Ordering::AcqRel,
+            Ordering::Acquire,
+        );
+
+        let file = op
+            .file
+            .as_ref()
+            .expect("submitted op must have a back-ref to its RegisteredFile");
+        let overlapped = op.overlapped.get() as *mut OVERLAPPED;
+        // SAFETY: `file.handle` is the kernel handle the op was
+        // submitted against; `overlapped` is the per-op `OVERLAPPED`
+        // the kernel currently knows about.
+        let r = unsafe { CancelIoEx(file.handle as _, overlapped) };
+        if r == 0 {
+            let err = io::Error::last_os_error();
+            if err.raw_os_error() == Some(ERROR_NOT_FOUND as i32) {
+                return Ok(());
+            }
+            return Err(err);
+        }
+        Ok(())
+    }
+
+    /// Returns `true` once the IOCP completion dispatcher has
+    /// observed this op's completion entry.
+    pub fn is_complete(&self) -> bool {
+        self.op_ref().state.load(Ordering::Acquire) == OpState::Completed as u8
+    }
+
+    /// If [`is_complete`](Self::is_complete) reports `true`, consume
+    /// `self` and return the I/O result paired with the buffer;
+    /// otherwise hand `self` back unchanged.
+    ///
+    /// On error, the buffer is still returned alongside the
+    /// `io::Error` — the caller decides whether to drop it or
+    /// resubmit. The shape mirrors compio's `BufResult<T, B>`
+    /// (which is `From<(io::Result<T>, B)>`).
+    pub fn try_take(self) -> Result<(io::Result<usize>, B), Self> {
+        if self.is_complete() {
+            Ok(self.take_inner())
+        } else {
+            Err(self)
+        }
+    }
+
+    /// Consume `self` and return the I/O result paired with the
+    /// buffer.
+    ///
+    /// On error, the buffer is still returned — see
+    /// [`try_take`](Self::try_take) for the rationale.
+    ///
+    /// # Panics
+    ///
+    /// Panics if [`is_complete`](Self::is_complete) is `false`.
+    /// Use [`try_take`](Self::try_take) for the non-panicking
+    /// variant. Drive [`crate::Poller::wait`] until the
+    /// completion `Event` for this op's key arrives — see the
+    /// `key` argument to [`crate::os::iocp::PollerIocpFileExt::register_file`].
+    pub fn take(self) -> (io::Result<usize>, B) {
+        assert!(
+            self.is_complete(),
+            "OpHandle::take called on a not-yet-completed op",
+        );
+        self.take_inner()
+    }
+
+    fn take_inner(self) -> (io::Result<usize>, B) {
+        let inner = self.op_ref();
+        let bytes = inner.bytes_transferred.load(Ordering::Acquire) as usize;
+        let dos_error = inner.dos_error.load(Ordering::Acquire);
+
+        // Take the buffer out of `buf_storage` via a raw read; mark
+        // taken so `OpInner::Drop` does not double-free.
+        //
+        // SAFETY: `buf_storage` was initialised by the matching
+        // `submit_*` helper with a `B`. State is `Completed`, so
+        // the kernel no longer references the buffer and the
+        // dispatcher has already released its `Arc` strong ref.
+        let buf: B = unsafe { ptr::read(inner.buf_storage.get() as *const B) };
+        inner.taken.store(true, Ordering::Release);
+
+        // `self` is dropped at end of scope; with `taken == true`
+        // and refcount now 1 (kernel ref already reclaimed), the
+        // allocation is freed without re-running the buffer
+        // destructor.
+        drop(self);
+
+        // `ERROR_MORE_DATA` is the Win32 translation of
+        // `STATUS_BUFFER_OVERFLOW` — a message-mode pipe read filled
+        // the user buffer while more data is queued. Byte count and
+        // buffer contents are valid; surface as success so the
+        // partial data is not lost.
+        let res = if dos_error == 0 || dos_error == ERROR_MORE_DATA {
+            Ok(bytes)
+        } else {
+            Err(io::Error::from_raw_os_error(dos_error as i32))
+        };
+        (res, buf)
+    }
+
+    fn op_ref(&self) -> &OpInner {
+        match self.packet.as_ref().data().project_ref() {
+            PacketInnerProj::FileOp { op } => op.get_ref(),
+            _ => unreachable!("OpHandle wraps a FileOp packet"),
+        }
+    }
+}
+
+// No custom `Drop` for `OpHandle`. The default `Pin<Arc<…>>` drop
+// is correct:
+//   - Op already completed: refcount drops to 0, `OpInner::Drop`
+//     reclaims the buffer (unless `take()` already took it).
+//   - Op still pending: the kernel still holds one strong ref
+//     (bumped at submit time in `classify_submission`), so the
+//     allocation lives on. The eventual completion dispatcher
+//     reclaims that ref, decrements to 0, and `OpInner::Drop`
+//     reclaims the buffer.
+
+/// `ERROR_MORE_DATA` (Win32 234) — translation of
+/// `STATUS_BUFFER_OVERFLOW`. A message-mode pipe read filled the
+/// user buffer while more data is queued. `OpHandle::take_inner`
+/// treats this as success so the partial result is not dropped.
+const ERROR_MORE_DATA: u32 = 234;
+
+/// VTable factory: produces a per-`B` `OpVTable` whose `drop_buf`
+/// runs `ptr::drop_in_place::<B>`.
+fn vtable_for<B>() -> &'static OpVTable {
+    struct VTableHolder<B>(PhantomData<B>);
+    impl<B> VTableHolder<B> {
+        const VTABLE: OpVTable = OpVTable {
+            drop_buf: drop_buf_typed::<B>,
+        };
+    }
+    unsafe fn drop_buf_typed<B>(p: *mut u8) {
+        // SAFETY: callers (`OpInner::Drop`) only invoke this on
+        // storage that was initialised with a `B` via `ptr::write`
+        // and not yet taken (`taken == false`).
+        unsafe { ptr::drop_in_place(p as *mut B) }
+    }
+    &VTableHolder::<B>::VTABLE
+}
+
+/// Construct a fresh `Pin<Arc<…>>` packet wrapping a `FileOp` op.
+///
+/// The buffer `B` is moved into the type-erased slot; the chosen
+/// vtable knows how to drop / take it.
+fn make_op_packet<B>(
+    file: Arc<RegisteredFileInner>,
+    buf: B,
+    interest: OpInterest,
+) -> Result<Packet, (B, io::Error)> {
+    // Compile-time would be nicer, but we already enforce these
+    // dynamically when the slot is dimensioned (Step 1 sized it at
+    // 32 bytes). If a future buffer type overflows the slot, we
+    // hand it back as a `Failed` instead of UB.
+    if std::mem::size_of::<B>() > std::mem::size_of::<ErasedBuf>()
+        || std::mem::align_of::<B>() > std::mem::align_of::<ErasedBuf>()
+    {
+        return Err((
+            buf,
+            io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "buffer type exceeds the OpInner slot (size or alignment)",
+            ),
+        ));
+    }
+
+    let op = OpInner {
+        overlapped: UnsafeCell::new(OVERLAPPED::default()),
+        state: AtomicU8::new(OpState::Submitted as u8),
+        bytes_transferred: AtomicU32::new(0),
+        dos_error: AtomicU32::new(0),
+        taken: AtomicBool::new(false),
+        buf_storage: UnsafeCell::new(MaybeUninit::zeroed()),
+        vtable: vtable_for::<B>(),
+        file: Some(file),
+        interest,
+        _pinned: PhantomPinned,
+    };
+
+    // Move the buffer into the type-erased slot.
+    // SAFETY: `buf_storage` is a `MaybeUninit<ErasedBuf>` sized to
+    // hold `B` (verified above). We own `op` exclusively.
+    unsafe {
+        ptr::write(op.buf_storage.get() as *mut B, buf);
+    }
+
+    Ok(Arc::pin(IoStatusBlock::from(PacketInner::FileOp { op })))
+}
+
+/// Helpers to access the `OpInner` inside a freshly-built `Packet`
+/// without going through the projection machinery (we need a
+/// `*mut OVERLAPPED` and the buffer back when classifying a sync
+/// success).
+fn op_in(packet: &Packet) -> &OpInner {
+    match packet.as_ref().data().project_ref() {
+        PacketInnerProj::FileOp { op } => op.get_ref(),
+        _ => unreachable!(),
+    }
+}
+
+impl RegisteredFile {
+    /// Mark the registration inactive; in-flight ops continue to
+    /// drive completions, but new `submit_*` calls error.
+    pub fn deactivate(&self) {
+        self.inner.active.store(false, Ordering::Release);
+    }
+
+    /// Rebind the user-visible event key.
+    ///
+    /// Intended for reactors that allocate the event key after
+    /// constructing the [`RegisteredFile`] — for example
+    /// [`async-io`](https://docs.rs/async-io)'s `Slab<Source>`
+    /// indexing (see `docs/named-pipe.design.md` §5.2).
+    ///
+    /// The new key applies to every completion the dispatcher emits
+    /// **after** the dispatcher's `Acquire` load of `user_key`
+    /// observes this `Release` store. There is no synchronisation
+    /// with completions already dequeued from the IOCP, nor with
+    /// completions whose `user_key` load happens-before the store;
+    /// those carry the previous key. Callers that need a strict
+    /// hand-off should drain pending events from
+    /// [`crate::Poller::wait`] before calling `set_user_key`.
+    pub fn set_user_key(&self, key: usize) {
+        self.inner.user_key.store(key, Ordering::Release);
+    }
+
+    /// Submit a `ReadFile` op. See module docs.
+    pub fn submit_read<B: StableBufMut>(&self, mut buf: B) -> Submission<B> {
+        if !self.inner.active.load(Ordering::Acquire) {
+            return Submission::Failed {
+                error: io::Error::new(io::ErrorKind::InvalidInput, "file removed from poller"),
+                buf,
+            };
+        }
+        let cap = buf.capacity();
+        // Win32 `ReadFile` takes a `u32` byte count. Reject buffers
+        // larger than `u32::MAX` early so the truncation does not
+        // silently short-read.
+        if cap > u32::MAX as usize {
+            return Submission::Failed {
+                error: io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "buffer capacity exceeds u32::MAX",
+                ),
+                buf,
+            };
+        }
+        let ptr = buf.as_mut_ptr();
+        let packet = match make_op_packet::<B>(
+            Arc::clone(&self.inner),
+            buf,
+            OpInterest {
+                readable: true,
+                writable: false,
+            },
+        ) {
+            Ok(p) => p,
+            Err((buf, error)) => return Submission::Failed { error, buf },
+        };
+        let overlapped = op_in(&packet).overlapped.get() as *mut OVERLAPPED;
+        let mut bytes_returned: u32 = 0;
+        // SAFETY: `self.inner.handle` is the kernel handle bound at
+        // registration time; `ptr` / `cap` describe the buffer we
+        // just moved into the packet (so it stays at this address
+        // for the kernel's use); `overlapped` is the per-op block.
+        let r = unsafe {
+            ReadFile(
+                self.inner.handle as _,
+                ptr,
+                cap as u32,
+                &mut bytes_returned as *mut _,
+                overlapped,
+            )
+        };
+        classify_submission::<B>(packet, r != FALSE, bytes_returned as usize)
+    }
+
+    /// Submit a `WriteFile` op. See module docs.
+    pub fn submit_write<B: StableBuf>(&self, buf: B) -> Submission<B> {
+        if !self.inner.active.load(Ordering::Acquire) {
+            return Submission::Failed {
+                error: io::Error::new(io::ErrorKind::InvalidInput, "file removed from poller"),
+                buf,
+            };
+        }
+        let len = buf.len();
+        // Win32 `WriteFile` takes a `u32` byte count. Reject buffers
+        // larger than `u32::MAX` early so the truncation does not
+        // silently short-write.
+        if len > u32::MAX as usize {
+            return Submission::Failed {
+                error: io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "buffer length exceeds u32::MAX",
+                ),
+                buf,
+            };
+        }
+        let ptr = buf.as_ptr();
+        let packet = match make_op_packet::<B>(
+            Arc::clone(&self.inner),
+            buf,
+            OpInterest {
+                readable: false,
+                writable: true,
+            },
+        ) {
+            Ok(p) => p,
+            Err((buf, error)) => return Submission::Failed { error, buf },
+        };
+        let overlapped = op_in(&packet).overlapped.get() as *mut OVERLAPPED;
+        let mut bytes_returned: u32 = 0;
+        // SAFETY: see `submit_read`.
+        let r = unsafe {
+            WriteFile(
+                self.inner.handle as _,
+                ptr,
+                len as u32,
+                &mut bytes_returned as *mut _,
+                overlapped,
+            )
+        };
+        classify_submission::<B>(packet, r != FALSE, bytes_returned as usize)
+    }
+
+    /// Submit a `ConnectNamedPipe` op. See module docs.
+    pub fn submit_connect_named_pipe(&self) -> Submission<()> {
+        if !self.inner.active.load(Ordering::Acquire) {
+            return Submission::Failed {
+                error: io::Error::new(io::ErrorKind::InvalidInput, "file removed from poller"),
+                buf: (),
+            };
+        }
+        // ConnectNamedPipe is the server-side accept; the typical
+        // follow-up is a `ReadFile`, so we mark it readable-only.
+        let packet = match make_op_packet::<()>(
+            Arc::clone(&self.inner),
+            (),
+            OpInterest {
+                readable: true,
+                writable: false,
+            },
+        ) {
+            Ok(p) => p,
+            Err((buf, error)) => return Submission::Failed { error, buf },
+        };
+        let overlapped = op_in(&packet).overlapped.get() as *mut OVERLAPPED;
+        // SAFETY: see `submit_read`.
+        let r = unsafe { ConnectNamedPipe(self.inner.handle as _, overlapped) };
+        if r != FALSE {
+            // Sync success. No completion will arrive.
+            return finish_sync_success::<()>(packet, 0);
+        }
+        // ConnectNamedPipe quirk: returns FALSE + ERROR_PIPE_CONNECTED
+        // when the client had already connected before the call.
+        let err = io::Error::last_os_error();
+        match err.raw_os_error().map(|e| e as u32) {
+            Some(ERROR_IO_PENDING) => {
+                // SAFETY: see `classify_submission`; the kernel
+                // owns one `Arc` strong ref for the lifetime of
+                // the in-flight op, reclaimed by the dispatcher.
+                std::mem::forget(packet.clone());
+                Submission::Pending(into_op_handle::<()>(packet))
+            }
+            Some(ERROR_PIPE_CONNECTED) => finish_sync_success::<()>(packet, 0),
+            _ => finish_sync_failure::<()>(packet, err),
+        }
+    }
+}
+
+fn classify_submission<B>(packet: Packet, sync_ok: bool, bytes: usize) -> Submission<B> {
+    if sync_ok {
+        return finish_sync_success::<B>(packet, bytes);
+    }
+    let err = io::Error::last_os_error();
+    match err.raw_os_error().map(|e| e as u32) {
+        Some(ERROR_IO_PENDING) => {
+            // SAFETY: the kernel kept our `OVERLAPPED` pointer (the
+            // syscall returned `ERROR_IO_PENDING`). We bump the
+            // packet `Arc` strong count here so the kernel
+            // logically owns one strong reference for the lifetime
+            // of the in-flight op. The IOCP completion dispatcher
+            // in `Poller::wait_deadline` reclaims that reference
+            // via `OverlappedEntry::into_file_op_packet` (which
+            // calls `Arc::from_raw` on the recovered packet
+            // pointer). The bump and the reclaim are paired one
+            // for one: every `Pending` submission produces exactly
+            // one completion entry.
+            std::mem::forget(packet.clone());
+            Submission::Pending(into_op_handle::<B>(packet))
+        }
+        _ => finish_sync_failure::<B>(packet, err),
+    }
+}
+
+fn into_op_handle<B>(packet: Packet) -> OpHandle<B> {
+    OpHandle {
+        packet,
+        _marker: PhantomData,
+    }
+}
+
+fn finish_sync_success<B>(packet: Packet, bytes: usize) -> Submission<B> {
+    // Take the buffer back out and discard the empty packet.
+    let buf = unsafe { take_buf_unchecked::<B>(&packet) };
+    Submission::Complete { bytes, buf }
+}
+
+fn finish_sync_failure<B>(packet: Packet, error: io::Error) -> Submission<B> {
+    let buf = unsafe { take_buf_unchecked::<B>(&packet) };
+    Submission::Failed { error, buf }
+}
+
+/// SAFETY: caller must ensure the buffer at `buf_storage` is still
+/// initialised (i.e. `taken == false`) and that no concurrent
+/// reader is racing on it (true for sync paths inside `submit_*`).
+unsafe fn take_buf_unchecked<B>(packet: &Packet) -> B {
+    let op = op_in(packet);
+    // SAFETY: see fn doc.
+    let buf: B = unsafe { ptr::read(op.buf_storage.get() as *const B) };
+    op.taken.store(true, Ordering::Release);
+    buf
+}
+
+#[cfg(test)]
+mod op_tests {
+    use super::*;
+
+    /// `OVERLAPPED` (the inner kernel block) must live at offset 0 of
+    /// `OpInner` so the kernel-written `lpOverlapped` pointer can be
+    /// cast straight back to `*mut OpInner`.
+    #[test]
+    fn op_inner_overlapped_at_offset_zero() {
+        assert_eq!(std::mem::offset_of!(OpInner, overlapped), 0);
+    }
+
+    /// Smoke test that an `OpInner` can be pinned in an `Arc` and the
+    /// raw-pointer round trip through `Pin::into_inner_unchecked` /
+    /// re-pinning works. `OpInner` is `!Unpin` (via `PhantomPinned`),
+    /// which is what we actually rely on.
+    #[test]
+    fn op_inner_round_trips_through_pinned_arc() {
+        let arc: Pin<Arc<OpInner>> = Arc::pin(OpInner::new());
+        // Round-trip via the unchecked pin API the IOCP path uses.
+        let raw = unsafe { Pin::into_inner_unchecked(arc) };
+        let _re_pinned: Pin<Arc<OpInner>> = unsafe { Pin::new_unchecked(raw) };
+    }
+
+    /// Calling `NOOP_VTABLE.drop_buf` on a zeroed buffer must be a
+    /// no-op and not panic.
+    #[test]
+    fn noop_vtable_drop_is_safe() {
+        let mut buf = [0u8; 32];
+        unsafe {
+            (NOOP_VTABLE.drop_buf)(buf.as_mut_ptr());
+        }
     }
 }

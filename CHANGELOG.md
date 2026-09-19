@@ -1,3 +1,18 @@
+# Version 3.12.0
+
+- Add Windows file-handle (named pipe / file / device) support to the IOCP
+  backend via the new `PollerIocpFileExt` trait, `RegisteredFile`,
+  `OpHandle`, and `Submission`. (#248)
+- `OpHandle::take` and `OpHandle::try_take` now return the buffer alongside the
+  result on both success and failure paths (mirrors `compio::BufResult<T, B>`):
+  - `take(self) -> (io::Result<usize>, B)` (was `io::Result<(usize, B)>`)
+  - `try_take(self) -> Result<(io::Result<usize>, B), Self>` (was
+    `Result<io::Result<(usize, B)>, Self>`)
+  This lets the caller reclaim or drop the buffer on error. `cancel(&self)` is
+  unchanged; the buffer is recovered through the subsequent `take`/`try_take`.
+  (#248)
+- Bump MSRV to 1.77 (required by `std::mem::offset_of!`). (#248)
+
 # Version 3.11.0
 
 - Bump MSRV to 1.71. (#251)
