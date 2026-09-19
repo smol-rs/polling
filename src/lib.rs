@@ -759,6 +759,11 @@ impl Poller {
                     // If the wait was interrupted by a signal, clear events and try again.
                     if e.kind() == io::ErrorKind::Interrupted {
                         events.clear();
+                        // Reset the notification flag so a concurrent
+                        // notify() call whose EVFILT_USER event was
+                        // consumed by the interrupted kevent() can
+                        // re-trigger.
+                        self.notified.swap(false, Ordering::SeqCst);
                         continue;
                     } else {
                         return Err(e);
