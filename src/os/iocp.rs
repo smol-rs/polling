@@ -1,6 +1,6 @@
 //! Functionality that is only available for IOCP-based platforms.
 
-pub use crate::sys::CompletionPacket;
+use crate::sys::{Completion, CompletionHandle, IoStatusBlock, Packet, PacketInner};
 
 use super::__private::PollerSealed;
 use crate::{Event, PollMode, Poller};
@@ -8,6 +8,61 @@ use crate::{Event, PollMode, Poller};
 use std::io;
 use std::os::windows::io::{AsRawHandle, RawHandle};
 use std::os::windows::prelude::{AsHandle, BorrowedHandle};
+use std::pin::Pin;
+use std::sync::Arc;
+
+/// A packet used to wake up the poller with an event.
+#[derive(Debug, Clone)]
+pub struct CompletionPacket(pub(crate) Packet);
+
+impl CompletionPacket {
+    /// Create a new completion packet with a custom event.
+    pub fn new(event: Event) -> Self {
+        Self(Arc::pin(IoStatusBlock::from(PacketInner::Custom { event })))
+    }
+
+    /// Get the event associated with this packet.
+    pub fn event(&self) -> &Event {
+        self.0.as_ref().event()
+    }
+
+    /// Get a pointer to the underlying I/O status block.
+    ///
+    /// This pointer can be used as an `OVERLAPPED` block in Windows APIs. Calling this function
+    /// marks the block as "in use". Trying to call this function again before the operation is
+    /// indicated as complete by the poller will result in a panic.
+    pub fn as_overlapped_ptr(&self) -> *mut () {
+        if !self.0.as_ref().get().try_lock() {
+            panic!("completion packet is already in use");
+        }
+        // The key point here is to increment the Arc reference count by cloning it.
+        // Otherwise, the Arc<> will be dropped in the method Poller::wait_deadline
+        // after it is re-created via from_raw() once the overlapped io has completed.
+        unsafe { Arc::into_raw(Pin::into_inner_unchecked(self.0.clone())) as *mut () }
+    }
+
+    /// Get the number of transferred bytes after an OVERLAPPED IO has finished.
+    pub fn transferred_bytes(&self) -> usize {
+        if !self.0.as_ref().get().try_lock() {
+            panic!("completion packet is currently in use");
+        }
+
+        unsafe {
+            (*self.0.as_ref().padded_io_status_block().get())
+                .overlapped
+                .InternalHigh
+        }
+    }
+
+    /// Cancel the in flight operation.
+    ///
+    /// # Safety
+    ///
+    /// The packet must be in flight and the operation must be cancelled already.
+    pub unsafe fn cancel(&mut self) {
+        self.0.as_ref().get().unlock();
+    }
+}
 
 /// Extension trait for the [`Poller`] type that provides functionality specific to IOCP-based
 /// platforms.
