@@ -470,14 +470,17 @@ mod notify {
 
         /// Notifies the `Poller`.
         pub(super) fn notify(&self, poller: &Poller) -> io::Result<()> {
-            // Trigger the EVFILT_USER event.
+            // Trigger the EVFILT_USER event.  EV_CLEAR must be
+            // preserved so the event auto-resets after delivery;
+            // without it EV_ADD would switch the filter to
+            // level-triggered mode and subsequent waits would spin.
             poller.submit_changes([kqueue::Event::new(
                 kqueue::EventFilter::User {
                     ident: 0,
                     flags: kqueue::UserFlags::TRIGGER,
                     user_flags: kqueue::UserDefinedFlags::new(0),
                 },
-                kqueue::EventFlags::ADD | kqueue::EventFlags::RECEIPT,
+                kqueue::EventFlags::ADD | kqueue::EventFlags::RECEIPT | kqueue::EventFlags::CLEAR,
                 crate::NOTIFY_KEY as _,
             )])?;
 
