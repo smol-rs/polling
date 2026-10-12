@@ -27,7 +27,7 @@ use windows_sys::Win32::System::IO::{
 /// # Safety
 ///
 /// This must be a valid completion block.
-pub(super) unsafe trait Completion {
+pub(crate) unsafe trait Completion {
     /// Signal to the completion block that we are about to start an operation.
     fn try_lock(self: Pin<&Self>) -> bool;
 
@@ -40,7 +40,7 @@ pub(super) unsafe trait Completion {
 /// # Safety
 ///
 /// This must be a valid completion block.
-pub(super) unsafe trait CompletionHandle: Deref + Sized {
+pub(crate) unsafe trait CompletionHandle: Deref + Sized {
     /// Type of the completion block.
     type Completion: Completion;
 
