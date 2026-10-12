@@ -6,9 +6,7 @@ use socket2::Type;
 fn main() -> io::Result<()> {
     let socket = socket2::Socket::new(socket2::Domain::IPV4, Type::STREAM, None)?;
     let poller = polling::Poller::new()?;
-    unsafe {
-        poller.add(&socket, Event::new(0, true, true))?;
-    }
+    poller.add(&socket, Event::new(0, true, true))?;
     let addr = net::SocketAddr::new(net::Ipv4Addr::LOCALHOST.into(), 8080);
     socket.set_nonblocking(true)?;
     let _ = socket.connect(&addr.into());

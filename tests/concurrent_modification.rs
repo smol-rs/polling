@@ -20,9 +20,7 @@ fn concurrent_add() -> io::Result<()> {
         })
         .add(|| {
             thread::sleep(Duration::from_millis(100));
-            unsafe {
-                poller.add(&reader, Event::readable(0))?;
-            }
+            poller.add(&reader, Event::readable(0))?;
             writer.write_all(&[1])?;
             Ok(())
         })
@@ -46,9 +44,7 @@ fn concurrent_add() -> io::Result<()> {
 fn concurrent_modify() -> io::Result<()> {
     let (reader, mut writer) = tcp_pair()?;
     let poller = Poller::new()?;
-    unsafe {
-        poller.add(&reader, Event::none(0))?;
-    }
+    poller.add(&reader, Event::none(0))?;
 
     let mut events = Events::new();
 
@@ -84,9 +80,7 @@ fn concurrent_interruption() -> io::Result<()> {
 
     let (reader, _writer) = tcp_pair()?;
     let poller = Poller::new()?;
-    unsafe {
-        poller.add(&reader, Event::none(0))?;
-    }
+    poller.add(&reader, Event::none(0))?;
 
     let mut events = Events::new();
     let events_borrow = &mut events;
