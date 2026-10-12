@@ -225,9 +225,15 @@ impl Poller {
             // Complete all current operations.
             loop {
                 if self.notified.swap(false, Ordering::SeqCst) {
-                    // `notify` will have sent a notification in case we were polling. We weren't,
-                    // so remove it.
-                    return self.notify.pop_notification();
+                    // `notify` will have sent a notification in case we were polling. We
+                    // weren't, so remove it. `notify` sets the flag before writing the
+                    // notification, however, so the byte may not be readable yet. A
+                    // missing notification is a spurious wakeup, not an error, so
+                    // tolerate `WouldBlock` here.
+                    return match self.notify.pop_notification() {
+                        Err(err) if err.kind() == io::ErrorKind::WouldBlock => Ok(()),
+                        result => result,
+                    };
                 } else if self.waiting_operations.load(Ordering::SeqCst) == 0 {
                     break;
                 }
@@ -853,5 +859,27 @@ mod notify {
         pub(super) fn has_fd(&self, fd: RawFd) -> bool {
             self.event_fd.as_raw_fd() == fd
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    /// `notify` sets the `notified` flag before writing the notification byte.
+    /// When `wait` runs inside that window it observes the flag with nothing to
+    /// read, which must be treated as a spurious wakeup rather than an error.
+    #[test]
+    fn wait_tolerates_notification_race() {
+        let poller = Poller::new().unwrap();
+
+        // Simulate `notify` having set the flag but not yet written the byte.
+        poller.notified.store(true, Ordering::SeqCst);
+
+        let mut events = Events::with_capacity(1);
+        poller
+            .wait_deadline(&mut events, Some(Instant::now() + Duration::from_secs(1)))
+            .unwrap();
     }
 }
