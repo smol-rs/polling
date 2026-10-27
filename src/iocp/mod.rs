@@ -53,7 +53,7 @@ use std::os::windows::io::{
     AsHandle, AsRawHandle, AsRawSocket, BorrowedHandle, BorrowedSocket, RawHandle, RawSocket,
 };
 use std::pin::Pin;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{fence, AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, RwLock, Weak};
 use std::time::{Duration, Instant};
 
@@ -526,7 +526,15 @@ impl Poller {
 
             // Try to queue the update.
             match self.pending_updates.push(packet) {
-                Ok(()) => return Ok(()),
+                Ok(()) => {
+                    // A poller may have started waiting after the check above and drained
+                    // the queue before our push. Wake it so the update is not left behind.
+                    fence(Ordering::SeqCst);
+                    if self.polling.load(Ordering::Acquire) {
+                        self.notify()?;
+                    }
+                    return Ok(());
+                }
                 Err(p) => packet = p.into_inner(),
             }
 
