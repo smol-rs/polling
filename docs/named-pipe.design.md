@@ -303,22 +303,34 @@ hand the buffer back to the caller. The packet is dropped at the end
 of the classifier; `OpInner::Drop` sees `taken == true` and skips the
 type-erased `vtable.drop_buf`.
 
-### 3.4 Kernel-Arc protocol (bump on Pending, reclaim in dispatcher)
+### 3.4 Kernel-Arc protocol (grant before syscall, reclaim in dispatcher)
 
 The single most important invariant in the file API:
 
-> Every `Pending` submission bumps the packet's `Arc` strong count
-> by exactly one (via `mem::forget(packet.clone())`). The IOCP
-> completion dispatcher reclaims that bump exactly once, via
-> `Arc::from_raw` inside `OverlappedEntry::into_file_op_packet`. Sync
-> success and sync failure must NOT bump — they leave the Arc
-> reference balanced.
+> Every submission grants the kernel one `Arc` strong reference
+> **before** the I/O syscall runs (by cloning the packet and keeping
+> the clone alive across the call). If the syscall classifies the
+> operation as synchronous (immediate success, or a failure other
+> than `ERROR_IO_PENDING`), the grant is returned (`drop`ped) right
+> away — the kernel never took it. If the syscall returns
+> `ERROR_IO_PENDING`, the grant leaks into the kernel's ownership and
+> the IOCP completion dispatcher reclaims it exactly once, via
+> `Arc::from_raw` inside `OverlappedEntry::into_file_op_packet`.
+
+The grant must happen before the syscall because the kernel may
+complete the operation (and post the completion entry) before the
+submitting thread observes `ERROR_IO_PENDING` — a named-pipe read
+with data already buffered does exactly this. If the reference were
+granted only after the syscall, the dispatcher could dequeue the
+completion first, reclaim a reference that was never granted, and
+free the packet while the submitting thread still holds its own
+`Arc` — a use-after-free that surfaces as heap corruption.
 
 `FILE_SKIP_COMPLETION_PORT_ON_SUCCESS` (set in `register_file`)
 guarantees that sync success will not produce an IOCP entry, so there
 is no completion path that could spuriously reclaim.
 
-The bump/reclaim pairing means:
+The grant/reclaim pairing means:
 
 - A `Pending` `OpHandle` may be dropped immediately. The kernel still
   holds one strong reference, so the buffer stays alive at the

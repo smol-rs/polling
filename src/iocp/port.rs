@@ -147,12 +147,12 @@ unsafe impl<T: FileOverlapped> FileCompletionHandle for Pin<Arc<T>> {
     fn file_op_done(entry: &OVERLAPPED_ENTRY) -> Self {
         let overlapped_ptr = entry.lpOverlapped;
         let offset = T::file_op_offset();
-        // The submitter (`classify_submission` in `iocp::mod`) bumped the `Arc`
-        // strong count via `mem::forget(packet.clone())` when the op
-        // entered the `Pending` state, so the kernel logically owns
-        // one strong reference. Reclaim that reference here via a
+        // The submitter (`submit_*` in `iocp::mod`) granted the kernel
+        // one `Arc` strong reference before the syscall ran, so the
+        // kernel logically owns one strong reference for the lifetime
+        // of the in-flight op. Reclaim that reference here via a
         // plain `Arc::from_raw` (no extra increment). Mirrors the
-        // bump/reclaim invariant in `docs/named-pipe.design.md`
+        // grant/reclaim invariant in `docs/named-pipe.design.md`
         // §3.4.
         unsafe {
             let raw = (overlapped_ptr as *const u8).sub(offset) as *const T;

@@ -529,8 +529,8 @@ impl Poller {
                     // `GetQueuedCompletionStatusEx`, so its
                     // `lpOverlapped` points to a live `OVERLAPPED`.
                     let nt_status = unsafe { entry.nt_status_raw() };
-                    // Reclaim the kernel's `Arc` strong reference (bumped
-                    // at submit time in `classify_submission`) and
+                    // Reclaim the kernel's `Arc` strong reference (granted
+                    // before the syscall in `submit_*`) and
                     // publish the completion fields. The packet is
                     // dropped at the end of this scope, releasing that
                     // strong ref. If the user already dropped their
@@ -2038,7 +2038,7 @@ impl<B> OpHandle<B> {
 //   - Op already completed: refcount drops to 0, `OpInner::Drop`
 //     reclaims the buffer (unless `take()` already took it).
 //   - Op still pending: the kernel still holds one strong ref
-//     (bumped at submit time in `classify_submission`), so the
+//     (granted before the syscall in `submit_*`), so the
 //     allocation lives on. The eventual completion dispatcher
 //     reclaims that ref, decrements to 0, and `OpInner::Drop`
 //     reclaims the buffer.
@@ -2187,6 +2187,17 @@ impl RegisteredFile {
         };
         let overlapped = op_in(&packet).overlapped.get() as *mut OVERLAPPED;
         let mut bytes_returned: u32 = 0;
+        // Grant the kernel its strong reference BEFORE the syscall.
+        // The operation may complete before `ReadFile` returns (e.g. a
+        // named-pipe read with data already buffered), and the IOCP
+        // dispatcher reclaims this reference via `Arc::from_raw` as soon
+        // as it dequeues that completion. Granting it only after observing
+        // `ERROR_IO_PENDING` would let the dispatcher drop the last live
+        // reference and free the packet while `packet` is still in use on
+        // this thread. Every synchronous completion path returns the
+        // grant (`drop(kernel_ref)`) because no completion entry will
+        // ever arrive for it.
+        let kernel_ref = packet.clone();
         // SAFETY: `self.inner.handle` is the kernel handle bound at
         // registration time; `ptr` / `cap` describe the buffer we
         // just moved into the packet (so it stays at this address
@@ -2200,7 +2211,7 @@ impl RegisteredFile {
                 overlapped,
             )
         };
-        classify_submission::<B>(packet, r != FALSE, bytes_returned as usize)
+        classify_submission::<B>(packet, kernel_ref, r != FALSE, bytes_returned as usize)
     }
 
     /// Submit a `WriteFile` op. See module docs.
@@ -2238,6 +2249,9 @@ impl RegisteredFile {
         };
         let overlapped = op_in(&packet).overlapped.get() as *mut OVERLAPPED;
         let mut bytes_returned: u32 = 0;
+        // Grant the kernel its strong reference before the syscall —
+        // see `submit_read`.
+        let kernel_ref = packet.clone();
         // SAFETY: see `submit_read`.
         let r = unsafe {
             WriteFile(
@@ -2248,7 +2262,7 @@ impl RegisteredFile {
                 overlapped,
             )
         };
-        classify_submission::<B>(packet, r != FALSE, bytes_returned as usize)
+        classify_submission::<B>(packet, kernel_ref, r != FALSE, bytes_returned as usize)
     }
 
     /// Submit a `ConnectNamedPipe` op. See module docs.
@@ -2273,10 +2287,14 @@ impl RegisteredFile {
             Err((buf, error)) => return Submission::Failed { error, buf },
         };
         let overlapped = op_in(&packet).overlapped.get() as *mut OVERLAPPED;
+        // Grant the kernel its strong reference before the syscall —
+        // see `submit_read`.
+        let kernel_ref = packet.clone();
         // SAFETY: see `submit_read`.
         let r = unsafe { ConnectNamedPipe(self.inner.handle as _, overlapped) };
         if r != FALSE {
             // Sync success. No completion will arrive.
+            drop(kernel_ref);
             return finish_sync_success::<()>(packet, 0);
         }
         // ConnectNamedPipe quirk: returns FALSE + ERROR_PIPE_CONNECTED
@@ -2284,40 +2302,56 @@ impl RegisteredFile {
         let err = io::Error::last_os_error();
         match err.raw_os_error().map(|e| e as u32) {
             Some(ERROR_IO_PENDING) => {
-                // SAFETY: see `classify_submission`; the kernel
-                // owns one `Arc` strong ref for the lifetime of
-                // the in-flight op, reclaimed by the dispatcher.
-                std::mem::forget(packet.clone());
+                // The kernel owns `kernel_ref` for the lifetime of the
+                // in-flight op; the dispatcher reclaims it when the
+                // completion is dequeued.
+                std::mem::forget(kernel_ref);
                 Submission::Pending(into_op_handle::<()>(packet))
             }
-            Some(ERROR_PIPE_CONNECTED) => finish_sync_success::<()>(packet, 0),
-            _ => finish_sync_failure::<()>(packet, err),
+            Some(ERROR_PIPE_CONNECTED) => {
+                drop(kernel_ref);
+                finish_sync_success::<()>(packet, 0)
+            }
+            _ => {
+                drop(kernel_ref);
+                finish_sync_failure::<()>(packet, err)
+            }
         }
     }
 }
 
-fn classify_submission<B>(packet: Packet, sync_ok: bool, bytes: usize) -> Submission<B> {
+/// Classify the result of a submission syscall.
+///
+/// `kernel_ref` is the strong reference granted to the kernel BEFORE the
+/// syscall ran (see `submit_read`). It is returned (`drop`ped) on every
+/// synchronous path — the kernel never took it, and no completion entry
+/// will arrive to reclaim it — and leaked into the kernel's ownership on
+/// `ERROR_IO_PENDING`, where the IOCP completion dispatcher in
+/// `Poller::wait_deadline` reclaims it via
+/// `OverlappedEntry::into_file_op_packet` (which calls `Arc::from_raw` on
+/// the recovered packet pointer). The grant and the reclaim are paired
+/// one for one: every `Pending` submission produces exactly one
+/// completion entry.
+fn classify_submission<B>(
+    packet: Packet,
+    kernel_ref: Packet,
+    sync_ok: bool,
+    bytes: usize,
+) -> Submission<B> {
     if sync_ok {
+        drop(kernel_ref);
         return finish_sync_success::<B>(packet, bytes);
     }
     let err = io::Error::last_os_error();
     match err.raw_os_error().map(|e| e as u32) {
         Some(ERROR_IO_PENDING) => {
-            // SAFETY: the kernel kept our `OVERLAPPED` pointer (the
-            // syscall returned `ERROR_IO_PENDING`). We bump the
-            // packet `Arc` strong count here so the kernel
-            // logically owns one strong reference for the lifetime
-            // of the in-flight op. The IOCP completion dispatcher
-            // in `Poller::wait_deadline` reclaims that reference
-            // via `OverlappedEntry::into_file_op_packet` (which
-            // calls `Arc::from_raw` on the recovered packet
-            // pointer). The bump and the reclaim are paired one
-            // for one: every `Pending` submission produces exactly
-            // one completion entry.
-            std::mem::forget(packet.clone());
+            std::mem::forget(kernel_ref);
             Submission::Pending(into_op_handle::<B>(packet))
         }
-        _ => finish_sync_failure::<B>(packet, err),
+        _ => {
+            drop(kernel_ref);
+            finish_sync_failure::<B>(packet, err)
+        }
     }
 }
 
