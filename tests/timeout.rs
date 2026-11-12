@@ -20,6 +20,19 @@ fn twice() -> io::Result<()> {
 }
 
 #[test]
+fn far_future() -> io::Result<()> {
+    let poller = Poller::new()?;
+    let mut events = Events::new();
+
+    // A timeout beyond what the OS accepts still waits, and a notification
+    // still wakes it.
+    poller.notify()?;
+    poller.wait(&mut events, Some(Duration::from_secs(u64::from(u32::MAX))))?;
+
+    Ok(())
+}
+
+#[test]
 fn non_blocking() -> io::Result<()> {
     let poller = Poller::new()?;
     let mut events = Events::new();

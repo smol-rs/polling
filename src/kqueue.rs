@@ -4,13 +4,18 @@ use std::collections::HashSet;
 use std::io;
 use std::os::unix::io::{AsFd, AsRawFd, BorrowedFd, OwnedFd, RawFd};
 use std::sync::RwLock;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use rustix::buffer::spare_capacity;
 use rustix::event::{kqueue, Timespec};
 use rustix::io::{fcntl_setfd, Errno, FdFlags};
 
 use crate::{Event, PollMode};
+
+/// The largest timeout `kevent` accepts. macOS's rejects one of more than
+/// `i32::MAX` seconds with `EINVAL`; waking after about 68 years instead
+/// is indistinguishable from waiting longer.
+const MAX_TIMEOUT: Duration = Duration::from_secs(i32::MAX as u64);
 
 /// Interface to kqueue.
 #[derive(Debug)]
@@ -247,11 +252,10 @@ impl Poller {
 
         let timeout = deadline.map(|deadline| deadline.saturating_duration_since(Instant::now()));
 
-        // Timeout for kevent. In case of overflow, use no timeout.
-        let timeout = match timeout {
-            Some(t) => Timespec::try_from(t).ok(),
-            None => None,
-        };
+        // Timeout for kevent, capped at the largest one it accepts.
+        let timeout = timeout.map(|t| {
+            Timespec::try_from(t.min(MAX_TIMEOUT)).expect("the capped timeout fits in a timespec")
+        });
 
         // Wait for I/O events.
         let changelist = [];
